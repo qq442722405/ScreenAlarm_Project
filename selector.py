@@ -1,7 +1,7 @@
 import sys
-from PySide6.QtWidgets import QApplication, QWidget, QVBoxLayout, QPushButton, QLabel
+from PySide6.QtWidgets import QApplication, QWidget, QLabel
 from PySide6.QtCore import Qt, QRect, QPoint, Signal
-from PySide6.QtGui import QPainter, QPen, QColor, QBrush, QFont
+from PySide6.QtGui import QPainter, QPen, QColor, QFont
 
 
 class ScreenSelector(QWidget):
@@ -53,43 +53,32 @@ class ScreenSelector(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
         
-        # 绘制半透明遮罩
         if self.is_selecting or not self.selection_rect.isNull():
-            # 遮罩颜色
             mask_color = QColor(0, 0, 0, 120)
             painter.fillRect(self.rect(), mask_color)
             
-            # 高亮选择区域
             rect = self.selection_rect if not self.is_selecting else self._get_current_rect()
             if not rect.isNull() and rect.width() > 5 and rect.height() > 5:
-                # 清除遮罩区域
                 painter.setCompositionMode(QPainter.CompositionMode_Clear)
                 painter.fillRect(rect, Qt.transparent)
                 painter.setCompositionMode(QPainter.CompositionMode_SourceOver)
                 
-                # 绘制边框
                 pen = QPen(QColor(0, 255, 136), 3)
                 pen.setStyle(Qt.DashLine)
                 painter.setPen(pen)
                 painter.drawRect(rect)
                 
-                # 绘制角落标记
                 corner_size = 12
                 painter.setPen(QPen(QColor(0, 255, 136), 3))
-                # 左上角
                 painter.drawLine(rect.topLeft(), rect.topLeft() + QPoint(corner_size, 0))
                 painter.drawLine(rect.topLeft(), rect.topLeft() + QPoint(0, corner_size))
-                # 右上角
                 painter.drawLine(rect.topRight(), rect.topRight() + QPoint(-corner_size, 0))
                 painter.drawLine(rect.topRight(), rect.topRight() + QPoint(0, corner_size))
-                # 左下角
                 painter.drawLine(rect.bottomLeft(), rect.bottomLeft() + QPoint(corner_size, 0))
                 painter.drawLine(rect.bottomLeft(), rect.bottomLeft() + QPoint(0, -corner_size))
-                # 右下角
                 painter.drawLine(rect.bottomRight(), rect.bottomRight() + QPoint(-corner_size, 0))
                 painter.drawLine(rect.bottomRight(), rect.bottomRight() + QPoint(0, -corner_size))
                 
-                # 显示尺寸信息
                 info_text = f"{rect.width()} × {rect.height()}"
                 painter.setPen(Qt.white)
                 painter.setFont(QFont("Arial", 14, QFont.Bold))
@@ -99,7 +88,6 @@ class ScreenSelector(QWidget):
                     info_text
                 )
         else:
-            # 初始状态，显示半透明提示
             painter.fillRect(self.rect(), QColor(0, 0, 0, 80))
             painter.setPen(Qt.white)
             painter.setFont(QFont("Arial", 18, QFont.Bold))
@@ -110,10 +98,8 @@ class ScreenSelector(QWidget):
             )
     
     def _get_current_rect(self):
-        """获取当前选择的矩形"""
         if not self.is_selecting:
             return self.selection_rect
-        
         x = min(self.start_point.x(), self.end_point.x())
         y = min(self.start_point.y(), self.end_point.y())
         w = abs(self.end_point.x() - self.start_point.x())
@@ -137,19 +123,12 @@ class ScreenSelector(QWidget):
         if event.button() == Qt.LeftButton and self.is_selecting:
             self.is_selecting = False
             rect = self._get_current_rect()
-            
             if rect.width() > 20 and rect.height() > 20:
                 self.selection_rect = rect
                 self.update()
-                
-                # 发送选择结果
-                self.area_selected.emit(
-                    rect.x(), rect.y(),
-                    rect.width(), rect.height()
-                )
+                self.area_selected.emit(rect.x(), rect.y(), rect.width(), rect.height())
                 self.close()
             else:
-                # 区域太小，重置
                 self.selection_rect = QRect()
                 self.update()
     
