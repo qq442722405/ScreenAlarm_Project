@@ -155,11 +155,10 @@ class ScreenSelector(QWidget):
     
     def keyPressEvent(self, event):
         if event.key() == Qt.Key_Escape:
-            self.area_selected.emit(0, 0, 0, 0)  # 发送空值表示取消
+            self.area_selected.emit(0, 0, 0, 0)
             self.close()
     
     def closeEvent(self, event):
-        # 确保发送取消信号
         if self.selection_rect.isNull():
             self.area_selected.emit(0, 0, 0, 0)
         event.accept()
