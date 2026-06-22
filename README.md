@@ -1,2 +1,2 @@
-# ScreenAlarm_Project
-屏幕数字监控报警
+# ScreenAlarm
+OCR screen number monitoring alarm system (starter project).

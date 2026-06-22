@@ -1,0 +1,7 @@
+PySide6
+paddleocr
+paddlepaddle
+mss
+pillow
+opencv-python
+pyinstaller
