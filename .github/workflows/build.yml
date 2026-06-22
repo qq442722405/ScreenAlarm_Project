@@ -26,10 +26,6 @@ jobs:
           pip install -r requirements.txt
           pip install pyinstaller
 
-      - name: Verify pyinstaller installation
-        run: |
-          python -m PyInstaller --version
-
       - name: Build EXE with PyInstaller
         run: |
           python -m PyInstaller --onefile --windowed --name "屏幕数字监控报警" main.py
