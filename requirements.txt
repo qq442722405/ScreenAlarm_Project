@@ -1,7 +1,8 @@
-PySide6
+PySide6==6.9.0
 paddleocr
 paddlepaddle
 mss
-pillow
 opencv-python
+numpy
+Pillow
 pyinstaller
