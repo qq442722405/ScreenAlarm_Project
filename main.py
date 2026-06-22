@@ -171,6 +171,7 @@ class AddMonitorDialog(QDialog):
         # 确保选择器在最前面
         self.selector.raise_()
         self.selector.activateWindow()
+        self.selector.setFocus(Qt.OtherFocusReason)
     
     def on_area_selected(self, x, y, width, height):
         """接收选择结果"""
