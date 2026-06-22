@@ -1,7 +1,7 @@
 import sys
 from PySide6.QtWidgets import QApplication, QWidget, QLabel
-from PySide6.QtCore import Qt, QRect, QPoint, Signal
-from PySide6.QtGui import QPainter, QPen, QColor, QFont, QGuiApplication
+from PySide6.QtCore import Qt, QRect, QPoint, Signal, QTimer
+from PySide6.QtGui import QPainter, QPen, QColor, QFont
 
 
 class ScreenSelector(QWidget):
@@ -25,10 +25,6 @@ class ScreenSelector(QWidget):
         self.setAttribute(Qt.WA_NoSystemBackground)
         
         # 获取所有屏幕的总尺寸
-        screen = QApplication.primaryScreen()
-        self.screen_rect = screen.geometry()
-        
-        # 扩展到所有屏幕
         screens = QApplication.screens()
         total_rect = QRect(0, 0, 0, 0)
         for s in screens:
@@ -72,8 +68,13 @@ class ScreenSelector(QWidget):
             self.height() - self.label.height() - 80
         )
         
-        # 显示提示信息
-        self.info_text = "按住鼠标左键并拖拽，选择要监控的屏幕区域"
+        # 使用定时器确保窗口始终在最前
+        QTimer.singleShot(100, self._ensure_top)
+    
+    def _ensure_top(self):
+        """确保窗口在最上层"""
+        self.raise_()
+        self.activateWindow()
     
     def paintEvent(self, event):
         """绘制选择框"""
@@ -175,8 +176,7 @@ class ScreenSelector(QWidget):
                 self.setCursor(Qt.ArrowCursor)
                 
                 # 延迟发送信号，让用户看到选择结果
-                from PySide6.QtCore import QTimer
-                QTimer.singleShot(300, lambda: self._confirm_selection())
+                QTimer.singleShot(300, self._confirm_selection)
             else:
                 self.selection_rect = QRect()
                 self.update()
@@ -206,15 +206,6 @@ class ScreenSelector(QWidget):
         self.activateWindow()
         self.setFocus(Qt.OtherFocusReason)
         self.setCursor(Qt.CrossCursor)
-        
-        # 使用定时器确保窗口始终在最前
-        from PySide6.QtCore import QTimer
-        QTimer.singleShot(100, self._ensure_top)
-    
-    def _ensure_top(self):
-        """确保窗口在最上层"""
-        self.raise_()
-        self.activateWindow()
     
     def closeEvent(self, event):
         """关闭事件"""
