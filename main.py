@@ -2,9 +2,9 @@ import sys
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget,
     QVBoxLayout, QPushButton, QLabel,
-    QMessageBox, QTableWidget, QTableWidgetItem
+    QTableWidget, QTableWidgetItem, QMessageBox
 )
-
+from PySide6.QtGui import QIcon
 from selector import ScreenSelector
 from monitor import Monitor
 
@@ -14,152 +14,114 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
 
-        self.setWindowTitle("ScreenAlarm Industrial V3.2")
-        self.resize(900, 600)
+        self.setWindowTitle("ScreenAlarm V4 Industrial")
+        self.resize(1000, 650)
 
-        self.region = None
-        self.monitor = None
-        self.alarm_state = False
+        # ✔ 图标（可换ico）
+        self.setWindowIcon(QIcon("icon.ico"))
 
-        # ===== UI =====
+        self.monitors = []
+
         central = QWidget()
         self.setCentralWidget(central)
 
         layout = QVBoxLayout(central)
 
-        self.label = QLabel("状态：未选择监控区域")
+        self.label = QLabel("状态：未启动")
         layout.addWidget(self.label)
 
-        # 表格
         self.table = QTableWidget()
-        self.table.setColumnCount(3)
-        self.table.setHorizontalHeaderLabels(["当前值", "下限", "上限"])
+        self.table.setColumnCount(5)
+        self.table.setHorizontalHeaderLabels(
+            ["区域", "当前值", "下限", "上限", "状态"]
+        )
         layout.addWidget(self.table)
 
-        # 按钮
-        self.btn_select = QPushButton("① 选择监控区域")
-        self.btn_start = QPushButton("② 开始监控")
-        self.btn_stop = QPushButton("③ 停止监控")
-        self.btn_clear = QPushButton("④ 消除报警")
+        self.btn_add = QPushButton("➕ 添加监控点")
+        self.btn_start = QPushButton("▶ 启动监控")
+        self.btn_stop = QPushButton("⏹ 停止全部")
+        self.btn_clear = QPushButton("✔ 清除报警")
 
-        layout.addWidget(self.btn_select)
+        layout.addWidget(self.btn_add)
         layout.addWidget(self.btn_start)
         layout.addWidget(self.btn_stop)
         layout.addWidget(self.btn_clear)
 
-        # 绑定事件
-        self.btn_select.clicked.connect(self.select_region)
-        self.btn_start.clicked.connect(self.start_monitor)
-        self.btn_stop.clicked.connect(self.stop_monitor)
-        self.btn_clear.clicked.connect(self.clear_alarm)
+        self.btn_add.clicked.connect(self.add_region)
+        self.btn_start.clicked.connect(self.start_all)
+        self.btn_stop.clicked.connect(self.stop_all)
+        self.btn_clear.clicked.connect(self.clear)
 
-        # 阈值（你可以后面做成UI输入）
-        self.low = 5.0
-        self.high = 10.0
+        self.low = 5
+        self.high = 10
 
-    # =========================
-    # 选择区域
-    # =========================
-    def select_region(self):
+    def add_region(self):
 
         selector = ScreenSelector()
 
-        # 等待窗口关闭（工业稳定写法）
         while selector.isVisible():
             QApplication.processEvents()
 
-        self.region = selector.result
+        if selector.result:
+            self.monitors.append({
+                "region": selector.result,
+                "value": 0,
+                "status": "待启动"
+            })
 
-        if self.region:
-            x, y, w, h = self.region
-            self.label.setText(f"区域：X={x}, Y={y}, W={w}, H={h}")
-        else:
-            QMessageBox.warning(self, "提示", "未选择区域")
+            self.refresh_table()
 
-    # =========================
-    # 启动监控
-    # =========================
-    def start_monitor(self):
+    def start_all(self):
 
-        if not self.region:
-            QMessageBox.warning(self, "错误", "请先选择监控区域")
-            return
+        for i, m in enumerate(self.monitors):
 
-        if self.monitor:
-            self.monitor.running = False
+            monitor = Monitor(
+                m["region"],
+                self.low,
+                self.high,
+                self,
+                i
+            )
 
-        self.monitor = Monitor(
-            self.region,
-            self.low,
-            self.high,
-            self
-        )
+            monitor.start()
 
-        self.monitor.start()
+            m["thread"] = monitor
 
-        self.label.setText("状态：监控运行中")
+        self.label.setText("运行中")
 
-    # =========================
-    # 停止监控
-    # =========================
-    def stop_monitor(self):
+    def stop_all(self):
 
-        if self.monitor:
-            self.monitor.running = False
+        for m in self.monitors:
+            if "thread" in m:
+                m["thread"].running = False
 
-        self.label.setText("状态：已停止")
+        self.label.setText("已停止")
 
-    # =========================
-    # 清除报警
-    # =========================
-    def clear_alarm(self):
+    def clear(self):
+        self.label.setText("报警已清除")
 
-        self.alarm_state = False
-        self.label.setText("状态：报警已清除")
+    def refresh_table(self):
 
-    # =========================
-    # UI更新（线程调用）
-    # =========================
-    def update_value(self, value):
+        self.table.setRowCount(len(self.monitors))
 
-        self.table.setRowCount(1)
+        for i, m in enumerate(self.monitors):
 
-        self.table.setItem(0, 0, QTableWidgetItem(str(value)))
-        self.table.setItem(0, 1, QTableWidgetItem(str(self.low)))
-        self.table.setItem(0, 2, QTableWidgetItem(str(self.high)))
+            r = m["region"]
 
-        # 超限高亮
-        if value > self.high or value < self.low:
-            self.table.item(0, 0).setText(f"⚠ {value}")
+            self.table.setItem(i, 0, QTableWidgetItem(str(r)))
+            self.table.setItem(i, 1, QTableWidgetItem(str(m.get("value", 0))))
+            self.table.setItem(i, 2, QTableWidgetItem(str(self.low)))
+            self.table.setItem(i, 3, QTableWidgetItem(str(self.high)))
+            self.table.setItem(i, 4, QTableWidgetItem(m.get("status", "")))
 
-    # =========================
-    # 报警触发
-    # =========================
-    def alarm_trigger(self, value):
+    def update_value(self, index, value, status):
 
-        if self.alarm_state:
-            return
+        if index < len(self.monitors):
 
-        self.alarm_state = True
+            self.monitors[index]["value"] = value
+            self.monitors[index]["status"] = status
 
-        self.label.setText(f"⚠ 报警：{value}")
+            self.refresh_table()
 
-        # 非阻塞弹窗（避免卡死）
-        msg = QMessageBox(self)
-        msg.setWindowTitle("报警")
-        msg.setText(f"数值异常：{value}")
-        msg.setStandardButtons(QMessageBox.Ok)
-        msg.show()
-
-
-# =========================
-# 主入口
-# =========================
-if __name__ == "__main__":
-
-    app = QApplication(sys.argv)
-
-    win = MainWindow()
-    win.show()
-
-    sys.exit(app.exec())
+            if value > self.high or value < self.low:
+                QMessageBox.warning(self, "报警", f"{value}")
