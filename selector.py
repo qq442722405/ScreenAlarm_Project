@@ -1,62 +1,66 @@
-import threading
-import time
-from mss import mss
-from PySide6.QtCore import Signal, QObject
-from ocr import read_number
-import datetime
+from PySide6.QtWidgets import QWidget
+from PySide6.QtCore import Qt, QRect, QPoint, Signal, QObject
+from PySide6.QtGui import QPainter, QColor
 
 
-class MonitorThread(threading.Thread):
+class ScreenSelector(QWidget):
 
-    update_signal = Signal(float)
-    alarm_signal = Signal(float, str)
+    area_selected = Signal(int, int, int, int)
 
-    def __init__(self, region, low, high):
+    def __init__(self):
         super().__init__()
 
-        self.x, self.y, self.w, self.h = region
-        self.low = low
-        self.high = high
-        self.running = True
+        self.setWindowFlags(
+            Qt.FramelessWindowHint |
+            Qt.WindowStaysOnTopHint |
+            Qt.Tool
+        )
 
-        self.last_value = None
+        self.setWindowState(Qt.WindowFullScreen)
+        self.setAttribute(Qt.WA_TranslucentBackground)
 
-    def run(self):
+        self.start = QPoint()
+        self.end = QPoint()
+        self.drawing = False
 
-        with mss() as sct:
+        self.show()
 
-            monitor = {
-                "left": self.x,
-                "top": self.y,
-                "width": self.w,
-                "height": self.h
-            }
+    def paintEvent(self, event):
 
-            while self.running:
+        painter = QPainter(self)
+        painter.fillRect(self.rect(), QColor(0, 0, 0, 120))
 
-                img = sct.grab(monitor)
+        if self.drawing:
 
-                value = read_number(img)
+            rect = QRect(self.start, self.end).normalized()
 
-                if value is not None:
+            painter.fillRect(rect, QColor(0, 255, 0, 80))
+            painter.setPen(QColor(0, 255, 0))
+            painter.drawRect(rect)
 
-                    self.update_signal.emit(value)
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self.start = event.position().toPoint()
+            self.end = self.start
+            self.drawing = True
+            self.update()
 
-                    # 报警逻辑
-                    if value > self.high:
-                        self.log(value, "高报警")
-                        self.alarm_signal.emit(value, "高报警")
+    def mouseMoveEvent(self, event):
+        if self.drawing:
+            self.end = event.position().toPoint()
+            self.update()
 
-                    elif value < self.low:
-                        self.log(value, "低报警")
-                        self.alarm_signal.emit(value, "低报警")
+    def mouseReleaseEvent(self, event):
+        if self.drawing:
+            self.drawing = False
 
-                time.sleep(1)
+            rect = QRect(self.start, self.end).normalized()
 
-    def log(self, value, status):
-
-        with open("alarm_log.csv", "a", encoding="utf-8") as f:
-
-            f.write(
-                f"{datetime.datetime.now()},{value},{status}\n"
+            self.area_selected.emit(
+                rect.x(),
+                rect.y(),
+                rect.width(),
+                rect.height()
             )
+
+            self.close()
