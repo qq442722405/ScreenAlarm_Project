@@ -1,11 +1,9 @@
 from PySide6.QtWidgets import QWidget
-from PySide6.QtCore import Qt, QRect, QPoint, Signal, QObject
+from PySide6.QtCore import Qt, QRect, QPoint
 from PySide6.QtGui import QPainter, QColor
 
 
 class ScreenSelector(QWidget):
-
-    area_selected = Signal(int, int, int, int)
 
     def __init__(self):
         super().__init__()
@@ -23,11 +21,14 @@ class ScreenSelector(QWidget):
         self.end = QPoint()
         self.drawing = False
 
+        self.result = None   # ⭐关键：返回结果
+
         self.show()
 
     def paintEvent(self, event):
 
         painter = QPainter(self)
+
         painter.fillRect(self.rect(), QColor(0, 0, 0, 120))
 
         if self.drawing:
@@ -39,6 +40,7 @@ class ScreenSelector(QWidget):
             painter.drawRect(rect)
 
     def mousePressEvent(self, event):
+
         if event.button() == Qt.LeftButton:
             self.start = event.position().toPoint()
             self.end = self.start
@@ -46,17 +48,20 @@ class ScreenSelector(QWidget):
             self.update()
 
     def mouseMoveEvent(self, event):
+
         if self.drawing:
             self.end = event.position().toPoint()
             self.update()
 
     def mouseReleaseEvent(self, event):
+
         if self.drawing:
+
             self.drawing = False
 
             rect = QRect(self.start, self.end).normalized()
 
-            self.area_selected.emit(
+            self.result = (
                 rect.x(),
                 rect.y(),
                 rect.width(),
