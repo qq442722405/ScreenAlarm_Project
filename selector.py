@@ -8,15 +8,8 @@ class ScreenSelector(QWidget):
     def __init__(self):
         super().__init__()
 
-        self.setWindowFlags(
-            Qt.FramelessWindowHint |
-            Qt.WindowStaysOnTopHint
-        )
-
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
         self.setWindowState(Qt.WindowFullScreen)
-
-        # ✔ 关键：避免黑屏
-        self.setAttribute(Qt.WA_TranslucentBackground)
 
         self.start = QPoint()
         self.end = QPoint()
@@ -30,14 +23,13 @@ class ScreenSelector(QWidget):
 
         p = QPainter(self)
 
-        # ✔ 半透明（不会遮死屏幕）
-        p.fillRect(self.rect(), QColor(0, 0, 0, 40))
+        p.fillRect(self.rect(), QColor(0, 0, 0, 80))
 
         if self.drawing:
 
             r = QRect(self.start, self.end).normalized()
 
-            p.fillRect(r, QColor(0, 255, 0, 60))
+            p.fillRect(r, QColor(0, 255, 0, 80))
             p.setPen(QColor(0, 255, 0))
             p.drawRect(r)
 
