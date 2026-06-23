@@ -5,6 +5,7 @@ from PySide6.QtWidgets import (
     QMessageBox, QTableWidget, QTableWidgetItem
 )
 from monitor import Monitor
+from selector import ScreenSelector
 
 
 class MainWindow(QMainWindow):
@@ -12,19 +13,19 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
 
-        self.setWindowTitle("ScreenAlarm V3")
+        self.setWindowTitle("ScreenAlarm V3.1")
         self.resize(900, 600)
 
         self.region = None
         self.monitor = None
-        self.alarm = False
+        self.alarm_state = False
 
         central = QWidget()
         self.setCentralWidget(central)
 
         layout = QVBoxLayout(central)
 
-        self.label = QLabel("状态：未设置区域")
+        self.label = QLabel("状态：未选择区域")
         layout.addWidget(self.label)
 
         self.table = QTableWidget()
@@ -47,12 +48,10 @@ class MainWindow(QMainWindow):
         self.btn_stop.clicked.connect(self.stop)
         self.btn_clear.clicked.connect(self.clear_alarm)
 
-        self.low = 5
-        self.high = 10
+        self.low = 5.0
+        self.high = 10.0
 
     def select_region(self):
-
-        from selector import ScreenSelector
 
         self.selector = ScreenSelector()
 
@@ -83,7 +82,7 @@ class MainWindow(QMainWindow):
         self.label.setText("状态：已停止")
 
     def clear_alarm(self):
-        self.alarm = False
+        self.alarm_state = False
         self.label.setText("状态：报警已清除")
 
     def update_value(self, value):
@@ -99,6 +98,12 @@ class MainWindow(QMainWindow):
 
     def alarm_trigger(self, value):
 
-        self.alarm = True
-
+        self.alarm_state = True
         QMessageBox.warning(self, "报警", f"数值异常：{value}")
+
+
+if __name__ == "__main__":
+    app = QApplication(sys.argv)
+    win = MainWindow()
+    win.show()
+    sys.exit(app.exec())
