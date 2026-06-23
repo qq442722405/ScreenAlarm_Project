@@ -2,7 +2,6 @@ import threading
 import time
 import mss
 from ocr import read_number
-import datetime
 
 
 class Monitor(threading.Thread):
@@ -34,19 +33,21 @@ class Monitor(threading.Thread):
 
                 value = read_number(img)
 
-                if value is not None:
+                # ✔ 关键：过滤None
+                if value is None:
+                    time.sleep(1)
+                    continue
 
+                # UI更新（安全调用）
+                try:
                     self.ui.update_value(value)
+                except:
+                    pass
 
-                    if value > self.high or value < self.low:
-
+                if value > self.high or value < self.low:
+                    try:
                         self.ui.alarm_trigger(value)
-
-                        self.log(value)
+                    except:
+                        pass
 
                 time.sleep(1)
-
-    def log(self, value):
-
-        with open("alarm_log.csv", "a", encoding="utf-8") as f:
-            f.write(f"{datetime.datetime.now()},{value}\n")
