@@ -2,103 +2,65 @@ import cv2
 import numpy as np
 
 
-def clean_number(text):
-
-    # 保留数字和小数点
-    allowed = "0123456789."
-
-    result = ""
-
-    for c in text:
-        if c in allowed:
-            result += c
-
-    return result
-
-
 def read_number(img):
 
     img = np.array(img)
 
-    # BGRA → GRAY
     gray = cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
     gray = cv2.cvtColor(gray, cv2.COLOR_BGR2GRAY)
 
-    # 放大（工业屏很重要）
     gray = cv2.resize(gray, None, fx=2.5, fy=2.5)
 
-    # 降噪
     gray = cv2.GaussianBlur(gray, (3, 3), 0)
 
-    # 二值化（关键）
     _, th = cv2.threshold(
         gray,
         120,
         255,
-        cv2.THRESH_BINARY_INV
+        cv2.THRESH_BINARY
     )
 
-    # 形态学去噪
-    kernel = np.ones((2, 2), np.uint8)
-    th = cv2.morphologyEx(th, cv2.MORPH_OPEN, kernel)
-
-    # OCR替代：轮廓检测数字块
+    # 提取轮廓
     contours, _ = cv2.findContours(
         th,
         cv2.RETR_EXTERNAL,
         cv2.CHAIN_APPROX_SIMPLE
     )
 
-    candidates = []
+    chars = []
 
-    for cnt in contours:
+    for c in contours:
 
-        x, y, w, h = cv2.boundingRect(cnt)
+        x, y, w, h = cv2.boundingRect(c)
 
-        # 过滤噪点
-        if w < 5 or h < 10:
+        if h < 10 or w < 3:
             continue
 
         roi = th[y:y+h, x:x+w]
 
-        # 简单规则判断（数字特征）
         ratio = w / float(h)
 
-        if 0.2 < ratio < 1.5:
+        if 0.1 < ratio < 1.5:
+            chars.append((x, roi))
 
-            mean_val = cv2.mean(roi)[0]
-
-            if mean_val > 10:
-
-                candidates.append((x, roi))
-
-    # 如果没有识别到
-    if not candidates:
+    if not chars:
         return None
 
-    # 按x排序（从左到右）
-    candidates = sorted(candidates, key=lambda x: x[0])
+    chars = sorted(chars, key=lambda x: x[0])
 
-    # 拼接（简化版数字识别）
     text = ""
 
-    for _, roi in candidates:
+    for _, roi in chars:
 
-        # 计算“像素形状”
         h, w = roi.shape
 
-        if h < 10:
-            continue
+        black = np.sum(roi == 0)
+        total = h * w + 1
 
-        # 简单规则分类（工业简化识别）
-        black_ratio = np.sum(roi == 0) / (h * w + 1)
-
-        if black_ratio > 0.6:
+        if black / total > 0.5:
             text += "1"
         else:
             text += "0"
-
-    text = clean_number(text)
 
     try:
         return float(text)
