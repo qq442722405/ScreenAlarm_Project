@@ -1,4 +1,1 @@
 PySide6
-mss
-opencv-python
-numpy
