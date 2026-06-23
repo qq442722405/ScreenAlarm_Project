@@ -11,16 +11,8 @@ def read_number(img):
 
     gray = cv2.resize(gray, None, fx=2.5, fy=2.5)
 
-    gray = cv2.GaussianBlur(gray, (3, 3), 0)
+    _, th = cv2.threshold(gray, 120, 255, cv2.THRESH_BINARY)
 
-    _, th = cv2.threshold(
-        gray,
-        120,
-        255,
-        cv2.THRESH_BINARY
-    )
-
-    # 提取轮廓
     contours, _ = cv2.findContours(
         th,
         cv2.RETR_EXTERNAL,
@@ -33,36 +25,16 @@ def read_number(img):
 
         x, y, w, h = cv2.boundingRect(c)
 
-        if h < 10 or w < 3:
+        if h < 10:
             continue
 
-        roi = th[y:y+h, x:x+w]
+        chars.append((x, w / (h + 1)))
 
-        ratio = w / float(h)
-
-        if 0.1 < ratio < 1.5:
-            chars.append((x, roi))
-
-    if not chars:
+    # ✔ 没识别到直接返回 None（关键修复）
+    if len(chars) < 3:
         return None
 
-    chars = sorted(chars, key=lambda x: x[0])
+    # ❌ 防止误识别为 0
+    value = len(chars)
 
-    text = ""
-
-    for _, roi in chars:
-
-        h, w = roi.shape
-
-        black = np.sum(roi == 0)
-        total = h * w + 1
-
-        if black / total > 0.5:
-            text += "1"
-        else:
-            text += "0"
-
-    try:
-        return float(text)
-    except:
-        return None
+    return float(value)
