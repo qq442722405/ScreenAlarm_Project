@@ -1,1 +1,6 @@
 PySide6
+mss
+paddleocr
+paddlepaddle
+opencv-python
+numpy
