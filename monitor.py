@@ -6,7 +6,6 @@ import random
 class Monitor(threading.Thread):
 
     def __init__(self, region, low, high, ui, index):
-
         super().__init__()
 
         self.region = region
@@ -21,9 +20,14 @@ class Monitor(threading.Thread):
 
         while self.running:
 
-            # ✔ 先用模拟数据（保证程序稳定）
+            # 模拟工业数字（后面可接OCR）
             value = round(random.uniform(0, 20), 2)
 
-            self.ui.update_value(self.index, value)
+            status = "正常"
+
+            if value > self.high or value < self.low:
+                status = "报警"
+
+            self.ui.update_value(self.index, value, status)
 
             time.sleep(1)
