@@ -8,6 +8,7 @@ import datetime
 class Monitor(threading.Thread):
 
     def __init__(self, region, low, high, ui):
+
         super().__init__()
 
         self.x, self.y, self.w, self.h = region
