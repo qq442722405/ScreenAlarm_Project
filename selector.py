@@ -8,12 +8,7 @@ class ScreenSelector(QWidget):
     def __init__(self):
         super().__init__()
 
-        self.setWindowFlags(
-            Qt.FramelessWindowHint |
-            Qt.WindowStaysOnTopHint |
-            Qt.Tool
-        )
-
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
         self.setWindowState(Qt.WindowFullScreen)
         self.setAttribute(Qt.WA_TranslucentBackground)
 
@@ -21,51 +16,36 @@ class ScreenSelector(QWidget):
         self.end = QPoint()
         self.drawing = False
 
-        self.result = None   # ⭐关键：返回结果
+        self.result = None
 
         self.show()
 
-    def paintEvent(self, event):
+    def paintEvent(self, e):
 
-        painter = QPainter(self)
-
-        painter.fillRect(self.rect(), QColor(0, 0, 0, 120))
-
-        if self.drawing:
-
-            rect = QRect(self.start, self.end).normalized()
-
-            painter.fillRect(rect, QColor(0, 255, 0, 80))
-            painter.setPen(QColor(0, 255, 0))
-            painter.drawRect(rect)
-
-    def mousePressEvent(self, event):
-
-        if event.button() == Qt.LeftButton:
-            self.start = event.position().toPoint()
-            self.end = self.start
-            self.drawing = True
-            self.update()
-
-    def mouseMoveEvent(self, event):
+        p = QPainter(self)
+        p.fillRect(self.rect(), QColor(0, 0, 0, 120))
 
         if self.drawing:
-            self.end = event.position().toPoint()
-            self.update()
+            r = QRect(self.start, self.end).normalized()
+            p.fillRect(r, QColor(0, 255, 0, 80))
+            p.setPen(QColor(0, 255, 0))
+            p.drawRect(r)
 
-    def mouseReleaseEvent(self, event):
+    def mousePressEvent(self, e):
+        self.start = e.position().toPoint()
+        self.end = self.start
+        self.drawing = True
 
-        if self.drawing:
+    def mouseMoveEvent(self, e):
+        self.end = e.position().toPoint()
+        self.update()
 
-            self.drawing = False
+    def mouseReleaseEvent(self, e):
 
-            rect = QRect(self.start, self.end).normalized()
+        self.drawing = False
 
-            self.result = (
-                rect.x(),
-                rect.y(),
-                rect.width(),
-                rect.height()
-            )
+        r = QRect(self.start, self.end).normalized()
 
-            self.close()
+        self.result = (r.x(), r.y(), r.width(), r.height())
+
+        self.close()
