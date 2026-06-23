@@ -14,8 +14,8 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
 
-        self.setWindowTitle("ScreenAlarm V5 - Industrial Stable")
-        self.resize(1000, 700)
+        self.setWindowTitle("ScreenAlarm V6 工业稳定版")
+        self.resize(1100, 750)
 
         self.monitors = []
 
@@ -30,10 +30,10 @@ class MainWindow(QMainWindow):
 
         # 表格
         self.table = QTableWidget()
-        self.table.setColumnCount(5)
-        self.table.setHorizontalHeaderLabels(
-            ["区域", "当前值", "下限", "上限", "状态"]
-        )
+        self.table.setColumnCount(6)
+        self.table.setHorizontalHeaderLabels([
+            "区域", "备注", "当前值", "下限", "上限", "状态"
+        ])
         layout.addWidget(self.table)
 
         # 日志
@@ -42,7 +42,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.log_box)
 
         # 按钮
-        self.btn_add = QPushButton("➕ 添加监控区域（手动坐标）")
+        self.btn_add = QPushButton("➕ 添加监控（一次性输入）")
         self.btn_start = QPushButton("▶ 开始监控")
         self.btn_stop = QPushButton("⏹ 停止监控")
         self.btn_clear = QPushButton("✔ 清除报警")
@@ -58,7 +58,7 @@ class MainWindow(QMainWindow):
         self.btn_clear.clicked.connect(self.clear_alarm)
 
     # =========================
-    # 添加监控区域（手动输入）
+    # 一次性输入（重点）
     # =========================
     def add_region(self):
 
@@ -76,15 +76,22 @@ class MainWindow(QMainWindow):
         if not (ok5 and ok6):
             return
 
+        text, ok7 = QInputDialog.getText(self, "备注", "输入备注（如：压力/流量/温度）")
+
+        if not ok7:
+            text = ""
+
         region = (x1, y1, x2 - x1, y2 - y1)
 
         self.monitors.append({
             "region": region,
             "low": low,
             "high": high,
+            "remark": text,
             "value": 0,
             "status": "正常",
-            "thread": None
+            "thread": None,
+            "last_value": None  # ✔ 用于稳定滤波
         })
 
         self.refresh_table()
@@ -93,10 +100,6 @@ class MainWindow(QMainWindow):
     # 启动监控
     # =========================
     def start_monitor(self):
-
-        if not self.monitors:
-            QMessageBox.warning(self, "提示", "请先添加监控区域")
-            return
 
         for i, m in enumerate(self.monitors):
 
@@ -113,7 +116,7 @@ class MainWindow(QMainWindow):
                 m["thread"] = t
                 t.start()
 
-        self.status.setText("状态：监控中")
+        self.status.setText("状态：运行中")
 
     # =========================
     # 停止
@@ -133,23 +136,35 @@ class MainWindow(QMainWindow):
         self.status.setText("状态：报警已清除")
 
     # =========================
-    # 更新UI
+    # UI更新（带滤波）
     # =========================
     def update_value(self, index, value, status):
 
         if index >= len(self.monitors):
             return
 
-        self.monitors[index]["value"] = value
-        self.monitors[index]["status"] = status
+        m = self.monitors[index]
+
+        # =========================
+        # ✔ 滤波（解决跳数）
+        # =========================
+        if m["last_value"] is None:
+            m["last_value"] = value
+        else:
+            value = (m["last_value"] * 0.7) + (value * 0.3)
+            m["last_value"] = value
+
+        m["value"] = round(value, 2)
+        m["status"] = status
+
+        # 日志
+        if status == "报警":
+            self.log_box.append(f"⚠ {m['remark']} 区域{index} 值={m['value']}")
 
         self.refresh_table()
 
-        if status == "报警":
-            self.log_box.append(f"⚠ 区域{index} 报警 值={value}")
-
     # =========================
-    # 刷新表格
+    # 表格刷新
     # =========================
     def refresh_table(self):
 
@@ -158,17 +173,15 @@ class MainWindow(QMainWindow):
         for i, m in enumerate(self.monitors):
 
             self.table.setItem(i, 0, QTableWidgetItem(str(m["region"])))
-            self.table.setItem(i, 1, QTableWidgetItem(str(m["value"])))
-            self.table.setItem(i, 2, QTableWidgetItem(str(m["low"])))
-            self.table.setItem(i, 3, QTableWidgetItem(str(m["high"])))
-            self.table.setItem(i, 4, QTableWidgetItem(str(m["status"])))
+            self.table.setItem(i, 1, QTableWidgetItem(m["remark"]))
+            self.table.setItem(i, 2, QTableWidgetItem(str(m["value"])))
+            self.table.setItem(i, 3, QTableWidgetItem(str(m["low"])))
+            self.table.setItem(i, 4, QTableWidgetItem(str(m["high"])))
+            self.table.setItem(i, 5, QTableWidgetItem(m["status"]))
 
 
 if __name__ == "__main__":
-
     app = QApplication(sys.argv)
-
     win = MainWindow()
     win.show()
-
     sys.exit(app.exec())
