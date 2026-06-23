@@ -3,10 +3,9 @@ from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget,
     QVBoxLayout, QPushButton, QLabel,
     QTableWidget, QTableWidgetItem,
-    QTextEdit, QMessageBox, QInputDialog
+    QInputDialog, QTextEdit, QMessageBox
 )
 
-from selector import ScreenSelector
 from monitor import Monitor
 
 
@@ -15,7 +14,7 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
 
-        self.setWindowTitle("工业屏幕监控系统 V1")
+        self.setWindowTitle("ScreenAlarm V5 - Industrial Stable")
         self.resize(1000, 700)
 
         self.monitors = []
@@ -37,15 +36,15 @@ class MainWindow(QMainWindow):
         )
         layout.addWidget(self.table)
 
-        # 日志框
+        # 日志
         self.log_box = QTextEdit()
         self.log_box.setReadOnly(True)
         layout.addWidget(self.log_box)
 
         # 按钮
-        self.btn_add = QPushButton("➕ 添加监视区域")
-        self.btn_start = QPushButton("▶ 开始监视")
-        self.btn_stop = QPushButton("⏹ 停止监视")
+        self.btn_add = QPushButton("➕ 添加监控区域（手动坐标）")
+        self.btn_start = QPushButton("▶ 开始监控")
+        self.btn_stop = QPushButton("⏹ 停止监控")
         self.btn_clear = QPushButton("✔ 清除报警")
 
         layout.addWidget(self.btn_add)
@@ -59,42 +58,44 @@ class MainWindow(QMainWindow):
         self.btn_clear.clicked.connect(self.clear_alarm)
 
     # =========================
-    # 添加监视区域
+    # 添加监控区域（手动输入）
     # =========================
     def add_region(self):
 
-        selector = ScreenSelector()
+        x1, ok1 = QInputDialog.getInt(self, "输入", "左上X")
+        y1, ok2 = QInputDialog.getInt(self, "输入", "左上Y")
+        x2, ok3 = QInputDialog.getInt(self, "输入", "右下X")
+        y2, ok4 = QInputDialog.getInt(self, "输入", "右下Y")
 
-        selector.exec()
+        if not (ok1 and ok2 and ok3 and ok4):
+            return
 
-        if selector.result:
+        low, ok5 = QInputDialog.getDouble(self, "下限", "报警下限", 5)
+        high, ok6 = QInputDialog.getDouble(self, "上限", "报警上限", 10)
 
-            x, y, w, h = selector.result
+        if not (ok5 and ok6):
+            return
 
-            low, ok1 = QInputDialog.getDouble(self, "下限", "输入下限", 5)
-            high, ok2 = QInputDialog.getDouble(self, "上限", "输入上限", 10)
+        region = (x1, y1, x2 - x1, y2 - y1)
 
-            if not ok1 or not ok2:
-                return
+        self.monitors.append({
+            "region": region,
+            "low": low,
+            "high": high,
+            "value": 0,
+            "status": "正常",
+            "thread": None
+        })
 
-            self.monitors.append({
-                "region": (x, y, w, h),
-                "low": low,
-                "high": high,
-                "value": 0,
-                "status": "正常",
-                "thread": None
-            })
-
-            self.refresh_table()
+        self.refresh_table()
 
     # =========================
-    # 开始监视
+    # 启动监控
     # =========================
     def start_monitor(self):
 
         if not self.monitors:
-            QMessageBox.warning(self, "提示", "请先添加监视区域")
+            QMessageBox.warning(self, "提示", "请先添加监控区域")
             return
 
         for i, m in enumerate(self.monitors):
@@ -112,10 +113,10 @@ class MainWindow(QMainWindow):
                 m["thread"] = t
                 t.start()
 
-        self.status.setText("状态：监视中")
+        self.status.setText("状态：监控中")
 
     # =========================
-    # 停止监视
+    # 停止
     # =========================
     def stop_monitor(self):
 
@@ -132,7 +133,7 @@ class MainWindow(QMainWindow):
         self.status.setText("状态：报警已清除")
 
     # =========================
-    # 更新数据（线程调用）
+    # 更新UI
     # =========================
     def update_value(self, index, value, status):
 
@@ -145,10 +146,10 @@ class MainWindow(QMainWindow):
         self.refresh_table()
 
         if status == "报警":
-            self.log_box.append(f"⚠ 报警 区域{index} 数值={value}")
+            self.log_box.append(f"⚠ 区域{index} 报警 值={value}")
 
     # =========================
-    # 表格刷新
+    # 刷新表格
     # =========================
     def refresh_table(self):
 
@@ -164,7 +165,10 @@ class MainWindow(QMainWindow):
 
 
 if __name__ == "__main__":
+
     app = QApplication(sys.argv)
+
     win = MainWindow()
     win.show()
+
     sys.exit(app.exec())
