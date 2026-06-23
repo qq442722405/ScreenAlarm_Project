@@ -21,8 +21,10 @@ class Monitor(threading.Thread):
 
         while self.running:
 
-            # 模拟工业数值（后续可接OCR）
-            value = round(random.uniform(0, 20), 2)
+            # =========================
+            # 模拟工业数值（真实OCR后替换这里）
+            # =========================
+            value = random.uniform(0, 20)
 
             status = "正常"
 
