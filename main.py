@@ -60,6 +60,7 @@ class MainWindow(QMainWindow):
 
         self.selector = ScreenSelector()
         self.selector.area_selected.connect(self.save_region)
+        self.selector.setWindowModality(Qt.ApplicationModal)
         self.selector.show()
 
     def save_region(self, x, y, w, h):
