@@ -1,6 +1,6 @@
 import threading
 import time
-import mss
+import random
 
 
 class Monitor(threading.Thread):
@@ -9,7 +9,7 @@ class Monitor(threading.Thread):
 
         super().__init__()
 
-        self.x, self.y, self.w, self.h = region
+        self.region = region
         self.low = low
         self.high = high
         self.ui = ui
@@ -19,30 +19,11 @@ class Monitor(threading.Thread):
 
     def run(self):
 
-        with mss.mss() as sct:
+        while self.running:
 
-            monitor = {
-                "left": self.x,
-                "top": self.y,
-                "width": self.w,
-                "height": self.h
-            }
+            # ✔ 先用模拟数据（保证程序稳定）
+            value = round(random.uniform(0, 20), 2)
 
-            while self.running:
+            self.ui.update_value(self.index, value)
 
-                # ✔ 这里先模拟（避免OCR错误影响结构）
-                value = self.mock_value()
-
-                status = "正常"
-
-                if value > self.high or value < self.low:
-                    status = "报警"
-                    self.ui.update_value(self.index, value, status)
-                else:
-                    self.ui.update_value(self.index, value, status)
-
-                time.sleep(1)
-
-    def mock_value(self):
-        import random
-        return round(random.uniform(0, 20), 2)
+            time.sleep(1)
