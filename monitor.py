@@ -6,6 +6,7 @@ import random
 class Monitor(threading.Thread):
 
     def __init__(self, region, low, high, ui, index):
+
         super().__init__()
 
         self.region = region
@@ -20,7 +21,7 @@ class Monitor(threading.Thread):
 
         while self.running:
 
-            # 模拟工业数字（后面可接OCR）
+            # 模拟工业数值（后续可接OCR）
             value = round(random.uniform(0, 20), 2)
 
             status = "正常"
