@@ -2,7 +2,11 @@ import cv2
 import numpy as np
 from paddleocr import PaddleOCR
 
-ocr = PaddleOCR(use_angle_cls=False, lang="en", show_log=False)
+# ✔ 新版 PaddleOCR 不支持 show_log
+ocr = PaddleOCR(
+    use_angle_cls=False,
+    lang="en"
+)
 
 
 def read_number(img):
@@ -20,6 +24,10 @@ def read_number(img):
 
     try:
         text = result[0][0][1][0]
+
+        text = text.replace(" ", "").replace(",", ".")
+
         return float(text)
+
     except:
         return None
