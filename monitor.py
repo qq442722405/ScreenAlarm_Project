@@ -8,7 +8,6 @@ import datetime
 class Monitor(threading.Thread):
 
     def __init__(self, region, low, high, ui):
-
         super().__init__()
 
         self.x, self.y, self.w, self.h = region
@@ -50,7 +49,4 @@ class Monitor(threading.Thread):
     def log(self, value):
 
         with open("alarm_log.csv", "a", encoding="utf-8") as f:
-
-            f.write(
-                f"{datetime.datetime.now()},{value}\n"
-            )
+            f.write(f"{datetime.datetime.now()},{value}\n")
