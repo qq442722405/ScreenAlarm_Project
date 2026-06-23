@@ -8,8 +8,13 @@ class ScreenSelector(QWidget):
     def __init__(self):
         super().__init__()
 
-        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
+        self.setWindowFlags(
+            Qt.FramelessWindowHint |
+            Qt.WindowStaysOnTopHint
+        )
+
         self.setWindowState(Qt.WindowFullScreen)
+
         self.setAttribute(Qt.WA_TranslucentBackground)
 
         self.start = QPoint()
@@ -23,11 +28,19 @@ class ScreenSelector(QWidget):
     def paintEvent(self, e):
 
         p = QPainter(self)
-        p.fillRect(self.rect(), QColor(0, 0, 0, 120))
+
+        # ✔ 改为“浅遮罩”，不遮死屏幕
+        p.fillRect(self.rect(), QColor(0, 0, 0, 60))
+
+        # ✔ 提示文字
+        p.setPen(QColor(255, 255, 255))
+        p.drawText(50, 50, "拖动鼠标选择区域（ESC退出）")
 
         if self.drawing:
+
             r = QRect(self.start, self.end).normalized()
-            p.fillRect(r, QColor(0, 255, 0, 80))
+
+            p.fillRect(r, QColor(0, 255, 0, 60))
             p.setPen(QColor(0, 255, 0))
             p.drawRect(r)
 
