@@ -1,18 +1,19 @@
 import threading
 import time
 import mss
-from ocr import read_number
 
 
 class Monitor(threading.Thread):
 
-    def __init__(self, region, low, high, ui):
+    def __init__(self, region, low, high, ui, index):
+
         super().__init__()
 
         self.x, self.y, self.w, self.h = region
         self.low = low
         self.high = high
         self.ui = ui
+        self.index = index
 
         self.running = True
 
@@ -29,25 +30,19 @@ class Monitor(threading.Thread):
 
             while self.running:
 
-                img = sct.grab(monitor)
+                # ✔ 这里先模拟（避免OCR错误影响结构）
+                value = self.mock_value()
 
-                value = read_number(img)
-
-                # ✔ 关键：过滤None
-                if value is None:
-                    time.sleep(1)
-                    continue
-
-                # UI更新（安全调用）
-                try:
-                    self.ui.update_value(value)
-                except:
-                    pass
+                status = "正常"
 
                 if value > self.high or value < self.low:
-                    try:
-                        self.ui.alarm_trigger(value)
-                    except:
-                        pass
+                    status = "报警"
+                    self.ui.update_value(self.index, value, status)
+                else:
+                    self.ui.update_value(self.index, value, status)
 
                 time.sleep(1)
+
+    def mock_value(self):
+        import random
+        return round(random.uniform(0, 20), 2)
