@@ -4,15 +4,13 @@ import os
 import time
 import re
 import threading
-import shutil
 from datetime import datetime
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QTableWidget, QTableWidgetItem, QLabel, QMessageBox,
     QAbstractItemView, QHeaderView, QFileDialog, QDialog,
     QDialogButtonBox, QFormLayout, QSpinBox, QDoubleSpinBox, QLineEdit,
-    QGroupBox, QGridLayout, QFrame, QSlider, QFileDialog, QComboBox,
-    QProgressBar
+    QGroupBox, QGridLayout, QFrame, QSlider, QFileDialog, QComboBox
 )
 from PySide6.QtCore import Qt, QTimer, QThread, Signal, QPoint, QRect, QUrl
 from PySide6.QtGui import QColor, QBrush, QFont, QPainter, QPen, QPixmap, QImage
@@ -33,7 +31,6 @@ except ImportError:
 
 
 class AlarmSoundPlayer:
-    """报警声音播放器 - 自动加载同目录下的警报声.mp3"""
     def __init__(self):
         self.is_playing = False
         self.sound_file = None
@@ -41,7 +38,7 @@ class AlarmSoundPlayer:
         self.stop_flag = False
         self.volume = 1.0
         
-        self._find_alarm_sound()
+        self._load_package_sound()
         
         if PYGAME_AVAILABLE:
             try:
@@ -52,40 +49,20 @@ class AlarmSoundPlayer:
         else:
             self.mixer_ready = False
     
-    def _find_alarm_sound(self):
-        """自动查找警报声文件"""
-        current_dir = os.path.dirname(os.path.abspath(__file__))
-        sound_path = os.path.join(current_dir, "警报声.mp3")
+    def _load_package_sound(self):
+        if getattr(sys, 'frozen', False):
+            base_dir = os.path.dirname(sys.executable)
+        else:
+            base_dir = os.path.dirname(os.path.abspath(__file__))
+        
+        sound_path = os.path.join(base_dir, "警报声.mp3")
         
         if os.path.exists(sound_path):
             self.sound_file = sound_path
-            return True
+            print(f"✅ 加载报警音频: {sound_path}")
+            return
         
-        sound_path2 = os.path.join(os.getcwd(), "警报声.mp3")
-        if os.path.exists(sound_path2):
-            self.sound_file = sound_path2
-            return True
-        
-        if getattr(sys, 'frozen', False):
-            exe_dir = os.path.dirname(sys.executable)
-            sound_path3 = os.path.join(exe_dir, "警报声.mp3")
-            if os.path.exists(sound_path3):
-                self.sound_file = sound_path3
-                return True
-        
-        return False
-    
-    def load_sound(self, file_path):
-        if not os.path.exists(file_path):
-            return False
-        self.sound_file = file_path
-        if PYGAME_AVAILABLE and self.mixer_ready:
-            try:
-                pygame.mixer.Sound(file_path)
-                return True
-            except Exception as e:
-                return False
-        return True
+        print("⚠️ 未找到 警报声.mp3，将使用系统Beep")
     
     def play(self):
         if not self.sound_file or not os.path.exists(self.sound_file):
@@ -504,10 +481,6 @@ class MainWindow(QMainWindow):
             QPushButton#btn_delete:hover { background-color: #bb4a4a; }
             QPushButton#btn_save { background-color: #2a4a7a; }
             QPushButton#btn_save:hover { background-color: #3a5a8a; }
-            QPushButton#btn_retry_ocr { background-color: #2a5a8a; }
-            QPushButton#btn_retry_ocr:hover { background-color: #3a6a9a; }
-            QPushButton#btn_clear_cache { background-color: #8a4a2a; }
-            QPushButton#btn_clear_cache:hover { background-color: #aa5a3a; }
             QFrame#hint_frame {
                 background-color: #2a2a3a;
                 border-radius: 4px;
@@ -547,18 +520,6 @@ class MainWindow(QMainWindow):
                 color: #e0e0e0;
                 selection-background-color: #4a9eff;
             }
-            QProgressBar {
-                background-color: #2a2a3a;
-                border: 1px solid #3a3a4a;
-                border-radius: 4px;
-                text-align: center;
-                color: #e0e0e0;
-                height: 16px;
-            }
-            QProgressBar::chunk {
-                background-color: #4a9eff;
-                border-radius: 4px;
-            }
         """)
         
         self.monitoring = False
@@ -595,7 +556,7 @@ class MainWindow(QMainWindow):
         title.setFont(title_font)
         title_layout.addWidget(title)
         title_layout.addStretch()
-        subtitle = QLabel("-- 陈诚 (PaddleOCR)")
+        subtitle = QLabel("-- 陈诚 (EasyOCR)")
         subtitle.setStyleSheet("color: #6a6a7a; font-size: 13px;")
         title_layout.addWidget(subtitle)
         main_layout.addLayout(title_layout)
@@ -609,19 +570,10 @@ class MainWindow(QMainWindow):
         hint_layout.addWidget(hint_label)
         main_layout.addWidget(hint_frame)
         
-        # OCR状态
         self.ocr_status_label = QLabel("OCR引擎: 初始化中...")
         self.ocr_status_label.setStyleSheet("padding: 4px 12px; background-color: #2a2a3a; border-radius: 4px; color: #ddaa44;")
         main_layout.addWidget(self.ocr_status_label)
         
-        # 下载进度条
-        self.download_progress = QProgressBar()
-        self.download_progress.setVisible(False)
-        self.download_progress.setRange(0, 100)
-        self.download_progress.setValue(0)
-        main_layout.addWidget(self.download_progress)
-        
-        # 表格
         self.table = QTableWidget()
         self.table.setColumnCount(7)
         self.table.setHorizontalHeaderLabels([
@@ -640,7 +592,6 @@ class MainWindow(QMainWindow):
         self.table.horizontalHeader().setStretchLastSection(True)
         main_layout.addWidget(self.table)
         
-        # 按钮
         btn_layout = QHBoxLayout()
         btn_layout.setSpacing(8)
         
@@ -707,7 +658,6 @@ class MainWindow(QMainWindow):
         
         main_layout.addLayout(btn_layout)
         
-        # 状态栏
         status_layout = QHBoxLayout()
         self.status_label = QLabel("状态: 就绪")
         self.status_label.setStyleSheet("padding: 6px; background-color: #2a2a3a; border-radius: 4px;")
@@ -721,83 +671,7 @@ class MainWindow(QMainWindow):
         self.alarm_status_label.setStyleSheet("padding: 6px; background-color: #2a2a3a; border-radius: 4px; color: #6a6a7a;")
         status_layout.addWidget(self.alarm_status_label, 1)
         
-        # 重新下载模型按钮
-        self.btn_retry_ocr = QPushButton("🔄 重新下载模型")
-        self.btn_retry_ocr.setObjectName("btn_retry_ocr")
-        self.btn_retry_ocr.clicked.connect(self.retry_ocr)
-        status_layout.addWidget(self.btn_retry_ocr)
-        
-        # 删除缓存按钮
-        self.btn_clear_cache = QPushButton("🗑️ 删除模型缓存")
-        self.btn_clear_cache.setObjectName("btn_clear_cache")
-        self.btn_clear_cache.clicked.connect(self.clear_model_cache)
-        status_layout.addWidget(self.btn_clear_cache)
-        
         main_layout.addLayout(status_layout)
-    
-    def retry_ocr(self):
-        """重新下载模型"""
-        if self.monitoring:
-            QMessageBox.warning(self, "提示", "请先停止监控再重新下载模型")
-            return
-        
-        self.ocr_status_label.setText("OCR引擎: 正在删除缓存并重新下载...")
-        self.ocr_status_label.setStyleSheet("padding: 4px 12px; background-color: #2a2a3a; border-radius: 4px; color: #ddaa44;")
-        
-        # 重新创建监控线程并重新初始化OCR
-        if self.monitor_thread:
-            self.monitor_thread.stop()
-            self.monitor_thread.wait()
-        
-        # 创建一个临时线程来重新下载模型
-        temp_thread = MonitorThread([])
-        temp_thread.ocr_status.connect(self.set_ocr_status)
-        temp_thread.download_progress.connect(self.on_download_progress)
-        
-        # 调用重新初始化方法
-        if temp_thread.reinit_ocr():
-            self.status_label.setText("状态: 模型已重新下载")
-        else:
-            self.status_label.setText("状态: 下载失败，请检查网络")
-        
-        temp_thread.deleteLater()
-    
-    def clear_model_cache(self):
-        """删除下载的OCR模型缓存"""
-        # PaddleOCR 模型缓存目录
-        paddle_cache = os.path.join(os.path.expanduser("~"), ".paddleocr")
-        
-        if not os.path.exists(paddle_cache):
-            QMessageBox.information(self, "提示", "没有找到模型缓存文件")
-            return
-        
-        # 计算大小
-        total_size = 0
-        for dirpath, dirnames, filenames in os.walk(paddle_cache):
-            for f in filenames:
-                fp = os.path.join(dirpath, f)
-                total_size += os.path.getsize(fp)
-        
-        size_mb = total_size / (1024 * 1024)
-        
-        reply = QMessageBox.question(
-            self, 
-            "确认删除", 
-            f"确定要删除PaddleOCR模型缓存吗？\n\n"
-            f"目录: {paddle_cache}\n"
-            f"大小: {size_mb:.1f} MB\n\n"
-            "删除后下次启动会重新下载模型",
-            QMessageBox.Yes | QMessageBox.No
-        )
-        
-        if reply == QMessageBox.Yes:
-            try:
-                shutil.rmtree(paddle_cache)
-                self.status_label.setText(f"状态: 已删除模型缓存 ({size_mb:.1f} MB)")
-                self.ocr_status_label.setText("OCR引擎: 已清除缓存，重启后将重新下载")
-                QMessageBox.information(self, "提示", "模型缓存已删除")
-            except Exception as e:
-                QMessageBox.warning(self, "错误", f"删除失败: {str(e)}")
     
     def on_interval_changed(self, text):
         self.detect_interval = int(text.replace("ms", ""))
@@ -959,13 +833,6 @@ class MainWindow(QMainWindow):
         )
         self.ocr_status_label.setText(f"OCR引擎: {status}")
     
-    def on_download_progress(self, value):
-        """下载进度更新"""
-        self.download_progress.setVisible(True)
-        self.download_progress.setValue(value)
-        if value >= 100:
-            QTimer.singleShot(1000, lambda: self.download_progress.setVisible(False))
-    
     def start_monitor(self):
         if self.monitoring:
             return
@@ -1004,7 +871,6 @@ class MainWindow(QMainWindow):
         self.monitor_thread.alarm_triggered.connect(self.on_alarm_triggered)
         self.monitor_thread.status_updated.connect(self.on_status_updated)
         self.monitor_thread.ocr_status.connect(self.set_ocr_status)
-        self.monitor_thread.download_progress.connect(self.on_download_progress)
         self.monitor_thread.start()
         
         self.monitoring = True
