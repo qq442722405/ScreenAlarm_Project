@@ -2,6 +2,7 @@ import time
 import re
 import os
 import sys
+import urllib.request
 from PySide6.QtCore import QThread, Signal
 import cv2
 import numpy as np
@@ -21,6 +22,7 @@ class MonitorThread(QThread):
     alarm_triggered = Signal(int, str, float, float, float)
     status_updated = Signal(int, str)
     ocr_status = Signal(str, bool)
+    download_progress = Signal(int)  # 下载进度
     
     def __init__(self, monitors):
         super().__init__()
@@ -41,13 +43,12 @@ class MonitorThread(QThread):
         self.running = False
     
     def _init_ocr(self):
-        """初始化EasyOCR - 自动下载模型到程序目录"""
+        """初始化EasyOCR - 自动下载模型"""
         if not OCR_AVAILABLE:
             self.ocr_status.emit("EasyOCR未安装，请运行: pip install easyocr", False)
             return False
         
         try:
-            # 模型存储到程序目录下的 ocr_models 文件夹
             if getattr(sys, 'frozen', False):
                 base_dir = os.path.dirname(sys.executable)
             else:
@@ -55,23 +56,24 @@ class MonitorThread(QThread):
             
             model_dir = os.path.join(base_dir, 'ocr_models')
             
-            # 创建目录
             if not os.path.exists(model_dir):
                 os.makedirs(model_dir, exist_ok=True)
             
             self.ocr_status.emit("正在下载/加载EasyOCR模型 (首次约200MB)...", False)
+            self.download_progress.emit(0)
             
-            # 创建Reader，自动下载模型到 model_dir
+            # 创建Reader，自动下载模型
             self.reader = easyocr.Reader(
                 ['en'],
                 gpu=False,
                 model_storage_directory=model_dir,
-                download_enabled=True,  # 允许自动下载
+                download_enabled=True,
                 verbose=False
             )
             
             if self.reader is not None:
                 self.ocr_ready = True
+                self.download_progress.emit(100)
                 self.ocr_status.emit("就绪 ✅", True)
                 return True
             else:
@@ -94,20 +96,16 @@ class MonitorThread(QThread):
             else:
                 gray = img_np
             
-            # 增强对比度
             clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
             enhanced = clahe.apply(gray)
             
-            # 黑底白字修正
             if np.mean(enhanced) < 80:
                 enhanced = 255 - enhanced
                 enhanced = clahe.apply(enhanced)
             
-            # 高斯模糊
             blurred = cv2.GaussianBlur(enhanced, (3, 3), 0)
             _, binary = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
             
-            # 转为RGB（EasyOCR需要）
             rgb = cv2.cvtColor(binary, cv2.COLOR_GRAY2RGB)
             return rgb
             
@@ -129,10 +127,8 @@ class MonitorThread(QThread):
             img = Image.frombytes("RGB", screenshot.size, screenshot.rgb)
             img_np = np.array(img)
             
-            # 预处理
             processed = self._preprocess_image(img_np)
             
-            # EasyOCR识别 - 只识别数字
             result = self.reader.readtext(
                 processed,
                 allowlist='0123456789.-',
@@ -147,7 +143,7 @@ class MonitorThread(QThread):
                     if numbers:
                         return float(numbers[0])
             
-            # 如果预处理失败，尝试原图
+            # 尝试原图
             result2 = self.reader.readtext(
                 img_np,
                 allowlist='0123456789.-',
