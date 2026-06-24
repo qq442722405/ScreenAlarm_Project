@@ -3,6 +3,7 @@ import json
 import os
 import time
 import re
+import threading
 from datetime import datetime
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
@@ -13,14 +14,139 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, QTimer, QThread, Signal, QPoint, QRect, QUrl
 from PySide6.QtGui import QColor, QBrush, QFont, QPainter, QPen, QPixmap, QImage
-from PySide6.QtMultimedia import QMediaPlayer
-from PySide6.QtMultimediaWidgets import QVideoWidget
 
 from monitor import MonitorThread
 
+# 尝试导入音频播放库
+try:
+    import pygame
+    PYGAME_AVAILABLE = True
+except ImportError:
+    PYGAME_AVAILABLE = False
+    print("pygame未安装，使用系统Beep替代")
+
+try:
+    import winsound
+    WINSOUND_AVAILABLE = True
+except ImportError:
+    WINSOUND_AVAILABLE = False
+
+
+class AlarmSoundPlayer:
+    """报警声音播放器 - 支持循环播放MP3/WAV"""
+    def __init__(self):
+        self.is_playing = False
+        self.sound_file = None
+        self.play_thread = None
+        self.stop_flag = False
+        self.volume = 1.0
+        
+        # 初始化pygame mixer
+        if PYGAME_AVAILABLE:
+            try:
+                pygame.mixer.init()
+                self.mixer_ready = True
+            except:
+                self.mixer_ready = False
+        else:
+            self.mixer_ready = False
+    
+    def load_sound(self, file_path):
+        """加载音频文件"""
+        if not os.path.exists(file_path):
+            return False
+        
+        self.sound_file = file_path
+        
+        # 测试是否能加载
+        if PYGAME_AVAILABLE and self.mixer_ready:
+            try:
+                pygame.mixer.Sound(file_path)
+                return True
+            except Exception as e:
+                print(f"加载音频失败: {e}")
+                return False
+        return True
+    
+    def play(self):
+        """播放报警声音（循环）"""
+        if not self.sound_file or not os.path.exists(self.sound_file):
+            self._play_beep()
+            return
+        
+        if self.is_playing:
+            return
+        
+        self.stop_flag = False
+        self.is_playing = True
+        
+        # 使用pygame播放
+        if PYGAME_AVAILABLE and self.mixer_ready:
+            self._play_with_pygame()
+        else:
+            # 使用系统Beep作为备选
+            self._play_beep()
+    
+    def _play_with_pygame(self):
+        """使用pygame播放"""
+        def play_loop():
+            try:
+                sound = pygame.mixer.Sound(self.sound_file)
+                sound.set_volume(self.volume)
+                while not self.stop_flag:
+                    sound.play()
+                    # 等待播放完成
+                    while pygame.mixer.get_busy() and not self.stop_flag:
+                        pygame.time.wait(100)
+                    if self.stop_flag:
+                        break
+                    # 延迟一点再循环
+                    time.sleep(0.1)
+            except Exception as e:
+                print(f"播放失败: {e}")
+            finally:
+                self.is_playing = False
+        
+        self.play_thread = threading.Thread(target=play_loop, daemon=True)
+        self.play_thread.start()
+    
+    def _play_beep(self):
+        """使用系统Beep作为备选"""
+        def beep_loop():
+            try:
+                while not self.stop_flag:
+                    winsound.Beep(800, 200)
+                    time.sleep(0.1)
+                    if self.stop_flag:
+                        break
+                    winsound.Beep(1000, 200)
+                    time.sleep(0.1)
+            except:
+                pass
+            finally:
+                self.is_playing = False
+        
+        self.play_thread = threading.Thread(target=beep_loop, daemon=True)
+        self.play_thread.start()
+    
+    def stop(self):
+        """停止报警声音"""
+        self.stop_flag = True
+        self.is_playing = False
+        
+        if PYGAME_AVAILABLE and self.mixer_ready:
+            pygame.mixer.stop()
+    
+    def set_volume(self, volume):
+        """设置音量 (0.0 - 1.0)"""
+        self.volume = max(0.0, min(1.0, volume))
+    
+    def is_loaded(self):
+        return self.sound_file is not None and os.path.exists(self.sound_file)
+
 
 class CoordinatePicker(QWidget):
-    """鼠标坐标拾取器 - 全屏透明窗口显示鼠标坐标"""
+    """鼠标坐标拾取器"""
     coord_selected = Signal(int, int)
     
     def __init__(self, parent=None, coord_type="左上角"):
@@ -135,56 +261,6 @@ class CoordinatePicker(QWidget):
     def closeEvent(self, event):
         self.setCursor(Qt.ArrowCursor)
         event.accept()
-
-
-class AlarmSoundPlayer:
-    """报警声音播放器 - 支持循环播放MP3/WAV"""
-    def __init__(self):
-        self.player = QMediaPlayer()
-        self.is_playing = False
-        self.sound_file = None
-        self.loop_timer = QTimer()
-        self.loop_timer.timeout.connect(self._check_and_loop)
-        self.loop_timer.start(100)
-        
-    def load_sound(self, file_path):
-        """加载音频文件"""
-        try:
-            self.player.setSource(QUrl.fromLocalFile(file_path))
-            # 检查是否加载成功
-            if self.player.mediaStatus() == QMediaPlayer.NoMedia:
-                return False
-            self.sound_file = file_path
-            return True
-        except Exception as e:
-            print(f"加载音频失败: {e}")
-            return False
-    
-    def play(self):
-        """播放报警声音（循环）"""
-        if self.player.source().isEmpty():
-            return
-        
-        self.player.setLoops(-1)  # 无限循环
-        self.player.play()
-        self.is_playing = True
-    
-    def stop(self):
-        """停止报警声音"""
-        self.player.stop()
-        self.is_playing = False
-    
-    def set_volume(self, volume):
-        """设置音量 (0.0 - 1.0)"""
-        self.player.setVolume(int(volume * 100))
-    
-    def _check_and_loop(self):
-        """检查并循环播放"""
-        if self.is_playing and self.player.mediaStatus() == QMediaPlayer.EndOfMedia:
-            self.player.play()
-    
-    def is_loaded(self):
-        return not self.player.source().isEmpty()
 
 
 class AddMonitorRow(QWidget):
@@ -328,7 +404,7 @@ class AddMonitorRow(QWidget):
     def start_pick(self):
         """开始拾取 - 第一步：左上角"""
         self.pick_stage = 1
-        self.btn_pick.setText("拾取左上角...")
+        self.btn_pick.setText("左上角...")
         self.btn_pick.setEnabled(False)
         self.picker = CoordinatePicker(self, "左上角")
         self.picker.coord_selected.connect(self.on_first_pick)
@@ -338,7 +414,7 @@ class AddMonitorRow(QWidget):
             self.temp_x = x
             self.temp_y = y
             self.pick_stage = 2
-            self.btn_pick.setText("拾取右下角...")
+            self.btn_pick.setText("右下角...")
             self.btn_pick.setEnabled(True)
             QTimer.singleShot(200, self.pick_bottom_right)
         else:
@@ -486,14 +562,13 @@ class MainWindow(QMainWindow):
         self.alarm_logs = []
         self.alarm_sound_on = True
         self.add_row_widget = None
-        self.detect_interval = 500  # 默认500ms
+        self.detect_interval = 500
         
         # 报警声音播放器
         self.alarm_player = AlarmSoundPlayer()
         self.alarm_file = ""
         self.alarm_playing = False
         
-        # 创建UI
         self._setup_ui()
         self.load_config()
         
@@ -600,7 +675,6 @@ class MainWindow(QMainWindow):
         self.btn_load_sound.clicked.connect(self.load_alarm_sound)
         btn_layout.addWidget(self.btn_load_sound)
         
-        # 音量滑块
         btn_layout.addWidget(QLabel("音量:"))
         self.volume_slider = QSlider(Qt.Horizontal)
         self.volume_slider.setRange(0, 100)
@@ -609,11 +683,10 @@ class MainWindow(QMainWindow):
         self.volume_slider.valueChanged.connect(self.on_volume_changed)
         btn_layout.addWidget(self.volume_slider)
         
-        # 检测间隔
         btn_layout.addWidget(QLabel("间隔:"))
         self.interval_combo = QComboBox()
         self.interval_combo.addItems(["100ms", "200ms", "300ms", "500ms", "1000ms", "2000ms"])
-        self.interval_combo.setCurrentIndex(3)  # 500ms
+        self.interval_combo.setCurrentIndex(3)
         self.interval_combo.setFixedWidth(80)
         self.interval_combo.currentTextChanged.connect(self.on_interval_changed)
         btn_layout.addWidget(self.interval_combo)
@@ -646,18 +719,15 @@ class MainWindow(QMainWindow):
         main_layout.addLayout(status_layout)
     
     def on_interval_changed(self, text):
-        """检测间隔变化"""
         self.detect_interval = int(text.replace("ms", ""))
         if self.monitoring and self.monitor_thread:
             self.monitor_thread.set_interval(self.detect_interval)
     
     def on_volume_changed(self, value):
-        """音量改变"""
         volume = value / 100.0
         self.alarm_player.set_volume(volume)
     
     def load_alarm_sound(self):
-        """加载用户选择的音频文件"""
         file_path, _ = QFileDialog.getOpenFileName(
             self, "选择报警音频文件", "", 
             "音频文件 (*.wav *.mp3 *.flac *.ogg *.m4a);;所有文件 (*.*)"
@@ -674,11 +744,10 @@ class MainWindow(QMainWindow):
                 QMessageBox.warning(self, "错误", 
                     "无法加载音频文件\n\n"
                     "支持格式: WAV, MP3, FLAC, OGG, M4A\n"
-                    "提示: 如果加载MP3失败，请尝试转换为WAV格式"
+                    "提示: 如果加载MP3失败，请尝试安装: pip install pygame"
                 )
     
     def toggle_sound(self):
-        """切换声音开关"""
         self.alarm_sound_on = not self.alarm_sound_on
         self.btn_sound.setText("🔊 声音开启" if self.alarm_sound_on else "🔇 声音关闭")
         if not self.alarm_sound_on:
@@ -688,7 +757,6 @@ class MainWindow(QMainWindow):
             self.alarm_status_label.setStyleSheet("padding: 6px; background-color: #2a2a3a; border-radius: 4px; color: #aa3a3a;")
     
     def play_alarm(self):
-        """播放报警声音（循环）"""
         if not self.alarm_sound_on:
             return
         
@@ -698,18 +766,14 @@ class MainWindow(QMainWindow):
             self.alarm_status_label.setText("🔊 报警中... (循环)")
             self.alarm_status_label.setStyleSheet("padding: 6px; background-color: #aa3a3a; border-radius: 4px; color: white;")
         else:
-            # 如果没加载音频文件，使用系统Beep
-            try:
-                import winsound
-                winsound.Beep(800, 300)
-                winsound.Beep(1000, 300)
-            except:
-                pass
+            # 没有音频文件，使用系统Beep
+            self.alarm_player._play_beep()
+            self.alarm_playing = True
+            self.alarm_status_label.setText("🔊 报警中... (系统提示音)")
+            self.alarm_status_label.setStyleSheet("padding: 6px; background-color: #aa3a3a; border-radius: 4px; color: white;")
     
     def stop_alarm(self):
-        """停止报警声音"""
-        if self.alarm_player.is_loaded():
-            self.alarm_player.stop()
+        self.alarm_player.stop()
         self.alarm_playing = False
         self.alarm_status_label.setText("🔇 无报警")
         self.alarm_status_label.setStyleSheet("padding: 6px; background-color: #2a2a3a; border-radius: 4px; color: #6a6a7a;")
@@ -1017,19 +1081,16 @@ class MainWindow(QMainWindow):
                 self.table.setItem(row, 5, QTableWidgetItem("待监控"))
                 self.table.setItem(row, 6, QTableWidgetItem("--"))
             
-            # 加载音频文件
             alarm_file = config.get('alarm_file', '')
             if alarm_file and os.path.exists(alarm_file):
                 if self.alarm_player.load_sound(alarm_file):
                     self.alarm_file = alarm_file
                     self.status_label.setText("状态: 已加载报警音频")
             
-            # 加载音量
             volume = config.get('volume', 100)
             self.volume_slider.setValue(volume)
             self.on_volume_changed(volume)
             
-            # 加载间隔
             interval = config.get('interval', '500ms')
             idx = self.interval_combo.findText(interval)
             if idx >= 0:
