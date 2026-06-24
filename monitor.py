@@ -45,7 +45,6 @@ class MonitorThread(QThread):
     def _delete_model_cache(self):
         """删除PaddleOCR模型缓存"""
         try:
-            # PaddleOCR 模型缓存目录
             cache_dir = os.path.join(os.path.expanduser("~"), ".paddleocr")
             if os.path.exists(cache_dir):
                 shutil.rmtree(cache_dir)
@@ -56,7 +55,7 @@ class MonitorThread(QThread):
             return False
     
     def _init_ocr(self):
-        """初始化OCR - 使用PaddleOCR，自动下载模型"""
+        """初始化OCR - 使用最简参数"""
         if not OCR_AVAILABLE:
             self.ocr_status.emit("PaddleOCR未安装，请运行: pip install paddleocr", False)
             return False
@@ -68,62 +67,21 @@ class MonitorThread(QThread):
             self.ocr_status.emit("正在下载/加载PaddleOCR模型...", False)
             self.download_progress.emit(0)
             
-            # 使用正确的参数
-            # 注意：不同版本的PaddleOCR参数不同，使用基础参数
-            self.ocr = PaddleOCR(
-                lang='en',           # 英文
-                use_angle_cls=False, # 不使用角度分类
-                show_log=False       # 不显示日志
-            )
+            # 使用最简参数 - 兼容所有版本
+            # 只传 lang 参数，其他都用默认值
+            self.ocr = PaddleOCR(lang='en')
             
-            # 如果初始化成功，标记就绪
             self.ocr_ready = True
             self.download_progress.emit(100)
             self.ocr_status.emit("就绪 ✅", True)
             return True
             
-        except TypeError as e:
-            # 参数错误，尝试使用更基础的参数
-            if "use_gpu" in str(e):
-                try:
-                    self.ocr = PaddleOCR(
-                        lang='en',
-                        use_angle_cls=False,
-                        show_log=False
-                    )
-                    self.ocr_ready = True
-                    self.download_progress.emit(100)
-                    self.ocr_status.emit("就绪 ✅", True)
-                    return True
-                except Exception as e2:
-                    error_msg = str(e2)
-                    if "Connection" in error_msg or "timeout" in error_msg.lower():
-                        self.ocr_status.emit("网络连接失败，请检查网络后点击「重新下载模型」", False)
-                    else:
-                        self.ocr_status.emit(f"加载失败: {error_msg[:50]}", False)
-                    return False
-            else:
-                # 尝试最简参数
-                try:
-                    self.ocr = PaddleOCR(lang='en', show_log=False)
-                    self.ocr_ready = True
-                    self.download_progress.emit(100)
-                    self.ocr_status.emit("就绪 ✅", True)
-                    return True
-                except Exception as e3:
-                    error_msg = str(e3)
-                    if "Connection" in error_msg or "timeout" in error_msg.lower():
-                        self.ocr_status.emit("网络连接失败，请检查网络后点击「重新下载模型」", False)
-                    else:
-                        self.ocr_status.emit(f"加载失败: {error_msg[:50]}", False)
-                    return False
-                    
         except Exception as e:
             error_msg = str(e)
             if "Connection" in error_msg or "timeout" in error_msg.lower():
                 self.ocr_status.emit("网络连接失败，请检查网络后点击「重新下载模型」", False)
             else:
-                self.ocr_status.emit(f"加载失败: {error_msg[:50]}", False)
+                self.ocr_status.emit(f"加载失败: {error_msg[:80]}", False)
             return False
     
     def reinit_ocr(self):
@@ -146,37 +104,28 @@ class MonitorThread(QThread):
             else:
                 gray = img_np
             
-            # 增强对比度
             clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
             enhanced = clahe.apply(gray)
             
-            # 检测黑底白字
             avg_brightness = np.mean(enhanced)
             if avg_brightness < 80:
                 enhanced = 255 - enhanced
                 enhanced = clahe.apply(enhanced)
             
-            # 高斯模糊去噪
             blurred = cv2.GaussianBlur(enhanced, (3, 3), 0)
-            
-            # OTSU二值化
             _, binary = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
             
-            # 形态学操作
             kernel = np.ones((2, 2), np.uint8)
             cleaned = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel, iterations=1)
             cleaned = cv2.morphologyEx(cleaned, cv2.MORPH_OPEN, kernel, iterations=1)
             
-            # 如果图像太小，放大
             if cleaned.shape[0] < 40 or cleaned.shape[1] < 40:
                 scale = min(3, int(80 / max(cleaned.shape[0], cleaned.shape[1])))
                 if scale > 1:
                     cleaned = cv2.resize(cleaned, None, fx=scale, fy=scale, 
                                        interpolation=cv2.INTER_CUBIC)
             
-            # 转为RGB（PaddleOCR需要）
             rgb = cv2.cvtColor(cleaned, cv2.COLOR_GRAY2RGB)
-            
             return rgb
             
         except Exception as e:
@@ -192,26 +141,22 @@ class MonitorThread(QThread):
             if width <= 0 or height <= 0:
                 return None
             
-            # 截图
             monitor = {"top": y, "left": x, "width": width, "height": height}
             screenshot = self.sct.grab(monitor)
             img = Image.frombytes("RGB", screenshot.size, screenshot.rgb)
             img_np = np.array(img)
             
-            # 预处理
             processed = self._preprocess_image(img_np)
             
-            # PaddleOCR识别
+            # 使用 ocr 方法识别
             result = self.ocr.ocr(processed, cls=False)
             
             if result and len(result) > 0:
-                # 遍历所有识别结果
                 for line in result:
                     if line:
                         for word_info in line:
                             if len(word_info) >= 2:
                                 text = word_info[1][0] if isinstance(word_info[1], tuple) else word_info[1]
-                                # 提取数字
                                 numbers = re.findall(r'-?\d+\.?\d*', text)
                                 if numbers:
                                     return float(numbers[0])
