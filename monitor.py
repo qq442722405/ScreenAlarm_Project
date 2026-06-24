@@ -5,26 +5,15 @@ import os
 import sys
 from PySide6.QtCore import QThread, Signal
 import cv2
-import pytesseract
-from PIL import Image
 
 try:
+    from paddleocr import PaddleOCR
     import mss
+    from PIL import Image
     OCR_AVAILABLE = True
 except ImportError as e:
     OCR_AVAILABLE = False
     print(f"依赖库未安装: {e}")
-
-# 设置 Tesseract 路径（Windows）
-if sys.platform == 'win32':
-    tesseract_paths = [
-        r'C:\Program Files\Tesseract-OCR\tesseract.exe',
-        r'C:\Program Files (x86)\Tesseract-OCR\tesseract.exe',
-    ]
-    for path in tesseract_paths:
-        if os.path.exists(path):
-            pytesseract.pytesseract.tesseract_cmd = path
-            break
 
 
 class MonitorThread(QThread):
@@ -32,13 +21,14 @@ class MonitorThread(QThread):
     alarm_triggered = Signal(int, str, float, float, float)
     status_updated = Signal(int, str)
     ocr_status = Signal(str, bool)
-    download_progress = Signal(int)  # 保留用于兼容
+    download_progress = Signal(int)
     
     def __init__(self, monitors):
         super().__init__()
         self.monitors = monitors
         self.running = True
         self.sct = None
+        self.ocr = None
         self.ocr_ready = False
         self.interval_ms = 500
         
@@ -52,20 +42,41 @@ class MonitorThread(QThread):
         self.running = False
     
     def _init_ocr(self):
-        """初始化OCR - 使用Tesseract"""
+        """初始化OCR - 使用PaddleOCR，自动下载模型"""
+        if not OCR_AVAILABLE:
+            self.ocr_status.emit("PaddleOCR未安装", False)
+            return False
+        
         try:
-            # 测试 Tesseract 是否可用
-            version = pytesseract.get_tesseract_version()
-            self.ocr_ready = True
-            self.ocr_status.emit(f"就绪 ✅ (Tesseract {version})", True)
-            return True
-        except Exception as e:
-            self.ocr_status.emit(
-                "Tesseract未安装，请安装Tesseract OCR引擎\n"
-                "下载地址: https://github.com/UB-Mannheim/tesseract/wiki\n"
-                "安装后重启程序", 
-                False
+            import warnings
+            warnings.filterwarnings("ignore")
+            
+            self.ocr_status.emit("正在加载PaddleOCR (首次使用自动下载模型)...", False)
+            self.download_progress.emit(0)
+            
+            # 创建PaddleOCR实例 - 会自动下载模型
+            self.ocr = PaddleOCR(
+                lang='en',  # 英文
+                use_angle_cls=False,
+                use_gpu=False,
+                det_db_thresh=0.3,
+                rec_char_type='en',  # 只识别英文数字
+                show_log=False,  # 不显示日志
+                enable_mkldnn=False
             )
+            
+            # 如果初始化成功，标记就绪
+            self.ocr_ready = True
+            self.download_progress.emit(100)
+            self.ocr_status.emit("就绪 ✅", True)
+            return True
+            
+        except Exception as e:
+            error_msg = str(e)
+            if "Connection" in error_msg or "timeout" in error_msg.lower():
+                self.ocr_status.emit("网络连接失败，请检查网络后点击「重新加载OCR」", False)
+            else:
+                self.ocr_status.emit(f"加载失败: {error_msg[:50]}", False)
             return False
     
     def _preprocess_image(self, img_np):
@@ -104,14 +115,17 @@ class MonitorThread(QThread):
                     cleaned = cv2.resize(cleaned, None, fx=scale, fy=scale, 
                                        interpolation=cv2.INTER_CUBIC)
             
-            return cleaned
+            # 转为RGB（PaddleOCR需要）
+            rgb = cv2.cvtColor(cleaned, cv2.COLOR_GRAY2RGB)
+            
+            return rgb
             
         except Exception as e:
             return img_np
     
     def _capture_and_ocr(self, x, y, width, height):
-        """捕获屏幕并识别数字 - 使用Tesseract"""
-        if not self.ocr_ready:
+        """捕获屏幕并识别数字 - 使用PaddleOCR"""
+        if not self.ocr_ready or self.ocr is None:
             return None
         if self.sct is None:
             self.sct = mss.mss()
@@ -128,22 +142,16 @@ class MonitorThread(QThread):
             # 预处理
             processed = self._preprocess_image(img_np)
             
-            # 只识别数字（白名单）
-            custom_config = r'--psm 8 -c tessedit_char_whitelist=0123456789.'
+            # PaddleOCR识别 - 只识别英文数字
+            result = self.ocr.ocr(processed, det=False, rec=True, cls=False)
             
-            # 识别
-            text = pytesseract.image_to_string(processed, config=custom_config)
-            
-            # 提取数字
-            numbers = re.findall(r'-?\d+\.?\d*', text)
-            if numbers:
-                return float(numbers[0])
-            
-            # 如果第一次失败，尝试原始图像
-            text2 = pytesseract.image_to_string(img_np, config=custom_config)
-            numbers2 = re.findall(r'-?\d+\.?\d*', text2)
-            if numbers2:
-                return float(numbers2[0])
+            if result and len(result) > 0:
+                # 提取识别的文本
+                text = result[0][0] if isinstance(result[0], list) else result[0]
+                # 提取数字
+                numbers = re.findall(r'-?\d+\.?\d*', text)
+                if numbers:
+                    return float(numbers[0])
             
             return None
             
@@ -152,7 +160,7 @@ class MonitorThread(QThread):
     
     def run(self):
         if not self._init_ocr():
-            self.status_updated.emit(-1, 'OCR初始化失败，请安装Tesseract')
+            self.status_updated.emit(-1, 'OCR加载失败，请检查网络后点击「重新加载OCR」')
             return
         
         status = {}
