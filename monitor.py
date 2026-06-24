@@ -28,7 +28,6 @@ class MonitorThread(QThread):
         self.ocr_ready = False
         
     def stop(self):
-        self.running = True
         self.running = False
     
     def _init_ocr(self):
