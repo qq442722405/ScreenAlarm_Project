@@ -593,7 +593,7 @@ class MainWindow(QMainWindow):
         title.setFont(title_font)
         title_layout.addWidget(title)
         title_layout.addStretch()
-        subtitle = QLabel("-- 陈诚 (EasyOCR)")
+        subtitle = QLabel("-- 陈诚 (Tesseract)")
         subtitle.setStyleSheet("color: #6a6a7a; font-size: 13px;")
         title_layout.addWidget(subtitle)
         main_layout.addLayout(title_layout)
@@ -612,7 +612,7 @@ class MainWindow(QMainWindow):
         self.ocr_status_label.setStyleSheet("padding: 4px 12px; background-color: #2a2a3a; border-radius: 4px; color: #ddaa44;")
         main_layout.addWidget(self.ocr_status_label)
         
-        # 下载进度条
+        # 下载进度条（Tesseract不需要下载，但保留用于兼容）
         self.download_progress = QProgressBar()
         self.download_progress.setVisible(False)
         self.download_progress.setRange(0, 100)
@@ -719,49 +719,7 @@ class MainWindow(QMainWindow):
         self.alarm_status_label.setStyleSheet("padding: 6px; background-color: #2a2a3a; border-radius: 4px; color: #6a6a7a;")
         status_layout.addWidget(self.alarm_status_label, 1)
         
-        # 缓存管理按钮
-        self.btn_clear_cache = QPushButton("🗑️ 删除模型缓存")
-        self.btn_clear_cache.setObjectName("btn_clear_cache")
-        self.btn_clear_cache.clicked.connect(self.clear_model_cache)
-        status_layout.addWidget(self.btn_clear_cache)
-        
         main_layout.addLayout(status_layout)
-    
-    def clear_model_cache(self):
-        """删除下载的OCR模型缓存"""
-        user_data_dir = os.path.join(os.path.expanduser("~"), ".screen_monitor")
-        model_dir = os.path.join(user_data_dir, "ocr_models")
-        
-        if not os.path.exists(model_dir):
-            QMessageBox.information(self, "提示", "没有找到模型缓存文件")
-            return
-        
-        # 计算大小
-        total_size = 0
-        for dirpath, dirnames, filenames in os.walk(model_dir):
-            for f in filenames:
-                fp = os.path.join(dirpath, f)
-                total_size += os.path.getsize(fp)
-        
-        size_mb = total_size / (1024 * 1024)
-        
-        reply = QMessageBox.question(
-            self, 
-            "确认删除", 
-            f"确定要删除OCR模型缓存吗？\n\n"
-            f"目录: {model_dir}\n"
-            f"大小: {size_mb:.1f} MB\n\n"
-            "删除后下次启动会重新下载模型",
-            QMessageBox.Yes | QMessageBox.No
-        )
-        
-        if reply == QMessageBox.Yes:
-            try:
-                shutil.rmtree(model_dir)
-                self.status_label.setText(f"状态: 已删除模型缓存 ({size_mb:.1f} MB)")
-                QMessageBox.information(self, "提示", "模型缓存已删除")
-            except Exception as e:
-                QMessageBox.warning(self, "错误", f"删除失败: {str(e)}")
     
     def on_interval_changed(self, text):
         self.detect_interval = int(text.replace("ms", ""))
@@ -924,11 +882,8 @@ class MainWindow(QMainWindow):
         self.ocr_status_label.setText(f"OCR引擎: {status}")
     
     def on_download_progress(self, value):
-        """下载进度更新"""
-        self.download_progress.setVisible(True)
-        self.download_progress.setValue(value)
-        if value >= 100:
-            QTimer.singleShot(1000, lambda: self.download_progress.setVisible(False))
+        """下载进度更新（Tesseract不需要下载）"""
+        pass
     
     def start_monitor(self):
         if self.monitoring:
@@ -968,7 +923,6 @@ class MainWindow(QMainWindow):
         self.monitor_thread.alarm_triggered.connect(self.on_alarm_triggered)
         self.monitor_thread.status_updated.connect(self.on_status_updated)
         self.monitor_thread.ocr_status.connect(self.set_ocr_status)
-        self.monitor_thread.download_progress.connect(self.on_download_progress)
         self.monitor_thread.start()
         
         self.monitoring = True
