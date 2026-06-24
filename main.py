@@ -2,6 +2,7 @@ import sys
 import json
 import os
 import winsound
+import time
 from datetime import datetime
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
@@ -27,7 +28,7 @@ class CoordinatePicker(QWidget):
         self.setWindowFlags(
             Qt.WindowStaysOnTopHint | 
             Qt.FramelessWindowHint | 
-        Qt.Tool
+            Qt.Tool
         )
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setAttribute(Qt.WA_NoSystemBackground)
@@ -183,6 +184,7 @@ class AddMonitorDialog(QDialog):
                 color: #1a1a2a;
             }
             QPushButton[text="确定"]:hover { background-color: #3a8eef; }
+            QPushButton[text="取消"]:hover { background-color: #5a5a6a; }
             QPushButton#btn_pick {
                 background-color: #4a9eff;
                 color: #1a1a2a;
@@ -199,53 +201,45 @@ class AddMonitorDialog(QDialog):
         self.name_edit.setPlaceholderText("例如：温度表")
         layout.addRow("名称:", self.name_edit)
         
-        coord_group = QGroupBox("屏幕区域 (点击按钮拾取鼠标坐标)")
+        coord_group = QGroupBox("屏幕区域 (点击拾取按钮获取坐标)")
         coord_layout = QGridLayout()
         coord_layout.setSpacing(6)
         
-        # 左上X
+        # 左上角坐标 (X和Y合并)
         self.x1_edit = QSpinBox()
         self.x1_edit.setRange(0, 9999)
         self.x1_edit.setValue(100)
         coord_layout.addWidget(QLabel("左上X:"), 0, 0)
         coord_layout.addWidget(self.x1_edit, 0, 1)
-        self.btn_pick_x1 = QPushButton("拾取")
-        self.btn_pick_x1.setObjectName("btn_pick")
-        self.btn_pick_x1.clicked.connect(lambda: self.pick_coordinate("左上X", self.x1_edit))
-        coord_layout.addWidget(self.btn_pick_x1, 0, 2)
         
-        # 左上Y
         self.y1_edit = QSpinBox()
         self.y1_edit.setRange(0, 9999)
         self.y1_edit.setValue(100)
-        coord_layout.addWidget(QLabel("左上Y:"), 1, 0)
-        coord_layout.addWidget(self.y1_edit, 1, 1)
-        self.btn_pick_y1 = QPushButton("拾取")
-        self.btn_pick_y1.setObjectName("btn_pick")
-        self.btn_pick_y1.clicked.connect(lambda: self.pick_coordinate("左上Y", self.y1_edit))
-        coord_layout.addWidget(self.btn_pick_y1, 1, 2)
+        coord_layout.addWidget(QLabel("左上Y:"), 0, 2)
+        coord_layout.addWidget(self.y1_edit, 0, 3)
         
-        # 右下X
+        self.btn_pick_tl = QPushButton("拾取左上角")
+        self.btn_pick_tl.setObjectName("btn_pick")
+        self.btn_pick_tl.clicked.connect(lambda: self.pick_coordinate("左上角", self.x1_edit, self.y1_edit))
+        coord_layout.addWidget(self.btn_pick_tl, 0, 4)
+        
+        # 右下角坐标 (X和Y合并)
         self.x2_edit = QSpinBox()
         self.x2_edit.setRange(0, 9999)
         self.x2_edit.setValue(250)
-        coord_layout.addWidget(QLabel("右下X:"), 2, 0)
-        coord_layout.addWidget(self.x2_edit, 2, 1)
-        self.btn_pick_x2 = QPushButton("拾取")
-        self.btn_pick_x2.setObjectName("btn_pick")
-        self.btn_pick_x2.clicked.connect(lambda: self.pick_coordinate("右下X", self.x2_edit))
-        coord_layout.addWidget(self.btn_pick_x2, 2, 2)
+        coord_layout.addWidget(QLabel("右下X:"), 1, 0)
+        coord_layout.addWidget(self.x2_edit, 1, 1)
         
-        # 右下Y
         self.y2_edit = QSpinBox()
         self.y2_edit.setRange(0, 9999)
         self.y2_edit.setValue(160)
-        coord_layout.addWidget(QLabel("右下Y:"), 3, 0)
-        coord_layout.addWidget(self.y2_edit, 3, 1)
-        self.btn_pick_y2 = QPushButton("拾取")
-        self.btn_pick_y2.setObjectName("btn_pick")
-        self.btn_pick_y2.clicked.connect(lambda: self.pick_coordinate("右下Y", self.y2_edit))
-        coord_layout.addWidget(self.btn_pick_y2, 3, 2)
+        coord_layout.addWidget(QLabel("右下Y:"), 1, 2)
+        coord_layout.addWidget(self.y2_edit, 1, 3)
+        
+        self.btn_pick_br = QPushButton("拾取右下角")
+        self.btn_pick_br.setObjectName("btn_pick")
+        self.btn_pick_br.clicked.connect(lambda: self.pick_coordinate("右下角", self.x2_edit, self.y2_edit))
+        coord_layout.addWidget(self.btn_pick_br, 1, 4)
         
         coord_group.setLayout(coord_layout)
         layout.addRow(coord_group)
@@ -275,20 +269,29 @@ class AddMonitorDialog(QDialog):
         layout.addRow(buttons)
         
         self.picker = None
+        self.pending_x_edit = None
+        self.pending_y_edit = None
     
-    def pick_coordinate(self, coord_name, spinbox):
+    def pick_coordinate(self, coord_name, x_edit, y_edit):
         """打开坐标拾取器"""
+        self.pending_x_edit = x_edit
+        self.pending_y_edit = y_edit
         self.hide()
         self.picker = CoordinatePicker(self, coord_name)
-        self.picker.coord_selected.connect(lambda x, y: self.on_coord_picked(x, y, spinbox))
+        self.picker.coord_selected.connect(self.on_coord_picked)
     
-    def on_coord_picked(self, x, y, spinbox):
+    def on_coord_picked(self, x, y):
         if x >= 0 and y >= 0:
-            spinbox.setValue(x if "X" in spinbox.objectName() or spinbox == self.x1_edit or spinbox == self.x2_edit else y)
+            if self.pending_x_edit:
+                self.pending_x_edit.setValue(x)
+            if self.pending_y_edit:
+                self.pending_y_edit.setValue(y)
         self.show()
         self.raise_()
         self.activateWindow()
         self.picker = None
+        self.pending_x_edit = None
+        self.pending_y_edit = None
     
     def get_data(self):
         return {
@@ -403,7 +406,7 @@ class MainWindow(QMainWindow):
         hint_frame.setObjectName("hint_frame")
         hint_layout = QHBoxLayout(hint_frame)
         hint_layout.setContentsMargins(8, 4, 8, 4)
-        hint_label = QLabel("💡 点击「拾取」按钮，移动鼠标到目标位置点击即可获取坐标")
+        hint_label = QLabel("💡 点击「拾取左上角」和「拾取右下角」获取坐标，然后点击确定")
         hint_label.setStyleSheet("color: #ddaa44;")
         hint_layout.addWidget(hint_label)
         main_layout.addWidget(hint_frame)
@@ -624,16 +627,24 @@ class MainWindow(QMainWindow):
         self._update_alarm_count()
         self.status_label.setText(f"报警: {name} = {value:.2f} [范围: {lower}-{upper}]")
         
-        # 报警声音
+        # 报警声音 - 警报声
         if self.alarm_sound_on:
-            try:
-                winsound.Beep(800, 300)
-                winsound.Beep(1000, 300)
-            except:
-                pass
+            self.play_alarm_sound()
         
         with open("alarm_log.txt", "a", encoding="utf-8") as f:
             f.write(f"[{now}] 报警: {name} = {value:.2f} 超出范围 [{lower}, {upper}]\n")
+    
+    def play_alarm_sound(self):
+        """播放警报声音"""
+        try:
+            # 警报声：高频脉冲音
+            for _ in range(3):
+                winsound.Beep(1200, 150)
+                time.sleep(0.05)
+                winsound.Beep(800, 150)
+                time.sleep(0.05)
+        except:
+            pass
     
     def on_status_updated(self, row, status):
         if status == 'normal':
