@@ -8,7 +8,7 @@ from PySide6.QtCore import QThread, Signal
 import cv2
 
 try:
-    from paddleocr import PaddleOCR
+    import easyocr
     import mss
     from PIL import Image
     OCR_AVAILABLE = True
@@ -29,7 +29,7 @@ class MonitorThread(QThread):
         self.monitors = monitors
         self.running = True
         self.sct = None
-        self.ocr = None
+        self.reader = None
         self.ocr_ready = False
         self.interval_ms = 500
         
@@ -43,11 +43,17 @@ class MonitorThread(QThread):
         self.running = False
     
     def _delete_model_cache(self):
-        """删除PaddleOCR模型缓存"""
+        """删除EasyOCR模型缓存"""
         try:
-            cache_dir = os.path.join(os.path.expanduser("~"), ".paddleocr")
+            # EasyOCR 模型缓存目录
+            cache_dir = os.path.join(os.path.expanduser("~"), ".EasyOCR")
             if os.path.exists(cache_dir):
                 shutil.rmtree(cache_dir)
+                return True
+            # 也可能是这个目录
+            cache_dir2 = os.path.join(os.path.expanduser("~"), "EasyOCR")
+            if os.path.exists(cache_dir2):
+                shutil.rmtree(cache_dir2)
                 return True
             return False
         except Exception as e:
@@ -55,35 +61,28 @@ class MonitorThread(QThread):
             return False
     
     def _init_ocr(self):
-        """初始化OCR - 兼容所有版本"""
+        """初始化OCR - 使用EasyOCR"""
         if not OCR_AVAILABLE:
-            self.ocr_status.emit("PaddleOCR未安装，请运行: pip install paddleocr", False)
+            self.ocr_status.emit("EasyOCR未安装，请运行: pip install easyocr", False)
             return False
         
         try:
             import warnings
             warnings.filterwarnings("ignore")
             
-            self.ocr_status.emit("正在下载/加载PaddleOCR模型...", False)
+            self.ocr_status.emit("正在下载/加载EasyOCR模型 (首次使用约200MB)...", False)
             self.download_progress.emit(0)
             
-            # 方法1：使用最简参数创建OCR对象
-            try:
-                self.ocr = PaddleOCR(
-                    use_angle_cls=False,
-                    lang='en',
-                    show_log=False
-                )
-            except:
-                try:
-                    # 方法2：如果方法1失败，尝试更简参数
-                    self.ocr = PaddleOCR(lang='en')
-                except:
-                    # 方法3：如果都失败，使用空参数
-                    self.ocr = PaddleOCR()
+            # 创建EasyOCR reader - 只使用英文（数字识别）
+            self.reader = easyocr.Reader(
+                ['en'],  # 只需要英文
+                gpu=False,  # 使用CPU
+                model_storage_directory='./ocr_models',  # 模型存储目录
+                download_enabled=True,
+                verbose=False
+            )
             
-            # 测试OCR是否可用
-            if self.ocr is not None:
+            if self.reader is not None:
                 self.ocr_ready = True
                 self.download_progress.emit(100)
                 self.ocr_status.emit("就绪 ✅", True)
@@ -103,10 +102,18 @@ class MonitorThread(QThread):
     def reinit_ocr(self):
         """重新初始化OCR（删除缓存后重新下载）"""
         self.ocr_ready = False
-        self.ocr = None
+        self.reader = None
         
         self.ocr_status.emit("正在删除旧模型缓存...", False)
         self._delete_model_cache()
+        
+        # 也删除本地目录
+        local_dir = './ocr_models'
+        if os.path.exists(local_dir):
+            try:
+                shutil.rmtree(local_dir)
+            except:
+                pass
         
         return self._init_ocr()
     
@@ -118,27 +125,35 @@ class MonitorThread(QThread):
             else:
                 gray = img_np
             
+            # 增强对比度
             clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
             enhanced = clahe.apply(gray)
             
+            # 检测黑底白字
             avg_brightness = np.mean(enhanced)
             if avg_brightness < 80:
                 enhanced = 255 - enhanced
                 enhanced = clahe.apply(enhanced)
             
+            # 高斯模糊去噪
             blurred = cv2.GaussianBlur(enhanced, (3, 3), 0)
+            
+            # OTSU二值化
             _, binary = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
             
+            # 形态学操作
             kernel = np.ones((2, 2), np.uint8)
             cleaned = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel, iterations=1)
             cleaned = cv2.morphologyEx(cleaned, cv2.MORPH_OPEN, kernel, iterations=1)
             
+            # 如果图像太小，放大
             if cleaned.shape[0] < 40 or cleaned.shape[1] < 40:
                 scale = min(3, int(80 / max(cleaned.shape[0], cleaned.shape[1])))
                 if scale > 1:
                     cleaned = cv2.resize(cleaned, None, fx=scale, fy=scale, 
                                        interpolation=cv2.INTER_CUBIC)
             
+            # 转为RGB（EasyOCR需要）
             rgb = cv2.cvtColor(cleaned, cv2.COLOR_GRAY2RGB)
             return rgb
             
@@ -146,8 +161,8 @@ class MonitorThread(QThread):
             return img_np
     
     def _capture_and_ocr(self, x, y, width, height):
-        """捕获屏幕并识别数字 - 使用PaddleOCR"""
-        if not self.ocr_ready or self.ocr is None:
+        """捕获屏幕并识别数字"""
+        if not self.ocr_ready or self.reader is None:
             return None
         if self.sct is None:
             self.sct = mss.mss()
@@ -155,42 +170,42 @@ class MonitorThread(QThread):
             if width <= 0 or height <= 0:
                 return None
             
+            # 截图
             monitor = {"top": y, "left": x, "width": width, "height": height}
             screenshot = self.sct.grab(monitor)
             img = Image.frombytes("RGB", screenshot.size, screenshot.rgb)
             img_np = np.array(img)
             
+            # 预处理
             processed = self._preprocess_image(img_np)
             
-            # 兼容新旧版本的OCR调用
-            try:
-                # 新版PaddleOCR使用 ocr 方法
-                result = self.ocr.ocr(processed, cls=False)
-            except AttributeError:
-                try:
-                    # 旧版PaddleOCR使用 predict 方法
-                    result = self.ocr.predict(processed)
-                except:
-                    # 如果都失败，尝试直接调用
-                    result = self.ocr(processed)
+            # EasyOCR识别 - 只识别数字
+            result = self.reader.readtext(
+                processed,
+                allowlist='0123456789.-',  # 只允许数字和点号
+                paragraph=False,
+                width_ths=0.5,
+                height_ths=0.5
+            )
             
-            if result and len(result) > 0:
-                # 处理不同版本的返回格式
-                for line in result:
-                    if line:
-                        # 检查是否是列表嵌套结构
-                        if isinstance(line, list) and len(line) > 0:
-                            for word_info in line:
-                                if isinstance(word_info, (list, tuple)) and len(word_info) >= 2:
-                                    text = word_info[1][0] if isinstance(word_info[1], (list, tuple)) else str(word_info[1])
-                                    numbers = re.findall(r'-?\d+\.?\d*', text)
-                                    if numbers:
-                                        return float(numbers[0])
-                        elif isinstance(line, (list, tuple)) and len(line) >= 2:
-                            text = line[1][0] if isinstance(line[1], (list, tuple)) else str(line[1])
-                            numbers = re.findall(r'-?\d+\.?\d*', text)
-                            if numbers:
-                                return float(numbers[0])
+            # 提取数字
+            for bbox, text, confidence in result:
+                if confidence > 0.3:  # 置信度阈值
+                    numbers = re.findall(r'-?\d+\.?\d*', text)
+                    if numbers:
+                        return float(numbers[0])
+            
+            # 如果第一次失败，尝试原图
+            result2 = self.reader.readtext(
+                img_np,
+                allowlist='0123456789.-',
+                paragraph=False
+            )
+            for bbox, text, confidence in result2:
+                if confidence > 0.3:
+                    numbers = re.findall(r'-?\d+\.?\d*', text)
+                    if numbers:
+                        return float(numbers[0])
             
             return None
             
