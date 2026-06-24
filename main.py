@@ -22,7 +22,6 @@ try:
     PYGAME_AVAILABLE = True
 except ImportError:
     PYGAME_AVAILABLE = False
-    print("pygame未安装，使用系统Beep替代")
 
 try:
     import winsound
@@ -32,13 +31,16 @@ except ImportError:
 
 
 class AlarmSoundPlayer:
-    """报警声音播放器 - 支持循环播放MP3/WAV"""
+    """报警声音播放器 - 自动加载同目录下的警报声.mp3"""
     def __init__(self):
         self.is_playing = False
         self.sound_file = None
         self.play_thread = None
         self.stop_flag = False
         self.volume = 1.0
+        
+        # 自动查找警报声文件
+        self._find_alarm_sound()
         
         if PYGAME_AVAILABLE:
             try:
@@ -49,7 +51,38 @@ class AlarmSoundPlayer:
         else:
             self.mixer_ready = False
     
+    def _find_alarm_sound(self):
+        """自动查找警报声文件"""
+        # 1. 检查当前目录下的 警报声.mp3
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        sound_path = os.path.join(current_dir, "警报声.mp3")
+        
+        if os.path.exists(sound_path):
+            self.sound_file = sound_path
+            print(f"✅ 找到报警音频: {sound_path}")
+            return True
+        
+        # 2. 检查当前工作目录
+        sound_path2 = os.path.join(os.getcwd(), "警报声.mp3")
+        if os.path.exists(sound_path2):
+            self.sound_file = sound_path2
+            print(f"✅ 找到报警音频: {sound_path2}")
+            return True
+        
+        # 3. 检查 exe 同目录（打包后）
+        if getattr(sys, 'frozen', False):
+            exe_dir = os.path.dirname(sys.executable)
+            sound_path3 = os.path.join(exe_dir, "警报声.mp3")
+            if os.path.exists(sound_path3):
+                self.sound_file = sound_path3
+                print(f"✅ 找到报警音频: {sound_path3}")
+                return True
+        
+        print("⚠️ 未找到 警报声.mp3，将使用系统Beep")
+        return False
+    
     def load_sound(self, file_path):
+        """手动加载音频文件"""
         if not os.path.exists(file_path):
             return False
         self.sound_file = file_path
@@ -58,11 +91,11 @@ class AlarmSoundPlayer:
                 pygame.mixer.Sound(file_path)
                 return True
             except Exception as e:
-                print(f"加载音频失败: {e}")
                 return False
         return True
     
     def play(self):
+        """播放报警声音（循环）"""
         if not self.sound_file or not os.path.exists(self.sound_file):
             self._play_beep()
             return
@@ -528,8 +561,9 @@ class MainWindow(QMainWindow):
         self.add_row_widget = None
         self.detect_interval = 500
         
+        # 报警声音播放器 - 自动加载 警报声.mp3
         self.alarm_player = AlarmSoundPlayer()
-        self.alarm_file = ""
+        self.alarm_file = self.alarm_player.sound_file or ""
         self.alarm_playing = False
         
         self._setup_ui()
@@ -563,7 +597,7 @@ class MainWindow(QMainWindow):
         hint_frame.setObjectName("hint_frame")
         hint_layout = QHBoxLayout(hint_frame)
         hint_layout.setContentsMargins(8, 4, 8, 4)
-        hint_label = QLabel("💡 点击「拾取」依次点击左上角和右下角，自动计算宽高")
+        hint_label = QLabel("💡 点击「拾取」依次点击左上角和右下角，自动计算宽高 | 将 警报声.mp3 放到同目录自动加载")
         hint_label.setStyleSheet("color: #ddaa44;")
         hint_layout.addWidget(hint_label)
         main_layout.addWidget(hint_frame)
@@ -629,10 +663,6 @@ class MainWindow(QMainWindow):
         self.btn_sound.clicked.connect(self.toggle_sound)
         btn_layout.addWidget(self.btn_sound)
         
-        self.btn_load_sound = QPushButton("加载报警音频")
-        self.btn_load_sound.clicked.connect(self.load_alarm_sound)
-        btn_layout.addWidget(self.btn_load_sound)
-        
         btn_layout.addWidget(QLabel("音量:"))
         self.volume_slider = QSlider(Qt.Horizontal)
         self.volume_slider.setRange(0, 100)
@@ -684,25 +714,6 @@ class MainWindow(QMainWindow):
         volume = value / 100.0
         self.alarm_player.set_volume(volume)
     
-    def load_alarm_sound(self):
-        file_path, _ = QFileDialog.getOpenFileName(
-            self, "选择报警音频文件", "", 
-            "音频文件 (*.wav *.mp3 *.flac *.ogg *.m4a);;所有文件 (*.*)"
-        )
-        if file_path:
-            if self.alarm_player.load_sound(file_path):
-                self.alarm_file = file_path
-                self.status_label.setText(f"状态: 已加载报警音频: {os.path.basename(file_path)}")
-                self.alarm_player.play()
-                QTimer.singleShot(500, self.alarm_player.stop)
-                self.save_config()
-            else:
-                QMessageBox.warning(self, "错误", 
-                    "无法加载音频文件\n\n"
-                    "支持格式: WAV, MP3, FLAC, OGG, M4A\n"
-                    "提示: 如果加载MP3失败，请尝试安装: pip install pygame"
-                )
-    
     def toggle_sound(self):
         self.alarm_sound_on = not self.alarm_sound_on
         self.btn_sound.setText("🔊 声音开启" if self.alarm_sound_on else "🔇 声音关闭")
@@ -716,7 +727,6 @@ class MainWindow(QMainWindow):
         if not self.alarm_sound_on:
             return
         
-        # 窗口置顶
         self.setWindowFlags(self.windowFlags() | Qt.WindowStaysOnTopHint)
         self.show()
         self.raise_()
@@ -738,7 +748,6 @@ class MainWindow(QMainWindow):
         self.alarm_playing = False
         self.alarm_status_label.setText("🔇 无报警")
         self.alarm_status_label.setStyleSheet("padding: 6px; background-color: #2a2a3a; border-radius: 4px; color: #6a6a7a;")
-        # 取消置顶
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowStaysOnTopHint)
         self.show()
     
@@ -987,7 +996,6 @@ class MainWindow(QMainWindow):
     def save_config(self):
         config = {
             'monitors': [],
-            'alarm_file': self.alarm_file,
             'volume': self.volume_slider.value(),
             'interval': self.interval_combo.currentText()
         }
@@ -1024,19 +1032,17 @@ class MainWindow(QMainWindow):
                 self.table.setItem(row, 4, QTableWidgetItem(item['coords']))
                 self.table.setItem(row, 5, QTableWidgetItem("待监控"))
                 self.table.setItem(row, 6, QTableWidgetItem("--"))
-            alarm_file = config.get('alarm_file', '')
-            if alarm_file and os.path.exists(alarm_file):
-                if self.alarm_player.load_sound(alarm_file):
-                    self.alarm_file = alarm_file
-                    self.status_label.setText("状态: 已加载报警音频")
+            
             volume = config.get('volume', 100)
             self.volume_slider.setValue(volume)
             self.on_volume_changed(volume)
+            
             interval = config.get('interval', '500ms')
             idx = self.interval_combo.findText(interval)
             if idx >= 0:
                 self.interval_combo.setCurrentIndex(idx)
                 self.detect_interval = int(interval.replace("ms", ""))
+            
             self.status_label.setText("状态: 配置已加载")
         except Exception as e:
             print(f"加载失败: {e}")
