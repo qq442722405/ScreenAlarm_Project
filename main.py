@@ -1,7 +1,6 @@
 import sys
 import json
 import os
-import winsound
 import time
 import re
 from datetime import datetime
@@ -10,10 +9,12 @@ from PySide6.QtWidgets import (
     QPushButton, QTableWidget, QTableWidgetItem, QLabel, QMessageBox,
     QAbstractItemView, QHeaderView, QFileDialog, QDialog,
     QDialogButtonBox, QFormLayout, QSpinBox, QDoubleSpinBox, QLineEdit,
-    QGroupBox, QGridLayout, QFrame, QScrollArea, QSizePolicy
+    QGroupBox, QGridLayout, QFrame, QSlider, QFileDialog
 )
 from PySide6.QtCore import Qt, QTimer, QThread, Signal, QPoint, QRect
 from PySide6.QtGui import QColor, QBrush, QFont, QPainter, QPen, QPixmap, QImage
+from PySide6.QtMultimedia import QSoundEffect
+from PySide6.QtCore import QUrl
 
 from monitor import MonitorThread
 
@@ -134,6 +135,47 @@ class CoordinatePicker(QWidget):
     def closeEvent(self, event):
         self.setCursor(Qt.ArrowCursor)
         event.accept()
+
+
+class AlarmSoundPlayer:
+    """报警声音播放器 - 支持循环播放"""
+    def __init__(self):
+        self.sound_effect = None
+        self.is_playing = False
+        self.sound_file = None
+        
+    def load_sound(self, file_path):
+        """加载音频文件"""
+        try:
+            self.sound_effect = QSoundEffect()
+            self.sound_effect.setSource(QUrl.fromLocalFile(file_path))
+            self.sound_effect.setLoopCount(QSoundEffect.Infinite)  # 无限循环
+            self.sound_effect.setVolume(1.0)  # 最大音量
+            self.sound_file = file_path
+            return True
+        except Exception as e:
+            print(f"加载音频失败: {e}")
+            return False
+    
+    def play(self):
+        """播放报警声音（循环）"""
+        if self.sound_effect and not self.is_playing:
+            self.sound_effect.play()
+            self.is_playing = True
+    
+    def stop(self):
+        """停止报警声音"""
+        if self.sound_effect and self.is_playing:
+            self.sound_effect.stop()
+            self.is_playing = False
+    
+    def set_volume(self, volume):
+        """设置音量 (0.0 - 1.0)"""
+        if self.sound_effect:
+            self.sound_effect.setVolume(max(0.0, min(1.0, volume)))
+    
+    def is_loaded(self):
+        return self.sound_effect is not None
 
 
 class AddMonitorRow(QWidget):
@@ -290,7 +332,6 @@ class AddMonitorRow(QWidget):
             self.pick_stage = 2
             self.btn_pick.setText("右下角...")
             self.btn_pick.setEnabled(True)
-            # 延迟打开右下角拾取器
             QTimer.singleShot(200, self.pick_bottom_right)
         else:
             self.pick_stage = 0
@@ -395,6 +436,22 @@ class MainWindow(QMainWindow):
                 border-radius: 4px;
                 padding: 4px 8px;
             }
+            QSlider::groove:horizontal {
+                height: 6px;
+                background: #3a3a4a;
+                border-radius: 3px;
+            }
+            QSlider::handle:horizontal {
+                background: #4a9eff;
+                width: 14px;
+                height: 14px;
+                margin: -4px 0;
+                border-radius: 7px;
+            }
+            QSlider::sub-page:horizontal {
+                background: #4a9eff;
+                border-radius: 3px;
+            }
         """)
         
         self.monitoring = False
@@ -404,12 +461,33 @@ class MainWindow(QMainWindow):
         self.alarm_sound_on = True
         self.add_row_widget = None
         
+        # 报警声音播放器
+        self.alarm_player = AlarmSoundPlayer()
+        self.alarm_file = "alarm.wav"  # 默认文件名
+        self.alarm_playing = False
+        
+        # 创建UI
         self._setup_ui()
         self.load_config()
+        
+        # 尝试加载默认报警声音
+        self._load_default_alarm_sound()
         
         self.status_timer = QTimer()
         self.status_timer.timeout.connect(self._update_status_display)
         self.status_timer.start(500)
+    
+    def _load_default_alarm_sound(self):
+        """加载默认报警声音"""
+        # 先尝试加载用户指定的文件
+        if os.path.exists(self.alarm_file):
+            if self.alarm_player.load_sound(self.alarm_file):
+                self.status_label.setText("状态: 已加载报警声音文件")
+                return
+        
+        # 如果没有指定文件，尝试内置报警声
+        # 但QSoundEffect需要文件，所以如果没有文件就使用系统Beep
+        self.status_label.setText("状态: 未找到报警音频文件，使用系统提示音")
     
     def _setup_ui(self):
         central = QWidget()
@@ -447,7 +525,7 @@ class MainWindow(QMainWindow):
         self.ocr_status_label.setStyleSheet("padding: 4px 12px; background-color: #2a2a3a; border-radius: 4px; color: #ddaa44;")
         main_layout.addWidget(self.ocr_status_label)
         
-        # 表格 - 设置列宽
+        # 表格
         self.table = QTableWidget()
         self.table.setColumnCount(7)
         self.table.setHorizontalHeaderLabels([
@@ -456,19 +534,14 @@ class MainWindow(QMainWindow):
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.setAlternatingRowColors(True)
         self.table.setRowCount(0)
-        
-        # 设置列宽
-        self.table.setColumnWidth(0, 80)   # 名称
-        self.table.setColumnWidth(1, 80)   # 当前值
-        self.table.setColumnWidth(2, 60)   # 下限
-        self.table.setColumnWidth(3, 60)   # 上限
-        self.table.setColumnWidth(4, 120)  # 坐标
-        self.table.setColumnWidth(5, 80)   # 状态
-        self.table.setColumnWidth(6, 100)  # 报警时间
-        
-        # 允许水平滚动
+        self.table.setColumnWidth(0, 80)
+        self.table.setColumnWidth(1, 80)
+        self.table.setColumnWidth(2, 60)
+        self.table.setColumnWidth(3, 60)
+        self.table.setColumnWidth(4, 120)
+        self.table.setColumnWidth(5, 80)
+        self.table.setColumnWidth(6, 100)
         self.table.horizontalHeader().setStretchLastSection(True)
-        
         main_layout.addWidget(self.table)
         
         # 按钮
@@ -511,6 +584,19 @@ class MainWindow(QMainWindow):
         self.btn_sound.clicked.connect(self.toggle_sound)
         btn_layout.addWidget(self.btn_sound)
         
+        self.btn_load_sound = QPushButton("加载报警音频")
+        self.btn_load_sound.clicked.connect(self.load_alarm_sound)
+        btn_layout.addWidget(self.btn_load_sound)
+        
+        # 音量滑块
+        btn_layout.addWidget(QLabel("音量:"))
+        self.volume_slider = QSlider(Qt.Horizontal)
+        self.volume_slider.setRange(0, 100)
+        self.volume_slider.setValue(100)
+        self.volume_slider.setFixedWidth(80)
+        self.volume_slider.valueChanged.connect(self.on_volume_changed)
+        btn_layout.addWidget(self.volume_slider)
+        
         self.btn_save = QPushButton("保存配置")
         self.btn_save.setObjectName("btn_save")
         self.btn_save.clicked.connect(self.save_config)
@@ -532,40 +618,89 @@ class MainWindow(QMainWindow):
         self.alarm_count_label.setStyleSheet("padding: 6px; background-color: #2a2a3a; border-radius: 4px;")
         status_layout.addWidget(self.alarm_count_label, 1)
         
+        self.alarm_status_label = QLabel("🔇 无报警")
+        self.alarm_status_label.setStyleSheet("padding: 6px; background-color: #2a2a3a; border-radius: 4px; color: #6a6a7a;")
+        status_layout.addWidget(self.alarm_status_label, 1)
+        
         main_layout.addLayout(status_layout)
     
+    def on_volume_changed(self, value):
+        """音量改变"""
+        volume = value / 100.0
+        self.alarm_player.set_volume(volume)
+    
+    def load_alarm_sound(self):
+        """加载用户选择的音频文件"""
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "选择报警音频文件", "", "音频文件 (*.wav *.mp3 *.ogg)"
+        )
+        if file_path:
+            if self.alarm_player.load_sound(file_path):
+                self.alarm_file = file_path
+                self.status_label.setText(f"状态: 已加载报警音频: {os.path.basename(file_path)}")
+                # 保存到配置
+                self.save_config()
+            else:
+                QMessageBox.warning(self, "错误", "无法加载音频文件，请检查文件格式")
+    
+    def toggle_sound(self):
+        """切换声音开关"""
+        self.alarm_sound_on = not self.alarm_sound_on
+        self.btn_sound.setText("🔊 声音开启" if self.alarm_sound_on else "🔇 声音关闭")
+        if not self.alarm_sound_on:
+            self.alarm_player.stop()
+            self.alarm_playing = False
+            self.alarm_status_label.setText("🔇 声音已关闭")
+            self.alarm_status_label.setStyleSheet("padding: 6px; background-color: #2a2a3a; border-radius: 4px; color: #aa3a3a;")
+    
+    def play_alarm(self):
+        """播放报警声音（循环）"""
+        if not self.alarm_sound_on:
+            return
+        
+        if self.alarm_player.is_loaded():
+            self.alarm_player.play()
+            self.alarm_playing = True
+            self.alarm_status_label.setText("🔊 报警中... (循环)")
+            self.alarm_status_label.setStyleSheet("padding: 6px; background-color: #aa3a3a; border-radius: 4px; color: white;")
+        else:
+            # 如果没加载音频文件，使用系统Beep
+            try:
+                winsound.Beep(800, 300)
+                winsound.Beep(1000, 300)
+            except:
+                pass
+    
+    def stop_alarm(self):
+        """停止报警声音"""
+        if self.alarm_player.is_loaded():
+            self.alarm_player.stop()
+        self.alarm_playing = False
+        self.alarm_status_label.setText("🔇 无报警")
+        self.alarm_status_label.setStyleSheet("padding: 6px; background-color: #2a2a3a; border-radius: 4px; color: #6a6a7a;")
+    
     def add_monitor_row(self):
-        """在表格顶部添加一行输入控件"""
         if self.add_row_widget:
             return
         
         self.btn_add.setEnabled(False)
-        
-        # 插入一行
         row = 0
         self.table.insertRow(row)
         self.table.setRowHeight(row, 50)
         
-        # 创建控件
         self.add_row_widget = AddMonitorRow(self.table)
         self.add_row_widget.add_completed.connect(self.on_add_completed)
         self.add_row_widget.cancel.connect(self.on_add_canceled)
         
-        # 将控件放入第一个单元格，并合并所有列
         self.table.setCellWidget(row, 0, self.add_row_widget)
-        self.table.setSpan(row, 0, 1, 7)  # 合并所有7列
-        
-        # 滚动到顶部
+        self.table.setSpan(row, 0, 1, 7)
         self.table.scrollToTop()
     
     def on_add_completed(self, data):
-        """添加完成"""
-        # 移除编辑行
         self.table.removeRow(0)
         self.add_row_widget = None
         self.btn_add.setEnabled(True)
         
-        # 添加到表格底部
         row = self.table.rowCount()
         self.table.insertRow(row)
         self.table.setItem(row, 0, QTableWidgetItem(data['name']))
@@ -579,7 +714,6 @@ class MainWindow(QMainWindow):
         self.status_label.setText(f"状态: 已添加 [{data['name']}]")
     
     def on_add_canceled(self):
-        """取消添加"""
         self.table.removeRow(0)
         self.add_row_widget = None
         self.btn_add.setEnabled(True)
@@ -590,8 +724,6 @@ class MainWindow(QMainWindow):
         if row < 0:
             QMessageBox.warning(self, "提示", "请先选择一行")
             return
-        
-        # 检查是否是添加行
         if self.table.cellWidget(row, 0) is not None:
             return
         
@@ -605,16 +737,11 @@ class MainWindow(QMainWindow):
         else:
             x, y, w, h = 100, 100, 150, 60
         
-        # 创建编辑行
         if self.add_row_widget:
             return
         
         self.btn_add.setEnabled(False)
-        
-        # 删除原行
         self.table.removeRow(row)
-        
-        # 在相同位置插入编辑行
         self.table.insertRow(row)
         self.table.setRowHeight(row, 50)
         
@@ -622,7 +749,6 @@ class MainWindow(QMainWindow):
         self.add_row_widget.add_completed.connect(lambda data: self.on_edit_completed(row, data))
         self.add_row_widget.cancel.connect(self.on_edit_canceled)
         
-        # 填充数据
         self.add_row_widget.name_edit.setText(name)
         self.add_row_widget.x_edit.setValue(x)
         self.add_row_widget.y_edit.setValue(y)
@@ -631,18 +757,14 @@ class MainWindow(QMainWindow):
         self.add_row_widget.lower_edit.setValue(lower)
         self.add_row_widget.upper_edit.setValue(upper)
         
-        # 将控件放入第一个单元格，并合并所有列
         self.table.setCellWidget(row, 0, self.add_row_widget)
         self.table.setSpan(row, 0, 1, 7)
     
     def on_edit_completed(self, row, data):
-        """编辑完成"""
-        # 移除编辑行
         self.table.removeRow(row)
         self.add_row_widget = None
         self.btn_add.setEnabled(True)
         
-        # 在相同位置插入数据行
         self.table.insertRow(row)
         self.table.setItem(row, 0, QTableWidgetItem(data['name']))
         self.table.setItem(row, 1, QTableWidgetItem("--"))
@@ -654,8 +776,6 @@ class MainWindow(QMainWindow):
         self.status_label.setText(f"状态: 已编辑 [{data['name']}]")
     
     def on_edit_canceled(self):
-        """取消编辑"""
-        # 找到并移除编辑行
         for row in range(self.table.rowCount()):
             if self.table.cellWidget(row, 0) == self.add_row_widget:
                 self.table.removeRow(row)
@@ -663,7 +783,7 @@ class MainWindow(QMainWindow):
         self.add_row_widget = None
         self.btn_add.setEnabled(True)
         self.status_label.setText("状态: 已取消编辑")
-        self.load_config()  # 重新加载恢复数据
+        self.load_config()
     
     def delete_monitor_point(self):
         row = self.table.currentRow()
@@ -678,10 +798,6 @@ class MainWindow(QMainWindow):
         if reply == QMessageBox.Yes:
             self.table.removeRow(row)
             self.status_label.setText("状态: 已删除")
-    
-    def toggle_sound(self):
-        self.alarm_sound_on = not self.alarm_sound_on
-        self.btn_sound.setText("🔊 声音开启" if self.alarm_sound_on else "🔇 声音关闭")
     
     def set_ocr_status(self, status, is_ready=False):
         color = "#44ddaa" if is_ready else "#ddaa44"
@@ -699,7 +815,6 @@ class MainWindow(QMainWindow):
         
         monitors = []
         for row in range(self.table.rowCount()):
-            # 跳过编辑行
             if self.table.cellWidget(row, 0) is not None:
                 continue
             name = self.table.item(row, 0).text()
@@ -743,6 +858,10 @@ class MainWindow(QMainWindow):
         self.btn_start.setEnabled(True)
         self.btn_stop.setEnabled(False)
         self.status_label.setText("状态: 已停止")
+        
+        # 停止报警声音
+        self.stop_alarm()
+        
         for row in range(self.table.rowCount()):
             if self.table.cellWidget(row, 0) is None:
                 item = self.table.item(row, 5)
@@ -764,21 +883,11 @@ class MainWindow(QMainWindow):
         self._update_alarm_count()
         self.status_label.setText(f"报警: {name} = {value:.2f} [范围: {lower}-{upper}]")
         
-        if self.alarm_sound_on:
-            self.play_alarm_sound()
+        # 播放报警声音（循环）
+        self.play_alarm()
         
         with open("alarm_log.txt", "a", encoding="utf-8") as f:
             f.write(f"[{now}] 报警: {name} = {value:.2f} 超出范围 [{lower}, {upper}]\n")
-    
-    def play_alarm_sound(self):
-        try:
-            for _ in range(3):
-                winsound.Beep(1200, 150)
-                time.sleep(0.05)
-                winsound.Beep(800, 150)
-                time.sleep(0.05)
-        except:
-            pass
     
     def on_status_updated(self, row, status):
         if status == 'normal':
@@ -806,6 +915,11 @@ class MainWindow(QMainWindow):
                 self.table.setItem(row, 5, status_item)
                 self.table.setItem(row, 6, QTableWidgetItem("--"))
                 count += 1
+        
+        # 停止报警声音
+        if count > 0:
+            self.stop_alarm()
+        
         self._update_alarm_count()
         if count > 0:
             self.status_label.setText(f"状态: 已消除 {count} 个报警")
@@ -827,16 +941,22 @@ class MainWindow(QMainWindow):
             self.status_label.setText("状态: 监控运行中")
     
     def save_config(self):
-        config = []
+        config = {
+            'monitors': [],
+            'alarm_file': self.alarm_file,
+            'volume': self.volume_slider.value()
+        }
+        
         for row in range(self.table.rowCount()):
             if self.table.cellWidget(row, 0) is not None:
                 continue
-            config.append({
+            config['monitors'].append({
                 'name': self.table.item(row, 0).text(),
                 'lower': float(self.table.item(row, 2).text()),
                 'upper': float(self.table.item(row, 3).text()),
                 'coords': self.table.item(row, 4).text()
             })
+        
         try:
             with open(self.config_file, 'w', encoding='utf-8') as f:
                 json.dump(config, f, ensure_ascii=False, indent=2)
@@ -850,8 +970,10 @@ class MainWindow(QMainWindow):
         try:
             with open(self.config_file, 'r', encoding='utf-8') as f:
                 config = json.load(f)
+            
+            # 加载监控点
             self.table.setRowCount(0)
-            for item in config:
+            for item in config.get('monitors', []):
                 row = self.table.rowCount()
                 self.table.insertRow(row)
                 self.table.setItem(row, 0, QTableWidgetItem(item['name']))
@@ -861,6 +983,19 @@ class MainWindow(QMainWindow):
                 self.table.setItem(row, 4, QTableWidgetItem(item['coords']))
                 self.table.setItem(row, 5, QTableWidgetItem("待监控"))
                 self.table.setItem(row, 6, QTableWidgetItem("--"))
+            
+            # 加载音频文件
+            alarm_file = config.get('alarm_file', '')
+            if alarm_file and os.path.exists(alarm_file):
+                if self.alarm_player.load_sound(alarm_file):
+                    self.alarm_file = alarm_file
+                    self.status_label.setText("状态: 已加载报警音频")
+            
+            # 加载音量
+            volume = config.get('volume', 100)
+            self.volume_slider.setValue(volume)
+            self.on_volume_changed(volume)
+            
             self.status_label.setText("状态: 配置已加载")
         except Exception as e:
             print(f"加载失败: {e}")
@@ -875,6 +1010,7 @@ class MainWindow(QMainWindow):
     
     def closeEvent(self, event):
         self.stop_monitor()
+        self.stop_alarm()
         event.accept()
 
 
