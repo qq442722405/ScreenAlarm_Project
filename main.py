@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (
     QPushButton, QTableWidget, QTableWidgetItem, QLabel, QMessageBox,
     QAbstractItemView, QHeaderView, QFileDialog, QDialog,
     QDialogButtonBox, QFormLayout, QSpinBox, QDoubleSpinBox, QLineEdit,
-    QGroupBox, QGridLayout, QFrame, QScrollArea
+    QGroupBox, QGridLayout, QFrame, QScrollArea, QSizePolicy
 )
 from PySide6.QtCore import Qt, QTimer, QThread, Signal, QPoint, QRect
 from PySide6.QtGui import QColor, QBrush, QFont, QPainter, QPen, QPixmap, QImage
@@ -234,7 +234,7 @@ class AddMonitorRow(QWidget):
         layout.addWidget(self.h_edit)
         
         # 拾取按钮
-        self.btn_pick = QPushButton("拾取区域")
+        self.btn_pick = QPushButton("拾取")
         self.btn_pick.setObjectName("btn_pick")
         self.btn_pick.clicked.connect(self.pick_coordinates)
         layout.addWidget(self.btn_pick)
@@ -278,7 +278,7 @@ class AddMonitorRow(QWidget):
     def pick_coordinates(self):
         """开始拾取坐标"""
         self.pick_stage = 1
-        self.btn_pick.setText("拾取左上角...")
+        self.btn_pick.setText("左上角...")
         self.btn_pick.setEnabled(False)
         self.picker = CoordinatePicker(self, "左上角")
         self.picker.coord_selected.connect(self.on_first_pick)
@@ -288,13 +288,13 @@ class AddMonitorRow(QWidget):
             self.temp_x = x
             self.temp_y = y
             self.pick_stage = 2
-            self.btn_pick.setText("拾取右下角...")
+            self.btn_pick.setText("右下角...")
             self.btn_pick.setEnabled(True)
             # 延迟打开右下角拾取器
             QTimer.singleShot(200, self.pick_bottom_right)
         else:
             self.pick_stage = 0
-            self.btn_pick.setText("拾取区域")
+            self.btn_pick.setText("拾取")
             self.btn_pick.setEnabled(True)
             self.picker = None
     
@@ -316,7 +316,7 @@ class AddMonitorRow(QWidget):
                 QMessageBox.warning(self, "提示", "右下角必须在左上角的右下方！")
         
         self.pick_stage = 0
-        self.btn_pick.setText("拾取区域")
+        self.btn_pick.setText("拾取")
         self.btn_pick.setEnabled(True)
         self.picker = None
     
@@ -352,11 +352,11 @@ class MainWindow(QMainWindow):
                 selection-background-color: #4a9eff;
                 selection-color: #1a1a2a;
             }
-            QTableWidget::item { padding: 6px; }
+            QTableWidget::item { padding: 4px; }
             QHeaderView::section {
                 background-color: #2a2a3a;
                 color: #e0e0e0;
-                padding: 8px;
+                padding: 6px;
                 border: 1px solid #3a3a4a;
             }
             QPushButton {
@@ -437,7 +437,7 @@ class MainWindow(QMainWindow):
         hint_frame.setObjectName("hint_frame")
         hint_layout = QHBoxLayout(hint_frame)
         hint_layout.setContentsMargins(8, 4, 8, 4)
-        hint_label = QLabel("💡 点击「拾取区域」依次点击左上角和右下角，自动计算宽高")
+        hint_label = QLabel("💡 点击「拾取」依次点击左上角和右下角，自动计算宽高")
         hint_label.setStyleSheet("color: #ddaa44;")
         hint_layout.addWidget(hint_label)
         main_layout.addWidget(hint_frame)
@@ -447,7 +447,7 @@ class MainWindow(QMainWindow):
         self.ocr_status_label.setStyleSheet("padding: 4px 12px; background-color: #2a2a3a; border-radius: 4px; color: #ddaa44;")
         main_layout.addWidget(self.ocr_status_label)
         
-        # 表格
+        # 表格 - 设置列宽
         self.table = QTableWidget()
         self.table.setColumnCount(7)
         self.table.setHorizontalHeaderLabels([
@@ -455,8 +455,20 @@ class MainWindow(QMainWindow):
         ])
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.setAlternatingRowColors(True)
-        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.table.setRowCount(0)
+        
+        # 设置列宽
+        self.table.setColumnWidth(0, 80)   # 名称
+        self.table.setColumnWidth(1, 80)   # 当前值
+        self.table.setColumnWidth(2, 60)   # 下限
+        self.table.setColumnWidth(3, 60)   # 上限
+        self.table.setColumnWidth(4, 120)  # 坐标
+        self.table.setColumnWidth(5, 80)   # 状态
+        self.table.setColumnWidth(6, 100)  # 报警时间
+        
+        # 允许水平滚动
+        self.table.horizontalHeader().setStretchLastSection(True)
+        
         main_layout.addWidget(self.table)
         
         # 按钮
@@ -530,22 +542,21 @@ class MainWindow(QMainWindow):
         self.btn_add.setEnabled(False)
         
         # 插入一行
-        self.table.insertRow(0)
+        row = 0
+        self.table.insertRow(row)
+        self.table.setRowHeight(row, 50)
         
-        # 创建控件并放入第一行
+        # 创建控件
         self.add_row_widget = AddMonitorRow(self.table)
         self.add_row_widget.add_completed.connect(self.on_add_completed)
         self.add_row_widget.cancel.connect(self.on_add_canceled)
         
-        self.table.setCellWidget(0, 0, self.add_row_widget)
-        # 其他列合并
-        for col in range(1, 7):
-            self.table.setSpan(0, col, 1, 1)
-            item = QTableWidgetItem("")
-            item.setBackground(QBrush(QColor(42, 42, 58)))
-            self.table.setItem(0, col, item)
+        # 将控件放入第一个单元格，并合并所有列
+        self.table.setCellWidget(row, 0, self.add_row_widget)
+        self.table.setSpan(row, 0, 1, 7)  # 合并所有7列
         
-        self.table.setRowHeight(0, 55)
+        # 滚动到顶部
+        self.table.scrollToTop()
     
     def on_add_completed(self, data):
         """添加完成"""
@@ -554,7 +565,7 @@ class MainWindow(QMainWindow):
         self.add_row_widget = None
         self.btn_add.setEnabled(True)
         
-        # 添加到表格
+        # 添加到表格底部
         row = self.table.rowCount()
         self.table.insertRow(row)
         self.table.setItem(row, 0, QTableWidgetItem(data['name']))
@@ -599,7 +610,13 @@ class MainWindow(QMainWindow):
             return
         
         self.btn_add.setEnabled(False)
+        
+        # 删除原行
+        self.table.removeRow(row)
+        
+        # 在相同位置插入编辑行
         self.table.insertRow(row)
+        self.table.setRowHeight(row, 50)
         
         self.add_row_widget = AddMonitorRow(self.table)
         self.add_row_widget.add_completed.connect(lambda data: self.on_edit_completed(row, data))
@@ -614,23 +631,18 @@ class MainWindow(QMainWindow):
         self.add_row_widget.lower_edit.setValue(lower)
         self.add_row_widget.upper_edit.setValue(upper)
         
-        # 移除原行
-        self.table.removeRow(row + 1)
+        # 将控件放入第一个单元格，并合并所有列
         self.table.setCellWidget(row, 0, self.add_row_widget)
-        for col in range(1, 7):
-            self.table.setSpan(row, col, 1, 1)
-            item = QTableWidgetItem("")
-            item.setBackground(QBrush(QColor(42, 42, 58)))
-            self.table.setItem(row, col, item)
-        
-        self.table.setRowHeight(row, 55)
+        self.table.setSpan(row, 0, 1, 7)
     
     def on_edit_completed(self, row, data):
         """编辑完成"""
+        # 移除编辑行
         self.table.removeRow(row)
         self.add_row_widget = None
         self.btn_add.setEnabled(True)
         
+        # 在相同位置插入数据行
         self.table.insertRow(row)
         self.table.setItem(row, 0, QTableWidgetItem(data['name']))
         self.table.setItem(row, 1, QTableWidgetItem("--"))
@@ -643,7 +655,7 @@ class MainWindow(QMainWindow):
     
     def on_edit_canceled(self):
         """取消编辑"""
-        # 获取当前行
+        # 找到并移除编辑行
         for row in range(self.table.rowCount()):
             if self.table.cellWidget(row, 0) == self.add_row_widget:
                 self.table.removeRow(row)
