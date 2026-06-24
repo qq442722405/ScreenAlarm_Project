@@ -28,6 +28,7 @@ class MonitorThread(QThread):
         self.ocr_ready = False
         
     def stop(self):
+        self.running = True
         self.running = False
     
     def _init_ocr(self):
@@ -44,13 +45,17 @@ class MonitorThread(QThread):
             self.ocr_status.emit(f"初始化失败: {str(e)[:30]}", False)
             return False
     
-    def _capture_and_ocr(self, x, y, width, height):
+    def _capture_and_ocr(self, x1, y1, x2, y2):
         if not self.ocr_ready or self.reader is None:
             return None
         if self.sct is None:
             self.sct = mss.mss()
         try:
-            monitor = {"top": y, "left": x, "width": width, "height": height}
+            width = x2 - x1
+            height = y2 - y1
+            if width <= 0 or height <= 0:
+                return None
+            monitor = {"top": y1, "left": x1, "width": width, "height": height}
             screenshot = self.sct.grab(monitor)
             img = Image.frombytes("RGB", screenshot.size, screenshot.rgb)
             img_np = np.array(img)
@@ -83,8 +88,8 @@ class MonitorThread(QThread):
                     break
                 row = monitor['row']
                 value = self._capture_and_ocr(
-                    monitor['x'], monitor['y'],
-                    monitor['width'], monitor['height']
+                    monitor['x1'], monitor['y1'],
+                    monitor['x2'], monitor['y2']
                 )
                 
                 if value is not None:
