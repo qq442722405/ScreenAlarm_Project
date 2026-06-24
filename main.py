@@ -17,7 +17,6 @@ from PySide6.QtGui import QColor, QBrush, QFont, QPainter, QPen, QPixmap, QImage
 
 from monitor import MonitorThread
 
-# 尝试导入音频播放库
 try:
     import pygame
     PYGAME_AVAILABLE = True
@@ -41,7 +40,6 @@ class AlarmSoundPlayer:
         self.stop_flag = False
         self.volume = 1.0
         
-        # 初始化pygame mixer
         if PYGAME_AVAILABLE:
             try:
                 pygame.mixer.init()
@@ -52,13 +50,9 @@ class AlarmSoundPlayer:
             self.mixer_ready = False
     
     def load_sound(self, file_path):
-        """加载音频文件"""
         if not os.path.exists(file_path):
             return False
-        
         self.sound_file = file_path
-        
-        # 测试是否能加载
         if PYGAME_AVAILABLE and self.mixer_ready:
             try:
                 pygame.mixer.Sound(file_path)
@@ -69,49 +63,38 @@ class AlarmSoundPlayer:
         return True
     
     def play(self):
-        """播放报警声音（循环）"""
         if not self.sound_file or not os.path.exists(self.sound_file):
             self._play_beep()
             return
-        
         if self.is_playing:
             return
-        
         self.stop_flag = False
         self.is_playing = True
-        
-        # 使用pygame播放
         if PYGAME_AVAILABLE and self.mixer_ready:
             self._play_with_pygame()
         else:
-            # 使用系统Beep作为备选
             self._play_beep()
     
     def _play_with_pygame(self):
-        """使用pygame播放"""
         def play_loop():
             try:
                 sound = pygame.mixer.Sound(self.sound_file)
                 sound.set_volume(self.volume)
                 while not self.stop_flag:
                     sound.play()
-                    # 等待播放完成
                     while pygame.mixer.get_busy() and not self.stop_flag:
                         pygame.time.wait(100)
                     if self.stop_flag:
                         break
-                    # 延迟一点再循环
                     time.sleep(0.1)
             except Exception as e:
                 print(f"播放失败: {e}")
             finally:
                 self.is_playing = False
-        
         self.play_thread = threading.Thread(target=play_loop, daemon=True)
         self.play_thread.start()
     
     def _play_beep(self):
-        """使用系统Beep作为备选"""
         def beep_loop():
             try:
                 while not self.stop_flag:
@@ -125,20 +108,16 @@ class AlarmSoundPlayer:
                 pass
             finally:
                 self.is_playing = False
-        
         self.play_thread = threading.Thread(target=beep_loop, daemon=True)
         self.play_thread.start()
     
     def stop(self):
-        """停止报警声音"""
         self.stop_flag = True
         self.is_playing = False
-        
         if PYGAME_AVAILABLE and self.mixer_ready:
             pygame.mixer.stop()
     
     def set_volume(self, volume):
-        """设置音量 (0.0 - 1.0)"""
         self.volume = max(0.0, min(1.0, volume))
     
     def is_loaded(self):
@@ -146,7 +125,6 @@ class AlarmSoundPlayer:
 
 
 class CoordinatePicker(QWidget):
-    """鼠标坐标拾取器"""
     coord_selected = Signal(int, int)
     
     def __init__(self, parent=None, coord_type="左上角"):
@@ -264,7 +242,6 @@ class CoordinatePicker(QWidget):
 
 
 class AddMonitorRow(QWidget):
-    """添加监控点的行控件"""
     add_completed = Signal(dict)
     cancel = Signal()
     
@@ -322,13 +299,11 @@ class AddMonitorRow(QWidget):
         layout.setSpacing(4)
         layout.setContentsMargins(4, 4, 4, 4)
         
-        # 名称
         self.name_edit = QLineEdit()
         self.name_edit.setPlaceholderText("名称")
         self.name_edit.setFixedWidth(70)
         layout.addWidget(self.name_edit)
         
-        # X坐标
         self.x_edit = QSpinBox()
         self.x_edit.setRange(0, 9999)
         self.x_edit.setValue(100)
@@ -336,7 +311,6 @@ class AddMonitorRow(QWidget):
         layout.addWidget(QLabel("X:"))
         layout.addWidget(self.x_edit)
         
-        # Y坐标
         self.y_edit = QSpinBox()
         self.y_edit.setRange(0, 9999)
         self.y_edit.setValue(100)
@@ -344,7 +318,6 @@ class AddMonitorRow(QWidget):
         layout.addWidget(QLabel("Y:"))
         layout.addWidget(self.y_edit)
         
-        # 宽度
         self.w_edit = QSpinBox()
         self.w_edit.setRange(10, 9999)
         self.w_edit.setValue(150)
@@ -352,7 +325,6 @@ class AddMonitorRow(QWidget):
         layout.addWidget(QLabel("W:"))
         layout.addWidget(self.w_edit)
         
-        # 高度
         self.h_edit = QSpinBox()
         self.h_edit.setRange(10, 9999)
         self.h_edit.setValue(60)
@@ -360,13 +332,11 @@ class AddMonitorRow(QWidget):
         layout.addWidget(QLabel("H:"))
         layout.addWidget(self.h_edit)
         
-        # 拾取按钮
         self.btn_pick = QPushButton("拾取")
         self.btn_pick.setObjectName("btn_pick")
         self.btn_pick.clicked.connect(self.start_pick)
         layout.addWidget(self.btn_pick)
         
-        # 下限
         self.lower_edit = QDoubleSpinBox()
         self.lower_edit.setRange(-99999, 99999)
         self.lower_edit.setValue(0)
@@ -374,7 +344,6 @@ class AddMonitorRow(QWidget):
         layout.addWidget(QLabel("下限:"))
         layout.addWidget(self.lower_edit)
         
-        # 上限
         self.upper_edit = QDoubleSpinBox()
         self.upper_edit.setRange(-99999, 99999)
         self.upper_edit.setValue(100)
@@ -382,7 +351,6 @@ class AddMonitorRow(QWidget):
         layout.addWidget(QLabel("上限:"))
         layout.addWidget(self.upper_edit)
         
-        # 确定/取消
         self.btn_ok = QPushButton("确定")
         self.btn_ok.setObjectName("btn_ok")
         self.btn_ok.clicked.connect(self.confirm_add)
@@ -393,16 +361,13 @@ class AddMonitorRow(QWidget):
         self.btn_cancel.clicked.connect(self.cancel.emit)
         layout.addWidget(self.btn_cancel)
         
-        # 拾取状态
         self.pick_stage = 0
         self.temp_x = 0
         self.temp_y = 0
         self.picker = None
-        
         self.name_edit.setFocus()
     
     def start_pick(self):
-        """开始拾取 - 第一步：左上角"""
         self.pick_stage = 1
         self.btn_pick.setText("左上角...")
         self.btn_pick.setEnabled(False)
@@ -446,7 +411,6 @@ class AddMonitorRow(QWidget):
         self.picker = None
     
     def confirm_add(self):
-        """确认添加"""
         name = self.name_edit.text().strip() or "未命名"
         data = {
             'name': name,
@@ -564,7 +528,6 @@ class MainWindow(QMainWindow):
         self.add_row_widget = None
         self.detect_interval = 500
         
-        # 报警声音播放器
         self.alarm_player = AlarmSoundPlayer()
         self.alarm_file = ""
         self.alarm_playing = False
@@ -583,7 +546,6 @@ class MainWindow(QMainWindow):
         main_layout.setSpacing(10)
         main_layout.setContentsMargins(12, 12, 12, 12)
         
-        # 标题
         title_layout = QHBoxLayout()
         title = QLabel("📊 屏幕数字监控报警系统")
         title_font = QFont()
@@ -597,7 +559,6 @@ class MainWindow(QMainWindow):
         title_layout.addWidget(subtitle)
         main_layout.addLayout(title_layout)
         
-        # 使用提示
         hint_frame = QFrame()
         hint_frame.setObjectName("hint_frame")
         hint_layout = QHBoxLayout(hint_frame)
@@ -607,12 +568,10 @@ class MainWindow(QMainWindow):
         hint_layout.addWidget(hint_label)
         main_layout.addWidget(hint_frame)
         
-        # OCR状态
         self.ocr_status_label = QLabel("OCR引擎: 初始化中...")
         self.ocr_status_label.setStyleSheet("padding: 4px 12px; background-color: #2a2a3a; border-radius: 4px; color: #ddaa44;")
         main_layout.addWidget(self.ocr_status_label)
         
-        # 表格
         self.table = QTableWidget()
         self.table.setColumnCount(7)
         self.table.setHorizontalHeaderLabels([
@@ -631,7 +590,6 @@ class MainWindow(QMainWindow):
         self.table.horizontalHeader().setStretchLastSection(True)
         main_layout.addWidget(self.table)
         
-        # 按钮
         btn_layout = QHBoxLayout()
         btn_layout.setSpacing(8)
         
@@ -702,7 +660,6 @@ class MainWindow(QMainWindow):
         
         main_layout.addLayout(btn_layout)
         
-        # 状态栏
         status_layout = QHBoxLayout()
         self.status_label = QLabel("状态: 就绪")
         self.status_label.setStyleSheet("padding: 6px; background-color: #2a2a3a; border-radius: 4px;")
@@ -736,7 +693,6 @@ class MainWindow(QMainWindow):
             if self.alarm_player.load_sound(file_path):
                 self.alarm_file = file_path
                 self.status_label.setText(f"状态: 已加载报警音频: {os.path.basename(file_path)}")
-                # 测试播放
                 self.alarm_player.play()
                 QTimer.singleShot(500, self.alarm_player.stop)
                 self.save_config()
@@ -760,13 +716,18 @@ class MainWindow(QMainWindow):
         if not self.alarm_sound_on:
             return
         
+        # 窗口置顶
+        self.setWindowFlags(self.windowFlags() | Qt.WindowStaysOnTopHint)
+        self.show()
+        self.raise_()
+        self.activateWindow()
+        
         if self.alarm_player.is_loaded():
             self.alarm_player.play()
             self.alarm_playing = True
             self.alarm_status_label.setText("🔊 报警中... (循环)")
             self.alarm_status_label.setStyleSheet("padding: 6px; background-color: #aa3a3a; border-radius: 4px; color: white;")
         else:
-            # 没有音频文件，使用系统Beep
             self.alarm_player._play_beep()
             self.alarm_playing = True
             self.alarm_status_label.setText("🔊 报警中... (系统提示音)")
@@ -777,20 +738,20 @@ class MainWindow(QMainWindow):
         self.alarm_playing = False
         self.alarm_status_label.setText("🔇 无报警")
         self.alarm_status_label.setStyleSheet("padding: 6px; background-color: #2a2a3a; border-radius: 4px; color: #6a6a7a;")
+        # 取消置顶
+        self.setWindowFlags(self.windowFlags() & ~Qt.WindowStaysOnTopHint)
+        self.show()
     
     def add_monitor_row(self):
         if self.add_row_widget:
             return
-        
         self.btn_add.setEnabled(False)
         row = 0
         self.table.insertRow(row)
         self.table.setRowHeight(row, 50)
-        
         self.add_row_widget = AddMonitorRow(self.table)
         self.add_row_widget.add_completed.connect(self.on_add_completed)
         self.add_row_widget.cancel.connect(self.on_add_canceled)
-        
         self.table.setCellWidget(row, 0, self.add_row_widget)
         self.table.setSpan(row, 0, 1, 7)
         self.table.scrollToTop()
@@ -799,7 +760,6 @@ class MainWindow(QMainWindow):
         self.table.removeRow(0)
         self.add_row_widget = None
         self.btn_add.setEnabled(True)
-        
         row = self.table.rowCount()
         self.table.insertRow(row)
         self.table.setItem(row, 0, QTableWidgetItem(data['name']))
@@ -809,7 +769,6 @@ class MainWindow(QMainWindow):
         self.table.setItem(row, 4, QTableWidgetItem(f"{data['x']},{data['y']},{data['width']},{data['height']}"))
         self.table.setItem(row, 5, QTableWidgetItem("待监控"))
         self.table.setItem(row, 6, QTableWidgetItem("--"))
-        
         self.status_label.setText(f"状态: 已添加 [{data['name']}]")
     
     def on_add_canceled(self):
@@ -825,7 +784,6 @@ class MainWindow(QMainWindow):
             return
         if self.table.cellWidget(row, 0) is not None:
             return
-        
         name = self.table.item(row, 0).text()
         lower = float(self.table.item(row, 2).text())
         upper = float(self.table.item(row, 3).text())
@@ -835,19 +793,15 @@ class MainWindow(QMainWindow):
             x, y, w, h = map(int, nums[:4])
         else:
             x, y, w, h = 100, 100, 150, 60
-        
         if self.add_row_widget:
             return
-        
         self.btn_add.setEnabled(False)
         self.table.removeRow(row)
         self.table.insertRow(row)
         self.table.setRowHeight(row, 50)
-        
         self.add_row_widget = AddMonitorRow(self.table)
         self.add_row_widget.add_completed.connect(lambda data: self.on_edit_completed(row, data))
         self.add_row_widget.cancel.connect(self.on_edit_canceled)
-        
         self.add_row_widget.name_edit.setText(name)
         self.add_row_widget.x_edit.setValue(x)
         self.add_row_widget.y_edit.setValue(y)
@@ -855,7 +809,6 @@ class MainWindow(QMainWindow):
         self.add_row_widget.h_edit.setValue(h)
         self.add_row_widget.lower_edit.setValue(lower)
         self.add_row_widget.upper_edit.setValue(upper)
-        
         self.table.setCellWidget(row, 0, self.add_row_widget)
         self.table.setSpan(row, 0, 1, 7)
     
@@ -863,7 +816,6 @@ class MainWindow(QMainWindow):
         self.table.removeRow(row)
         self.add_row_widget = None
         self.btn_add.setEnabled(True)
-        
         self.table.insertRow(row)
         self.table.setItem(row, 0, QTableWidgetItem(data['name']))
         self.table.setItem(row, 1, QTableWidgetItem("--"))
@@ -891,7 +843,6 @@ class MainWindow(QMainWindow):
             return
         if self.table.cellWidget(row, 0) is not None:
             return
-        
         name = self.table.item(row, 0).text()
         reply = QMessageBox.question(self, "确认删除", f"确定要删除 [{name}] 吗？")
         if reply == QMessageBox.Yes:
@@ -958,9 +909,7 @@ class MainWindow(QMainWindow):
         self.btn_start.setEnabled(True)
         self.btn_stop.setEnabled(False)
         self.status_label.setText("状态: 已停止")
-        
         self.stop_alarm()
-        
         for row in range(self.table.rowCount()):
             if self.table.cellWidget(row, 0) is None:
                 item = self.table.item(row, 5)
@@ -1013,10 +962,8 @@ class MainWindow(QMainWindow):
                 self.table.setItem(row, 5, status_item)
                 self.table.setItem(row, 6, QTableWidgetItem("--"))
                 count += 1
-        
         if count > 0:
             self.stop_alarm()
-        
         self._update_alarm_count()
         if count > 0:
             self.status_label.setText(f"状态: 已消除 {count} 个报警")
@@ -1044,7 +991,6 @@ class MainWindow(QMainWindow):
             'volume': self.volume_slider.value(),
             'interval': self.interval_combo.currentText()
         }
-        
         for row in range(self.table.rowCount()):
             if self.table.cellWidget(row, 0) is not None:
                 continue
@@ -1054,7 +1000,6 @@ class MainWindow(QMainWindow):
                 'upper': float(self.table.item(row, 3).text()),
                 'coords': self.table.item(row, 4).text()
             })
-        
         try:
             with open(self.config_file, 'w', encoding='utf-8') as f:
                 json.dump(config, f, ensure_ascii=False, indent=2)
@@ -1068,7 +1013,6 @@ class MainWindow(QMainWindow):
         try:
             with open(self.config_file, 'r', encoding='utf-8') as f:
                 config = json.load(f)
-            
             self.table.setRowCount(0)
             for item in config.get('monitors', []):
                 row = self.table.rowCount()
@@ -1080,23 +1024,19 @@ class MainWindow(QMainWindow):
                 self.table.setItem(row, 4, QTableWidgetItem(item['coords']))
                 self.table.setItem(row, 5, QTableWidgetItem("待监控"))
                 self.table.setItem(row, 6, QTableWidgetItem("--"))
-            
             alarm_file = config.get('alarm_file', '')
             if alarm_file and os.path.exists(alarm_file):
                 if self.alarm_player.load_sound(alarm_file):
                     self.alarm_file = alarm_file
                     self.status_label.setText("状态: 已加载报警音频")
-            
             volume = config.get('volume', 100)
             self.volume_slider.setValue(volume)
             self.on_volume_changed(volume)
-            
             interval = config.get('interval', '500ms')
             idx = self.interval_combo.findText(interval)
             if idx >= 0:
                 self.interval_combo.setCurrentIndex(idx)
                 self.detect_interval = int(interval.replace("ms", ""))
-            
             self.status_label.setText("状态: 配置已加载")
         except Exception as e:
             print(f"加载失败: {e}")
