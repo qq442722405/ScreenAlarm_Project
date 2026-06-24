@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (
     QDialogButtonBox, QFormLayout, QSpinBox, QDoubleSpinBox, QLineEdit,
     QGroupBox, QGridLayout, QFrame, QSlider, QFileDialog, QComboBox
 )
-from PySide6.QtCore import Qt, QTimer, QThread, Signal, QPoint, QRect, QUrl
+from PySide6.QtCore import Qt, QTimer, QThread, Signal, QPoint
 from PySide6.QtGui import QColor, QBrush, QFont, QPainter, QPen, QPixmap, QImage
 
 from monitor import MonitorThread
@@ -59,7 +59,6 @@ class AlarmSoundPlayer:
         
         if os.path.exists(sound_path):
             self.sound_file = sound_path
-            print(f"✅ 加载报警音频: {sound_path}")
             return
         
         print("⚠️ 未找到 警报声.mp3，将使用系统Beep")
@@ -556,7 +555,7 @@ class MainWindow(QMainWindow):
         title.setFont(title_font)
         title_layout.addWidget(title)
         title_layout.addStretch()
-        subtitle = QLabel("-- 陈诚 (EasyOCR)")
+        subtitle = QLabel("-- 陈诚 (纯Python数字识别)")
         subtitle.setStyleSheet("color: #6a6a7a; font-size: 13px;")
         title_layout.addWidget(subtitle)
         main_layout.addLayout(title_layout)
