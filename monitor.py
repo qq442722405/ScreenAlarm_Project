@@ -3,6 +3,8 @@ import re
 import numpy as np
 import os
 import sys
+import urllib.request
+import zipfile
 from PySide6.QtCore import QThread, Signal
 import cv2
 
@@ -21,6 +23,7 @@ class MonitorThread(QThread):
     alarm_triggered = Signal(int, str, float, float, float)
     status_updated = Signal(int, str)
     ocr_status = Signal(str, bool)
+    download_progress = Signal(int)
     
     def __init__(self, monitors):
         super().__init__()
@@ -31,7 +34,6 @@ class MonitorThread(QThread):
         self.ocr_ready = False
         self.interval_ms = 500
         
-        # 数字识别缓存
         self.value_cache = {}
         self.cache_count = {}
         
@@ -41,51 +43,86 @@ class MonitorThread(QThread):
     def stop(self):
         self.running = False
     
+    def _download_model(self, url, dest_path):
+        """下载模型文件"""
+        try:
+            def report_progress(block_num, block_size, total_size):
+                if total_size > 0:
+                    progress = int(block_num * block_size / total_size * 100)
+                    self.download_progress.emit(min(progress, 100))
+                    if progress % 10 == 0:
+                        self.ocr_status.emit(f"下载中... {progress}%", False)
+            
+            urllib.request.urlretrieve(url, dest_path, report_progress)
+            return True
+        except Exception as e:
+            return False
+    
     def _init_ocr(self):
-        """初始化OCR - 静默加载"""
+        """初始化OCR - 自动下载模型到用户目录"""
         if not OCR_AVAILABLE:
             self.ocr_status.emit("EasyOCR未安装", False)
             return False
         
-        try:
-            # 创建模型目录
-            if not os.path.exists('./ocr_models'):
-                os.makedirs('./ocr_models', exist_ok=True)
+        # 用户数据目录
+        user_data_dir = os.path.join(os.path.expanduser("~"), ".screen_monitor")
+        model_dir = os.path.join(user_data_dir, "ocr_models")
+        
+        if not os.path.exists(model_dir):
+            try:
+                os.makedirs(model_dir, exist_ok=True)
+            except:
+                pass
+        
+        os.environ['EASYOCR_MODULE_PATH'] = model_dir
+        
+        # 检查模型是否存在
+        model_file = os.path.join(model_dir, "english_g2.pth")
+        model_zip = os.path.join(model_dir, "english_g2.zip")
+        
+        if not os.path.exists(model_file):
+            self.ocr_status.emit("首次运行，正在下载OCR模型 (~200MB)...", False)
+            self.download_progress.emit(0)
             
+            url = "https://github.com/JaidedAI/EasyOCR/releases/download/pre-v1.1.6/english_g2.zip"
+            if not self._download_model(url, model_zip):
+                self.ocr_status.emit("模型下载失败，请检查网络后重启", False)
+                return False
+            
+            # 解压
+            try:
+                with zipfile.ZipFile(model_zip, 'r') as zip_ref:
+                    zip_ref.extractall(model_dir)
+                os.remove(model_zip)
+                self.ocr_status.emit("模型解压完成", False)
+            except Exception as e:
+                self.ocr_status.emit(f"解压失败: {str(e)[:30]}", False)
+                return False
+        
+        # 加载模型
+        try:
             import warnings
             warnings.filterwarnings("ignore")
             
-            # 静默加载
-            original_stdout = sys.stdout
-            original_stderr = sys.stderr
-            sys.stdout = open(os.devnull, 'w')
-            sys.stderr = open(os.devnull, 'w')
-            
-            try:
-                self.reader = easyocr.Reader(
-                    ['en'], 
-                    gpu=False,
-                    model_storage_directory='./ocr_models',
-                    recog_network='en',
-                    download_enabled=True,
-                    verbose=False
-                )
-            finally:
-                sys.stdout.close()
-                sys.stderr.close()
-                sys.stdout = original_stdout
-                sys.stderr = original_stderr
+            self.reader = easyocr.Reader(
+                ['en'], 
+                gpu=False,
+                model_storage_directory=model_dir,
+                recog_network='en',
+                download_enabled=False,
+                verbose=False
+            )
             
             if self.reader is not None:
                 self.ocr_ready = True
-                self.ocr_status.emit("就绪", True)
+                self.ocr_status.emit("就绪 ✅", True)
                 return True
             else:
                 self.ocr_status.emit("加载失败", False)
                 return False
                 
         except Exception as e:
-            self.ocr_status.emit("加载失败", False)
+            self.ocr_status.emit(f"加载失败: {str(e)[:30]}", False)
             return False
     
     def _preprocess_image(self, img_np):
@@ -194,7 +231,6 @@ class MonitorThread(QThread):
             best = all_numbers[0]
             best_value = best[0]
             
-            # 优先返回整数
             for value, weight, length in all_numbers:
                 if value % 1 == 0 and length >= best[2]:
                     return value
@@ -206,6 +242,7 @@ class MonitorThread(QThread):
     
     def run(self):
         if not self._init_ocr():
+            self.status_updated.emit(-1, 'OCR加载失败，请检查网络后重启')
             return
         
         status = {}
