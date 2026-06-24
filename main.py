@@ -23,14 +23,9 @@ try:
 except ImportError:
     PYGAME_AVAILABLE = False
 
-try:
-    import winsound
-    WINSOUND_AVAILABLE = True
-except ImportError:
-    WINSOUND_AVAILABLE = False
-
 
 class AlarmSoundPlayer:
+    """报警声音播放器 - 使用包里的 警报声.mp3"""
     def __init__(self):
         self.is_playing = False
         self.sound_file = None
@@ -38,7 +33,7 @@ class AlarmSoundPlayer:
         self.stop_flag = False
         self.volume = 1.0
         
-        self._load_package_sound()
+        self._load_sound()
         
         if PYGAME_AVAILABLE:
             try:
@@ -49,17 +44,25 @@ class AlarmSoundPlayer:
         else:
             self.mixer_ready = False
     
-    def _load_package_sound(self):
-        if getattr(sys, 'frozen', False):
-            base_dir = os.path.dirname(sys.executable)
-        else:
-            base_dir = os.path.dirname(os.path.abspath(__file__))
-        
-        sound_path = os.path.join(base_dir, "警报声.mp3")
+    def _load_sound(self):
+        """加载包里的 警报声.mp3"""
+        # 开发环境：当前目录
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        sound_path = os.path.join(script_dir, "警报声.mp3")
         
         if os.path.exists(sound_path):
             self.sound_file = sound_path
+            print(f"✅ 加载报警音频: {sound_path}")
             return
+        
+        # 打包后：exe同目录
+        if getattr(sys, 'frozen', False):
+            exe_dir = os.path.dirname(sys.executable)
+            sound_path = os.path.join(exe_dir, "警报声.mp3")
+            if os.path.exists(sound_path):
+                self.sound_file = sound_path
+                print(f"✅ 加载报警音频: {sound_path}")
+                return
         
         print("⚠️ 未找到 警报声.mp3，将使用系统Beep")
     
@@ -99,6 +102,7 @@ class AlarmSoundPlayer:
         def beep_loop():
             try:
                 while not self.stop_flag:
+                    import winsound
                     winsound.Beep(800, 200)
                     time.sleep(0.1)
                     if self.stop_flag:
@@ -125,6 +129,7 @@ class AlarmSoundPlayer:
         return self.sound_file is not None and os.path.exists(self.sound_file)
 
 
+# ============ 以下为界面代码（与之前相同） ============
 class CoordinatePicker(QWidget):
     coord_selected = Signal(int, int)
     
@@ -555,7 +560,7 @@ class MainWindow(QMainWindow):
         title.setFont(title_font)
         title_layout.addWidget(title)
         title_layout.addStretch()
-        subtitle = QLabel("-- 陈诚 (纯Python数字识别)")
+        subtitle = QLabel("-- 陈诚 (EasyOCR)")
         subtitle.setStyleSheet("color: #6a6a7a; font-size: 13px;")
         title_layout.addWidget(subtitle)
         main_layout.addLayout(title_layout)
@@ -564,7 +569,7 @@ class MainWindow(QMainWindow):
         hint_frame.setObjectName("hint_frame")
         hint_layout = QHBoxLayout(hint_frame)
         hint_layout.setContentsMargins(8, 4, 8, 4)
-        hint_label = QLabel("💡 点击「拾取」依次点击左上角和右下角，自动计算宽高 | 将 警报声.mp3 放到同目录自动加载")
+        hint_label = QLabel("💡 首次启动自动下载OCR模型 (约200MB)，请确保网络畅通")
         hint_label.setStyleSheet("color: #ddaa44;")
         hint_layout.addWidget(hint_label)
         main_layout.addWidget(hint_frame)
