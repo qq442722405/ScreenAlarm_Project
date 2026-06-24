@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (
     QDialogButtonBox, QFormLayout, QSpinBox, QDoubleSpinBox, QLineEdit,
     QGroupBox, QGridLayout, QFrame
 )
-from PySide6.QtCore import Qt, QTimer, QThread, Signal, QPoint
+from PySide6.QtCore import Qt, QTimer, QThread, Signal, QPoint, QMetaObject, Q_ARG
 from PySide6.QtGui import QColor, QBrush, QFont, QMouseEvent, QPainter, QPen
 
 from monitor import MonitorThread
@@ -24,6 +24,7 @@ class CoordinatePicker(QWidget):
     def __init__(self, parent=None, coord_type="左上角"):
         super().__init__(parent)
         self.coord_type = coord_type
+        self.parent_dialog = parent
         self.setWindowTitle(f"选择{coord_type}")
         self.setWindowFlags(
             Qt.WindowStaysOnTopHint | 
@@ -201,45 +202,43 @@ class AddMonitorDialog(QDialog):
         self.name_edit.setPlaceholderText("例如：温度表")
         layout.addRow("名称:", self.name_edit)
         
-        coord_group = QGroupBox("屏幕区域 (点击拾取按钮获取坐标)")
+        coord_group = QGroupBox("屏幕区域 (格式: X, Y, 宽度, 高度)")
         coord_layout = QGridLayout()
         coord_layout.setSpacing(6)
         
-        # 左上角坐标 (X和Y合并)
-        self.x1_edit = QSpinBox()
-        self.x1_edit.setRange(0, 9999)
-        self.x1_edit.setValue(100)
-        coord_layout.addWidget(QLabel("左上X:"), 0, 0)
-        coord_layout.addWidget(self.x1_edit, 0, 1)
+        # X坐标
+        self.x_edit = QSpinBox()
+        self.x_edit.setRange(0, 9999)
+        self.x_edit.setValue(100)
+        coord_layout.addWidget(QLabel("X:"), 0, 0)
+        coord_layout.addWidget(self.x_edit, 0, 1)
         
-        self.y1_edit = QSpinBox()
-        self.y1_edit.setRange(0, 9999)
-        self.y1_edit.setValue(100)
-        coord_layout.addWidget(QLabel("左上Y:"), 0, 2)
-        coord_layout.addWidget(self.y1_edit, 0, 3)
+        # Y坐标
+        self.y_edit = QSpinBox()
+        self.y_edit.setRange(0, 9999)
+        self.y_edit.setValue(100)
+        coord_layout.addWidget(QLabel("Y:"), 0, 2)
+        coord_layout.addWidget(self.y_edit, 0, 3)
         
-        self.btn_pick_tl = QPushButton("拾取左上角")
-        self.btn_pick_tl.setObjectName("btn_pick")
-        self.btn_pick_tl.clicked.connect(lambda: self.pick_coordinate("左上角", self.x1_edit, self.y1_edit))
-        coord_layout.addWidget(self.btn_pick_tl, 0, 4)
+        # 宽度
+        self.w_edit = QSpinBox()
+        self.w_edit.setRange(10, 9999)
+        self.w_edit.setValue(150)
+        coord_layout.addWidget(QLabel("宽度:"), 1, 0)
+        coord_layout.addWidget(self.w_edit, 1, 1)
         
-        # 右下角坐标 (X和Y合并)
-        self.x2_edit = QSpinBox()
-        self.x2_edit.setRange(0, 9999)
-        self.x2_edit.setValue(250)
-        coord_layout.addWidget(QLabel("右下X:"), 1, 0)
-        coord_layout.addWidget(self.x2_edit, 1, 1)
+        # 高度
+        self.h_edit = QSpinBox()
+        self.h_edit.setRange(10, 9999)
+        self.h_edit.setValue(60)
+        coord_layout.addWidget(QLabel("高度:"), 1, 2)
+        coord_layout.addWidget(self.h_edit, 1, 3)
         
-        self.y2_edit = QSpinBox()
-        self.y2_edit.setRange(0, 9999)
-        self.y2_edit.setValue(160)
-        coord_layout.addWidget(QLabel("右下Y:"), 1, 2)
-        coord_layout.addWidget(self.y2_edit, 1, 3)
-        
-        self.btn_pick_br = QPushButton("拾取右下角")
-        self.btn_pick_br.setObjectName("btn_pick")
-        self.btn_pick_br.clicked.connect(lambda: self.pick_coordinate("右下角", self.x2_edit, self.y2_edit))
-        coord_layout.addWidget(self.btn_pick_br, 1, 4)
+        # 拾取按钮 - 拾取左上角并自动计算宽高
+        self.btn_pick = QPushButton("拾取左上角 + 右下角")
+        self.btn_pick.setObjectName("btn_pick")
+        self.btn_pick.clicked.connect(self.pick_coordinates)
+        coord_layout.addWidget(self.btn_pick, 2, 0, 1, 4)
         
         coord_group.setLayout(coord_layout)
         layout.addRow(coord_group)
@@ -269,37 +268,71 @@ class AddMonitorDialog(QDialog):
         layout.addRow(buttons)
         
         self.picker = None
-        self.pending_x_edit = None
-        self.pending_y_edit = None
+        self.pick_stage = 0  # 0=未开始, 1=已拾取左上角, 2=已完成
+        self.temp_x = 0
+        self.temp_y = 0
     
-    def pick_coordinate(self, coord_name, x_edit, y_edit):
-        """打开坐标拾取器"""
-        self.pending_x_edit = x_edit
-        self.pending_y_edit = y_edit
+    def pick_coordinates(self):
+        """开始拾取坐标 - 先拾取左上角，再拾取右下角"""
+        self.pick_stage = 0
+        self.pick_stage = 1
         self.hide()
-        self.picker = CoordinatePicker(self, coord_name)
-        self.picker.coord_selected.connect(self.on_coord_picked)
+        self.picker = CoordinatePicker(self, "左上角")
+        self.picker.coord_selected.connect(self.on_first_pick)
     
-    def on_coord_picked(self, x, y):
+    def on_first_pick(self, x, y):
+        """拾取左上角完成"""
         if x >= 0 and y >= 0:
-            if self.pending_x_edit:
-                self.pending_x_edit.setValue(x)
-            if self.pending_y_edit:
-                self.pending_y_edit.setValue(y)
+            self.temp_x = x
+            self.temp_y = y
+            self.pick_stage = 2
+            # 立即显示对话框，让用户知道正在等待拾取右下角
+            self.show()
+            self.raise_()
+            self.activateWindow()
+            # 使用定时器延迟打开右下角拾取器，确保对话框完全显示
+            QTimer.singleShot(100, self.pick_bottom_right)
+        else:
+            self.pick_stage = 0
+            self.show()
+            self.raise_()
+            self.activateWindow()
+            self.picker = None
+    
+    def pick_bottom_right(self):
+        """拾取右下角"""
+        if self.pick_stage == 2:
+            self.hide()
+            self.picker = CoordinatePicker(self, "右下角")
+            self.picker.coord_selected.connect(self.on_second_pick)
+    
+    def on_second_pick(self, x, y):
+        """拾取右下角完成"""
+        if x >= 0 and y >= 0 and self.temp_x >= 0 and self.temp_y >= 0:
+            # 计算宽度和高度
+            width = x - self.temp_x
+            height = y - self.temp_y
+            if width > 0 and height > 0:
+                self.x_edit.setValue(self.temp_x)
+                self.y_edit.setValue(self.temp_y)
+                self.w_edit.setValue(width)
+                self.h_edit.setValue(height)
+            else:
+                QMessageBox.warning(self, "提示", "右下角必须在左上角的右下方！")
+        
+        self.pick_stage = 0
         self.show()
         self.raise_()
         self.activateWindow()
         self.picker = None
-        self.pending_x_edit = None
-        self.pending_y_edit = None
     
     def get_data(self):
         return {
             'name': self.name_edit.text().strip() or "未命名",
-            'x1': self.x1_edit.value(),
-            'y1': self.y1_edit.value(),
-            'x2': self.x2_edit.value(),
-            'y2': self.y2_edit.value(),
+            'x': self.x_edit.value(),
+            'y': self.y_edit.value(),
+            'width': self.w_edit.value(),
+            'height': self.h_edit.value(),
             'lower': self.lower_edit.value(),
             'upper': self.upper_edit.value()
         }
@@ -406,7 +439,7 @@ class MainWindow(QMainWindow):
         hint_frame.setObjectName("hint_frame")
         hint_layout = QHBoxLayout(hint_frame)
         hint_layout.setContentsMargins(8, 4, 8, 4)
-        hint_label = QLabel("💡 点击「拾取左上角」和「拾取右下角」获取坐标，然后点击确定")
+        hint_label = QLabel("💡 点击「拾取左上角+右下角」，依次点击两个位置自动计算宽高")
         hint_label.setStyleSheet("color: #ddaa44;")
         hint_layout.addWidget(hint_label)
         main_layout.addWidget(hint_frame)
@@ -420,7 +453,7 @@ class MainWindow(QMainWindow):
         self.table = QTableWidget()
         self.table.setColumnCount(7)
         self.table.setHorizontalHeaderLabels([
-            "名称", "当前值", "下限", "上限", "坐标区域", "状态", "报警时间"
+            "名称", "当前值", "下限", "上限", "坐标 (X,Y,W,H)", "状态", "报警时间"
         ])
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.setAlternatingRowColors(True)
@@ -512,7 +545,7 @@ class MainWindow(QMainWindow):
             self.table.setItem(row, 1, QTableWidgetItem("--"))
             self.table.setItem(row, 2, QTableWidgetItem(str(data['lower'])))
             self.table.setItem(row, 3, QTableWidgetItem(str(data['upper'])))
-            self.table.setItem(row, 4, QTableWidgetItem(f"({data['x1']},{data['y1']})-({data['x2']},{data['y2']})"))
+            self.table.setItem(row, 4, QTableWidgetItem(f"{data['x']},{data['y']},{data['width']},{data['height']}"))
             self.table.setItem(row, 5, QTableWidgetItem("待监控"))
             self.table.setItem(row, 6, QTableWidgetItem("--"))
             self.status_label.setText(f"状态: 已添加 [{data['name']}]")
@@ -529,16 +562,16 @@ class MainWindow(QMainWindow):
         import re
         nums = re.findall(r'\d+', coords)
         if len(nums) >= 4:
-            x1, y1, x2, y2 = map(int, nums[:4])
+            x, y, w, h = map(int, nums[:4])
         else:
-            x1, y1, x2, y2 = 100, 100, 250, 160
+            x, y, w, h = 100, 100, 150, 60
         
         dialog = AddMonitorDialog(self)
         dialog.name_edit.setText(name)
-        dialog.x1_edit.setValue(x1)
-        dialog.y1_edit.setValue(y1)
-        dialog.x2_edit.setValue(x2)
-        dialog.y2_edit.setValue(y2)
+        dialog.x_edit.setValue(x)
+        dialog.y_edit.setValue(y)
+        dialog.w_edit.setValue(w)
+        dialog.h_edit.setValue(h)
         dialog.lower_edit.setValue(lower)
         dialog.upper_edit.setValue(upper)
         if dialog.exec() == QDialog.Accepted:
@@ -546,7 +579,7 @@ class MainWindow(QMainWindow):
             self.table.setItem(row, 0, QTableWidgetItem(data['name']))
             self.table.setItem(row, 2, QTableWidgetItem(str(data['lower'])))
             self.table.setItem(row, 3, QTableWidgetItem(str(data['upper'])))
-            self.table.setItem(row, 4, QTableWidgetItem(f"({data['x1']},{data['y1']})-({data['x2']},{data['y2']})"))
+            self.table.setItem(row, 4, QTableWidgetItem(f"{data['x']},{data['y']},{data['width']},{data['height']}"))
             self.status_label.setText(f"状态: 已编辑 [{data['name']}]")
     
     def delete_monitor_point(self):
@@ -576,13 +609,13 @@ class MainWindow(QMainWindow):
             import re
             nums = re.findall(r'\d+', coords)
             if len(nums) >= 4:
-                x1, y1, x2, y2 = map(int, nums[:4])
+                x, y, w, h = map(int, nums[:4])
             else:
                 continue
             monitors.append({
                 'name': name,
-                'x1': x1, 'y1': y1,
-                'x2': x2, 'y2': y2,
+                'x': x, 'y': y,
+                'width': w, 'height': h,
                 'lower': lower, 'upper': upper,
                 'row': row
             })
