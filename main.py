@@ -149,13 +149,17 @@ class AddMonitorRow(QWidget):
                 background-color: #2a2a3a;
                 border-radius: 4px;
             }
-            QLabel { color: #e0e0e0; }
+            QLabel { 
+                color: #e0e0e0;
+                font-size: 12px;
+            }
             QLineEdit, QSpinBox, QDoubleSpinBox {
                 background-color: #3d3d4d;
                 color: #e0e0e0;
                 border: 1px solid #555;
                 border-radius: 4px;
-                padding: 4px 6px;
+                padding: 2px 4px;
+                font-size: 12px;
             }
             QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus {
                 border-color: #4a9eff;
@@ -165,7 +169,8 @@ class AddMonitorRow(QWidget):
                 color: #e0e0e0;
                 border: none;
                 border-radius: 4px;
-                padding: 4px 12px;
+                padding: 4px 10px;
+                font-size: 12px;
             }
             QPushButton:hover { background-color: #5a5a6a; }
             QPushButton#btn_pick {
@@ -187,20 +192,20 @@ class AddMonitorRow(QWidget):
         """)
         
         layout = QHBoxLayout(self)
-        layout.setSpacing(8)
-        layout.setContentsMargins(8, 6, 8, 6)
+        layout.setSpacing(4)
+        layout.setContentsMargins(4, 4, 4, 4)
         
         # 名称
         self.name_edit = QLineEdit()
         self.name_edit.setPlaceholderText("名称")
-        self.name_edit.setFixedWidth(80)
+        self.name_edit.setFixedWidth(70)
         layout.addWidget(self.name_edit)
         
         # X坐标
         self.x_edit = QSpinBox()
         self.x_edit.setRange(0, 9999)
         self.x_edit.setValue(100)
-        self.x_edit.setFixedWidth(60)
+        self.x_edit.setFixedWidth(50)
         layout.addWidget(QLabel("X:"))
         layout.addWidget(self.x_edit)
         
@@ -208,7 +213,7 @@ class AddMonitorRow(QWidget):
         self.y_edit = QSpinBox()
         self.y_edit.setRange(0, 9999)
         self.y_edit.setValue(100)
-        self.y_edit.setFixedWidth(60)
+        self.y_edit.setFixedWidth(50)
         layout.addWidget(QLabel("Y:"))
         layout.addWidget(self.y_edit)
         
@@ -216,7 +221,7 @@ class AddMonitorRow(QWidget):
         self.w_edit = QSpinBox()
         self.w_edit.setRange(10, 9999)
         self.w_edit.setValue(150)
-        self.w_edit.setFixedWidth(60)
+        self.w_edit.setFixedWidth(50)
         layout.addWidget(QLabel("W:"))
         layout.addWidget(self.w_edit)
         
@@ -224,7 +229,7 @@ class AddMonitorRow(QWidget):
         self.h_edit = QSpinBox()
         self.h_edit.setRange(10, 9999)
         self.h_edit.setValue(60)
-        self.h_edit.setFixedWidth(60)
+        self.h_edit.setFixedWidth(50)
         layout.addWidget(QLabel("H:"))
         layout.addWidget(self.h_edit)
         
@@ -234,16 +239,11 @@ class AddMonitorRow(QWidget):
         self.btn_pick.clicked.connect(self.pick_coordinates)
         layout.addWidget(self.btn_pick)
         
-        # 预览按钮
-        self.btn_preview = QPushButton("预览")
-        self.btn_preview.clicked.connect(self.preview_area)
-        layout.addWidget(self.btn_preview)
-        
         # 下限
         self.lower_edit = QDoubleSpinBox()
         self.lower_edit.setRange(-99999, 99999)
         self.lower_edit.setValue(0)
-        self.lower_edit.setFixedWidth(70)
+        self.lower_edit.setFixedWidth(60)
         layout.addWidget(QLabel("下限:"))
         layout.addWidget(self.lower_edit)
         
@@ -251,7 +251,7 @@ class AddMonitorRow(QWidget):
         self.upper_edit = QDoubleSpinBox()
         self.upper_edit.setRange(-99999, 99999)
         self.upper_edit.setValue(100)
-        self.upper_edit.setFixedWidth(70)
+        self.upper_edit.setFixedWidth(60)
         layout.addWidget(QLabel("上限:"))
         layout.addWidget(self.upper_edit)
         
@@ -272,8 +272,8 @@ class AddMonitorRow(QWidget):
         self.temp_y = 0
         self.picker = None
         
-        # 预览窗口
-        self.preview_window = None
+        # 添加完成后自动聚焦到名称
+        self.name_edit.setFocus()
     
     def pick_coordinates(self):
         """开始拾取坐标"""
@@ -312,8 +312,6 @@ class AddMonitorRow(QWidget):
                 self.y_edit.setValue(self.temp_y)
                 self.w_edit.setValue(width)
                 self.h_edit.setValue(height)
-                # 自动预览
-                self.preview_area()
             else:
                 QMessageBox.warning(self, "提示", "右下角必须在左上角的右下方！")
         
@@ -321,74 +319,6 @@ class AddMonitorRow(QWidget):
         self.btn_pick.setText("拾取区域")
         self.btn_pick.setEnabled(True)
         self.picker = None
-    
-    def preview_area(self):
-        """预览识别区域截图"""
-        try:
-            import mss
-            from PIL import Image
-            import numpy as np
-            
-            x = self.x_edit.value()
-            y = self.y_edit.value()
-            w = self.w_edit.value()
-            h = self.h_edit.value()
-            
-            if w <= 0 or h <= 0:
-                QMessageBox.warning(self, "提示", "宽度和高度必须大于0")
-                return
-            
-            # 截图
-            with mss.mss() as sct:
-                monitor = {"top": y, "left": x, "width": w, "height": h}
-                screenshot = sct.grab(monitor)
-                img = Image.frombytes("RGB", screenshot.size, screenshot.rgb)
-                
-                # 转换为QPixmap
-                img = img.resize((300, int(300 * h / w)), Image.Resampling.LANCZOS)
-                data = img.tobytes("raw", "RGB")
-                qimage = QImage(data, img.width, img.height, QImage.Format_RGB888)
-                pixmap = QPixmap.fromImage(qimage)
-                
-                # 创建预览窗口
-                if self.preview_window is None or not self.preview_window.isVisible():
-                    self.preview_window = QWidget()
-                    self.preview_window.setWindowTitle("识别区域预览")
-                    self.preview_window.setWindowFlags(Qt.WindowStaysOnTopHint)
-                    self.preview_window.setStyleSheet("background-color: #1a1a2a;")
-                    layout = QVBoxLayout(self.preview_window)
-                    
-                    label = QLabel()
-                    label.setPixmap(pixmap)
-                    label.setAlignment(Qt.AlignCenter)
-                    layout.addWidget(label)
-                    
-                    info = QLabel(f"坐标: ({x}, {y})  大小: {w}×{h}")
-                    info.setAlignment(Qt.AlignCenter)
-                    info.setStyleSheet("color: #e0e0e0; padding: 8px;")
-                    layout.addWidget(info)
-                    
-                    close_btn = QPushButton("关闭预览")
-                    close_btn.clicked.connect(self.preview_window.close)
-                    layout.addWidget(close_btn)
-                    
-                    self.preview_window.resize(350, 400)
-                    self.preview_window.show()
-                else:
-                    # 更新已有窗口
-                    layout = self.preview_window.layout()
-                    if layout and layout.count() > 0:
-                        label = layout.itemAt(0).widget()
-                        if label:
-                            label.setPixmap(pixmap)
-                        info = layout.itemAt(1).widget()
-                        if info:
-                            info.setText(f"坐标: ({x}, {y})  大小: {w}×{h}")
-                    self.preview_window.show()
-                    self.preview_window.raise_()
-                    
-        except Exception as e:
-            QMessageBox.warning(self, "错误", f"预览失败: {str(e)}")
     
     def confirm_add(self):
         """确认添加"""
@@ -507,7 +437,7 @@ class MainWindow(QMainWindow):
         hint_frame.setObjectName("hint_frame")
         hint_layout = QHBoxLayout(hint_frame)
         hint_layout.setContentsMargins(8, 4, 8, 4)
-        hint_label = QLabel("💡 点击「拾取区域」依次点击左上角和右下角，自动计算宽高 | 点击「预览」查看识别区域")
+        hint_label = QLabel("💡 点击「拾取区域」依次点击左上角和右下角，自动计算宽高")
         hint_label.setStyleSheet("color: #ddaa44;")
         hint_layout.addWidget(hint_label)
         main_layout.addWidget(hint_frame)
@@ -615,7 +545,7 @@ class MainWindow(QMainWindow):
             item.setBackground(QBrush(QColor(42, 42, 58)))
             self.table.setItem(0, col, item)
         
-        self.table.setRowHeight(0, 70)
+        self.table.setRowHeight(0, 55)
     
     def on_add_completed(self, data):
         """添加完成"""
@@ -693,7 +623,7 @@ class MainWindow(QMainWindow):
             item.setBackground(QBrush(QColor(42, 42, 58)))
             self.table.setItem(row, col, item)
         
-        self.table.setRowHeight(row, 70)
+        self.table.setRowHeight(row, 55)
     
     def on_edit_completed(self, row, data):
         """编辑完成"""
@@ -713,7 +643,11 @@ class MainWindow(QMainWindow):
     
     def on_edit_canceled(self):
         """取消编辑"""
-        self.table.removeRow(self.add_row_widget.parent().currentRow())
+        # 获取当前行
+        for row in range(self.table.rowCount()):
+            if self.table.cellWidget(row, 0) == self.add_row_widget:
+                self.table.removeRow(row)
+                break
         self.add_row_widget = None
         self.btn_add.setEnabled(True)
         self.status_label.setText("状态: 已取消编辑")
