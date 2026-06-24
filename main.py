@@ -3,28 +3,29 @@ import json
 import os
 import winsound
 import time
+import re
 from datetime import datetime
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QTableWidget, QTableWidgetItem, QLabel, QMessageBox,
     QAbstractItemView, QHeaderView, QFileDialog, QDialog,
     QDialogButtonBox, QFormLayout, QSpinBox, QDoubleSpinBox, QLineEdit,
-    QGroupBox, QGridLayout, QFrame
+    QGroupBox, QGridLayout, QFrame, QScrollArea
 )
-from PySide6.QtCore import Qt, QTimer, QThread, Signal, QPoint, QMetaObject, Q_ARG
-from PySide6.QtGui import QColor, QBrush, QFont, QMouseEvent, QPainter, QPen
+from PySide6.QtCore import Qt, QTimer, QThread, Signal, QPoint, QRect
+from PySide6.QtGui import QColor, QBrush, QFont, QPainter, QPen, QPixmap, QImage
 
 from monitor import MonitorThread
 
 
 class CoordinatePicker(QWidget):
     """鼠标坐标拾取器 - 全屏透明窗口显示鼠标坐标"""
-    coord_selected = Signal(int, int)  # x, y
+    coord_selected = Signal(int, int)
     
     def __init__(self, parent=None, coord_type="左上角"):
         super().__init__(parent)
         self.coord_type = coord_type
-        self.parent_dialog = parent
+        self.parent_widget = parent
         self.setWindowTitle(f"选择{coord_type}")
         self.setWindowFlags(
             Qt.WindowStaysOnTopHint | 
@@ -35,7 +36,6 @@ class CoordinatePicker(QWidget):
         self.setAttribute(Qt.WA_NoSystemBackground)
         self.setMouseTracking(True)
         
-        # 获取屏幕尺寸
         from PySide6.QtWidgets import QApplication
         screens = QApplication.screens()
         total_rect = self.geometry()
@@ -47,10 +47,8 @@ class CoordinatePicker(QWidget):
         self.raise_()
         self.activateWindow()
         
-        # 当前鼠标位置
         self.current_pos = QPoint(0, 0)
         
-        # 提示标签
         self.label = QLabel(f"🖱 移动鼠标到{coord_type}位置，点击确认 | 按 ESC 取消", self)
         self.label.setAlignment(Qt.AlignCenter)
         self.label.setStyleSheet("""
@@ -70,7 +68,6 @@ class CoordinatePicker(QWidget):
             self.height() - self.label.height() - 60
         )
         
-        # 坐标显示
         self.coord_label = QLabel("X: 0  Y: 0", self)
         self.coord_label.setAlignment(Qt.AlignCenter)
         self.coord_label.setStyleSheet("""
@@ -90,28 +87,22 @@ class CoordinatePicker(QWidget):
             60
         )
         
-        # 设置鼠标追踪
         self.setMouseTracking(True)
         self.setFocus(Qt.OtherFocusReason)
     
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
-        
-        # 半透明背景
         painter.fillRect(self.rect(), QColor(0, 0, 0, 100))
         
-        # 绘制十字线
         painter.setPen(QPen(QColor(255, 255, 255, 80), 1, Qt.DashLine))
         painter.drawLine(self.current_pos.x(), 0, self.current_pos.x(), self.height())
         painter.drawLine(0, self.current_pos.y(), self.width(), self.current_pos.y())
         
-        # 绘制坐标圆点
         painter.setPen(QPen(QColor(255, 50, 50), 2))
         painter.setBrush(QBrush(QColor(255, 0, 0, 80)))
         painter.drawEllipse(self.current_pos, 6, 6)
         
-        # 显示坐标数字
         painter.setPen(QColor(255, 255, 255, 200))
         painter.setFont(QFont("Arial", 12))
         painter.drawText(
@@ -145,171 +136,175 @@ class CoordinatePicker(QWidget):
         event.accept()
 
 
-class AddMonitorDialog(QDialog):
+class AddMonitorRow(QWidget):
+    """添加监控点的行控件"""
+    add_completed = Signal(dict)
+    cancel = Signal()
+    
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("添加监控点")
-        self.setModal(True)
-        self.setMinimumWidth(450)
+        self.parent_table = parent
         self.setStyleSheet("""
-            QDialog { background-color: #2d2d3d; }
+            QWidget {
+                background-color: #2a2a3a;
+                border-radius: 4px;
+            }
             QLabel { color: #e0e0e0; }
             QLineEdit, QSpinBox, QDoubleSpinBox {
                 background-color: #3d3d4d;
                 color: #e0e0e0;
                 border: 1px solid #555;
                 border-radius: 4px;
-                padding: 6px;
+                padding: 4px 6px;
             }
             QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus {
                 border-color: #4a9eff;
             }
-            QGroupBox {
-                color: #e0e0e0;
-                border: 1px solid #555;
-                border-radius: 6px;
-                margin-top: 10px;
-                padding-top: 10px;
-            }
-            QGroupBox::title { left: 10px; padding: 0 6px; }
             QPushButton {
                 background-color: #4a4a5a;
                 color: #e0e0e0;
                 border: none;
                 border-radius: 4px;
-                padding: 8px 16px;
+                padding: 4px 12px;
             }
             QPushButton:hover { background-color: #5a5a6a; }
-            QPushButton[text="确定"] {
-                background-color: #4a9eff;
-                color: #1a1a2a;
-            }
-            QPushButton[text="确定"]:hover { background-color: #3a8eef; }
-            QPushButton[text="取消"]:hover { background-color: #5a5a6a; }
             QPushButton#btn_pick {
                 background-color: #4a9eff;
                 color: #1a1a2a;
                 font-weight: bold;
-                padding: 4px 12px;
             }
             QPushButton#btn_pick:hover { background-color: #3a8eef; }
+            QPushButton#btn_ok {
+                background-color: #2a8a4a;
+                color: white;
+            }
+            QPushButton#btn_ok:hover { background-color: #3a9a5a; }
+            QPushButton#btn_cancel {
+                background-color: #aa3a3a;
+                color: white;
+            }
+            QPushButton#btn_cancel:hover { background-color: #bb4a4a; }
         """)
         
-        layout = QFormLayout(self)
-        layout.setSpacing(10)
+        layout = QHBoxLayout(self)
+        layout.setSpacing(8)
+        layout.setContentsMargins(8, 6, 8, 6)
         
+        # 名称
         self.name_edit = QLineEdit()
-        self.name_edit.setPlaceholderText("例如：温度表")
-        layout.addRow("名称:", self.name_edit)
-        
-        coord_group = QGroupBox("屏幕区域 (格式: X, Y, 宽度, 高度)")
-        coord_layout = QGridLayout()
-        coord_layout.setSpacing(6)
+        self.name_edit.setPlaceholderText("名称")
+        self.name_edit.setFixedWidth(80)
+        layout.addWidget(self.name_edit)
         
         # X坐标
         self.x_edit = QSpinBox()
         self.x_edit.setRange(0, 9999)
         self.x_edit.setValue(100)
-        coord_layout.addWidget(QLabel("X:"), 0, 0)
-        coord_layout.addWidget(self.x_edit, 0, 1)
+        self.x_edit.setFixedWidth(60)
+        layout.addWidget(QLabel("X:"))
+        layout.addWidget(self.x_edit)
         
         # Y坐标
         self.y_edit = QSpinBox()
         self.y_edit.setRange(0, 9999)
         self.y_edit.setValue(100)
-        coord_layout.addWidget(QLabel("Y:"), 0, 2)
-        coord_layout.addWidget(self.y_edit, 0, 3)
+        self.y_edit.setFixedWidth(60)
+        layout.addWidget(QLabel("Y:"))
+        layout.addWidget(self.y_edit)
         
         # 宽度
         self.w_edit = QSpinBox()
         self.w_edit.setRange(10, 9999)
         self.w_edit.setValue(150)
-        coord_layout.addWidget(QLabel("宽度:"), 1, 0)
-        coord_layout.addWidget(self.w_edit, 1, 1)
+        self.w_edit.setFixedWidth(60)
+        layout.addWidget(QLabel("W:"))
+        layout.addWidget(self.w_edit)
         
         # 高度
         self.h_edit = QSpinBox()
         self.h_edit.setRange(10, 9999)
         self.h_edit.setValue(60)
-        coord_layout.addWidget(QLabel("高度:"), 1, 2)
-        coord_layout.addWidget(self.h_edit, 1, 3)
+        self.h_edit.setFixedWidth(60)
+        layout.addWidget(QLabel("H:"))
+        layout.addWidget(self.h_edit)
         
-        # 拾取按钮 - 拾取左上角并自动计算宽高
-        self.btn_pick = QPushButton("拾取左上角 + 右下角")
+        # 拾取按钮
+        self.btn_pick = QPushButton("拾取区域")
         self.btn_pick.setObjectName("btn_pick")
         self.btn_pick.clicked.connect(self.pick_coordinates)
-        coord_layout.addWidget(self.btn_pick, 2, 0, 1, 4)
+        layout.addWidget(self.btn_pick)
         
-        coord_group.setLayout(coord_layout)
-        layout.addRow(coord_group)
+        # 预览按钮
+        self.btn_preview = QPushButton("预览")
+        self.btn_preview.clicked.connect(self.preview_area)
+        layout.addWidget(self.btn_preview)
         
-        threshold_group = QGroupBox("报警阈值")
-        threshold_layout = QGridLayout()
-        threshold_layout.setSpacing(6)
-        
+        # 下限
         self.lower_edit = QDoubleSpinBox()
         self.lower_edit.setRange(-99999, 99999)
         self.lower_edit.setValue(0)
-        threshold_layout.addWidget(QLabel("下限:"), 0, 0)
-        threshold_layout.addWidget(self.lower_edit, 0, 1)
+        self.lower_edit.setFixedWidth(70)
+        layout.addWidget(QLabel("下限:"))
+        layout.addWidget(self.lower_edit)
         
+        # 上限
         self.upper_edit = QDoubleSpinBox()
         self.upper_edit.setRange(-99999, 99999)
         self.upper_edit.setValue(100)
-        threshold_layout.addWidget(QLabel("上限:"), 0, 2)
-        threshold_layout.addWidget(self.upper_edit, 0, 3)
+        self.upper_edit.setFixedWidth(70)
+        layout.addWidget(QLabel("上限:"))
+        layout.addWidget(self.upper_edit)
         
-        threshold_group.setLayout(threshold_layout)
-        layout.addRow(threshold_group)
+        # 确定/取消
+        self.btn_ok = QPushButton("确定")
+        self.btn_ok.setObjectName("btn_ok")
+        self.btn_ok.clicked.connect(self.confirm_add)
+        layout.addWidget(self.btn_ok)
         
-        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        buttons.accepted.connect(self.accept)
-        buttons.rejected.connect(self.reject)
-        layout.addRow(buttons)
+        self.btn_cancel = QPushButton("取消")
+        self.btn_cancel.setObjectName("btn_cancel")
+        self.btn_cancel.clicked.connect(self.cancel.emit)
+        layout.addWidget(self.btn_cancel)
         
-        self.picker = None
-        self.pick_stage = 0  # 0=未开始, 1=已拾取左上角, 2=已完成
+        # 拾取状态
+        self.pick_stage = 0
         self.temp_x = 0
         self.temp_y = 0
+        self.picker = None
+        
+        # 预览窗口
+        self.preview_window = None
     
     def pick_coordinates(self):
-        """开始拾取坐标 - 先拾取左上角，再拾取右下角"""
-        self.pick_stage = 0
+        """开始拾取坐标"""
         self.pick_stage = 1
-        self.hide()
+        self.btn_pick.setText("拾取左上角...")
+        self.btn_pick.setEnabled(False)
         self.picker = CoordinatePicker(self, "左上角")
         self.picker.coord_selected.connect(self.on_first_pick)
     
     def on_first_pick(self, x, y):
-        """拾取左上角完成"""
         if x >= 0 and y >= 0:
             self.temp_x = x
             self.temp_y = y
             self.pick_stage = 2
-            # 立即显示对话框，让用户知道正在等待拾取右下角
-            self.show()
-            self.raise_()
-            self.activateWindow()
-            # 使用定时器延迟打开右下角拾取器，确保对话框完全显示
-            QTimer.singleShot(100, self.pick_bottom_right)
+            self.btn_pick.setText("拾取右下角...")
+            self.btn_pick.setEnabled(True)
+            # 延迟打开右下角拾取器
+            QTimer.singleShot(200, self.pick_bottom_right)
         else:
             self.pick_stage = 0
-            self.show()
-            self.raise_()
-            self.activateWindow()
+            self.btn_pick.setText("拾取区域")
+            self.btn_pick.setEnabled(True)
             self.picker = None
     
     def pick_bottom_right(self):
-        """拾取右下角"""
         if self.pick_stage == 2:
-            self.hide()
             self.picker = CoordinatePicker(self, "右下角")
             self.picker.coord_selected.connect(self.on_second_pick)
     
     def on_second_pick(self, x, y):
-        """拾取右下角完成"""
         if x >= 0 and y >= 0 and self.temp_x >= 0 and self.temp_y >= 0:
-            # 计算宽度和高度
             width = x - self.temp_x
             height = y - self.temp_y
             if width > 0 and height > 0:
@@ -317,18 +312,89 @@ class AddMonitorDialog(QDialog):
                 self.y_edit.setValue(self.temp_y)
                 self.w_edit.setValue(width)
                 self.h_edit.setValue(height)
+                # 自动预览
+                self.preview_area()
             else:
                 QMessageBox.warning(self, "提示", "右下角必须在左上角的右下方！")
         
         self.pick_stage = 0
-        self.show()
-        self.raise_()
-        self.activateWindow()
+        self.btn_pick.setText("拾取区域")
+        self.btn_pick.setEnabled(True)
         self.picker = None
     
-    def get_data(self):
-        return {
-            'name': self.name_edit.text().strip() or "未命名",
+    def preview_area(self):
+        """预览识别区域截图"""
+        try:
+            import mss
+            from PIL import Image
+            import numpy as np
+            
+            x = self.x_edit.value()
+            y = self.y_edit.value()
+            w = self.w_edit.value()
+            h = self.h_edit.value()
+            
+            if w <= 0 or h <= 0:
+                QMessageBox.warning(self, "提示", "宽度和高度必须大于0")
+                return
+            
+            # 截图
+            with mss.mss() as sct:
+                monitor = {"top": y, "left": x, "width": w, "height": h}
+                screenshot = sct.grab(monitor)
+                img = Image.frombytes("RGB", screenshot.size, screenshot.rgb)
+                
+                # 转换为QPixmap
+                img = img.resize((300, int(300 * h / w)), Image.Resampling.LANCZOS)
+                data = img.tobytes("raw", "RGB")
+                qimage = QImage(data, img.width, img.height, QImage.Format_RGB888)
+                pixmap = QPixmap.fromImage(qimage)
+                
+                # 创建预览窗口
+                if self.preview_window is None or not self.preview_window.isVisible():
+                    self.preview_window = QWidget()
+                    self.preview_window.setWindowTitle("识别区域预览")
+                    self.preview_window.setWindowFlags(Qt.WindowStaysOnTopHint)
+                    self.preview_window.setStyleSheet("background-color: #1a1a2a;")
+                    layout = QVBoxLayout(self.preview_window)
+                    
+                    label = QLabel()
+                    label.setPixmap(pixmap)
+                    label.setAlignment(Qt.AlignCenter)
+                    layout.addWidget(label)
+                    
+                    info = QLabel(f"坐标: ({x}, {y})  大小: {w}×{h}")
+                    info.setAlignment(Qt.AlignCenter)
+                    info.setStyleSheet("color: #e0e0e0; padding: 8px;")
+                    layout.addWidget(info)
+                    
+                    close_btn = QPushButton("关闭预览")
+                    close_btn.clicked.connect(self.preview_window.close)
+                    layout.addWidget(close_btn)
+                    
+                    self.preview_window.resize(350, 400)
+                    self.preview_window.show()
+                else:
+                    # 更新已有窗口
+                    layout = self.preview_window.layout()
+                    if layout and layout.count() > 0:
+                        label = layout.itemAt(0).widget()
+                        if label:
+                            label.setPixmap(pixmap)
+                        info = layout.itemAt(1).widget()
+                        if info:
+                            info.setText(f"坐标: ({x}, {y})  大小: {w}×{h}")
+                    self.preview_window.show()
+                    self.preview_window.raise_()
+                    
+        except Exception as e:
+            QMessageBox.warning(self, "错误", f"预览失败: {str(e)}")
+    
+    def confirm_add(self):
+        """确认添加"""
+        name = self.name_edit.text().strip() or "未命名"
+        data = {
+            'name': name,
             'x': self.x_edit.value(),
             'y': self.y_edit.value(),
             'width': self.w_edit.value(),
@@ -336,13 +402,14 @@ class AddMonitorDialog(QDialog):
             'lower': self.lower_edit.value(),
             'upper': self.upper_edit.value()
         }
+        self.add_completed.emit(data)
 
 
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("屏幕数字监控报警系统")
-        self.resize(1100, 700)
+        self.resize(1200, 750)
         
         self.setStyleSheet("""
             QMainWindow { background-color: #1a1a2a; }
@@ -405,6 +472,7 @@ class MainWindow(QMainWindow):
         self.config_file = "monitor_config.json"
         self.alarm_logs = []
         self.alarm_sound_on = True
+        self.add_row_widget = None
         
         self._setup_ui()
         self.load_config()
@@ -439,7 +507,7 @@ class MainWindow(QMainWindow):
         hint_frame.setObjectName("hint_frame")
         hint_layout = QHBoxLayout(hint_frame)
         hint_layout.setContentsMargins(8, 4, 8, 4)
-        hint_label = QLabel("💡 点击「拾取左上角+右下角」，依次点击两个位置自动计算宽高")
+        hint_label = QLabel("💡 点击「拾取区域」依次点击左上角和右下角，自动计算宽高 | 点击「预览」查看识别区域")
         hint_label.setStyleSheet("color: #ddaa44;")
         hint_layout.addWidget(hint_label)
         main_layout.addWidget(hint_frame)
@@ -466,7 +534,7 @@ class MainWindow(QMainWindow):
         btn_layout.setSpacing(8)
         
         self.btn_add = QPushButton("添加监控点")
-        self.btn_add.clicked.connect(self.add_monitor_point)
+        self.btn_add.clicked.connect(self.add_monitor_row)
         btn_layout.addWidget(self.btn_add)
         
         self.btn_edit = QPushButton("编辑")
@@ -524,6 +592,147 @@ class MainWindow(QMainWindow):
         
         main_layout.addLayout(status_layout)
     
+    def add_monitor_row(self):
+        """在表格顶部添加一行输入控件"""
+        if self.add_row_widget:
+            return
+        
+        self.btn_add.setEnabled(False)
+        
+        # 插入一行
+        self.table.insertRow(0)
+        
+        # 创建控件并放入第一行
+        self.add_row_widget = AddMonitorRow(self.table)
+        self.add_row_widget.add_completed.connect(self.on_add_completed)
+        self.add_row_widget.cancel.connect(self.on_add_canceled)
+        
+        self.table.setCellWidget(0, 0, self.add_row_widget)
+        # 其他列合并
+        for col in range(1, 7):
+            self.table.setSpan(0, col, 1, 1)
+            item = QTableWidgetItem("")
+            item.setBackground(QBrush(QColor(42, 42, 58)))
+            self.table.setItem(0, col, item)
+        
+        self.table.setRowHeight(0, 70)
+    
+    def on_add_completed(self, data):
+        """添加完成"""
+        # 移除编辑行
+        self.table.removeRow(0)
+        self.add_row_widget = None
+        self.btn_add.setEnabled(True)
+        
+        # 添加到表格
+        row = self.table.rowCount()
+        self.table.insertRow(row)
+        self.table.setItem(row, 0, QTableWidgetItem(data['name']))
+        self.table.setItem(row, 1, QTableWidgetItem("--"))
+        self.table.setItem(row, 2, QTableWidgetItem(str(data['lower'])))
+        self.table.setItem(row, 3, QTableWidgetItem(str(data['upper'])))
+        self.table.setItem(row, 4, QTableWidgetItem(f"{data['x']},{data['y']},{data['width']},{data['height']}"))
+        self.table.setItem(row, 5, QTableWidgetItem("待监控"))
+        self.table.setItem(row, 6, QTableWidgetItem("--"))
+        
+        self.status_label.setText(f"状态: 已添加 [{data['name']}]")
+    
+    def on_add_canceled(self):
+        """取消添加"""
+        self.table.removeRow(0)
+        self.add_row_widget = None
+        self.btn_add.setEnabled(True)
+        self.status_label.setText("状态: 已取消添加")
+    
+    def edit_monitor_point(self):
+        row = self.table.currentRow()
+        if row < 0:
+            QMessageBox.warning(self, "提示", "请先选择一行")
+            return
+        
+        # 检查是否是添加行
+        if self.table.cellWidget(row, 0) is not None:
+            return
+        
+        name = self.table.item(row, 0).text()
+        lower = float(self.table.item(row, 2).text())
+        upper = float(self.table.item(row, 3).text())
+        coords = self.table.item(row, 4).text()
+        nums = re.findall(r'\d+', coords)
+        if len(nums) >= 4:
+            x, y, w, h = map(int, nums[:4])
+        else:
+            x, y, w, h = 100, 100, 150, 60
+        
+        # 创建编辑行
+        if self.add_row_widget:
+            return
+        
+        self.btn_add.setEnabled(False)
+        self.table.insertRow(row)
+        
+        self.add_row_widget = AddMonitorRow(self.table)
+        self.add_row_widget.add_completed.connect(lambda data: self.on_edit_completed(row, data))
+        self.add_row_widget.cancel.connect(self.on_edit_canceled)
+        
+        # 填充数据
+        self.add_row_widget.name_edit.setText(name)
+        self.add_row_widget.x_edit.setValue(x)
+        self.add_row_widget.y_edit.setValue(y)
+        self.add_row_widget.w_edit.setValue(w)
+        self.add_row_widget.h_edit.setValue(h)
+        self.add_row_widget.lower_edit.setValue(lower)
+        self.add_row_widget.upper_edit.setValue(upper)
+        
+        # 移除原行
+        self.table.removeRow(row + 1)
+        self.table.setCellWidget(row, 0, self.add_row_widget)
+        for col in range(1, 7):
+            self.table.setSpan(row, col, 1, 1)
+            item = QTableWidgetItem("")
+            item.setBackground(QBrush(QColor(42, 42, 58)))
+            self.table.setItem(row, col, item)
+        
+        self.table.setRowHeight(row, 70)
+    
+    def on_edit_completed(self, row, data):
+        """编辑完成"""
+        self.table.removeRow(row)
+        self.add_row_widget = None
+        self.btn_add.setEnabled(True)
+        
+        self.table.insertRow(row)
+        self.table.setItem(row, 0, QTableWidgetItem(data['name']))
+        self.table.setItem(row, 1, QTableWidgetItem("--"))
+        self.table.setItem(row, 2, QTableWidgetItem(str(data['lower'])))
+        self.table.setItem(row, 3, QTableWidgetItem(str(data['upper'])))
+        self.table.setItem(row, 4, QTableWidgetItem(f"{data['x']},{data['y']},{data['width']},{data['height']}"))
+        self.table.setItem(row, 5, QTableWidgetItem("待监控"))
+        self.table.setItem(row, 6, QTableWidgetItem("--"))
+        self.status_label.setText(f"状态: 已编辑 [{data['name']}]")
+    
+    def on_edit_canceled(self):
+        """取消编辑"""
+        self.table.removeRow(self.add_row_widget.parent().currentRow())
+        self.add_row_widget = None
+        self.btn_add.setEnabled(True)
+        self.status_label.setText("状态: 已取消编辑")
+        self.load_config()  # 重新加载恢复数据
+    
+    def delete_monitor_point(self):
+        row = self.table.currentRow()
+        if row < 0:
+            QMessageBox.warning(self, "提示", "请先选择一行")
+            return
+        if self.table.cellWidget(row, 0) is not None:
+            return
+        
+        name = self.table.item(row, 0).text()
+        reply = QMessageBox.question(self, "确认删除", f"确定要删除 [{name}] 吗？")
+        if reply == QMessageBox.Yes:
+            self.table.removeRow(row)
+            self.status_label.setText("状态: 已删除")
+    
     def toggle_sound(self):
         self.alarm_sound_on = not self.alarm_sound_on
         self.btn_sound.setText("🔊 声音开启" if self.alarm_sound_on else "🔇 声音关闭")
@@ -535,64 +744,6 @@ class MainWindow(QMainWindow):
         )
         self.ocr_status_label.setText(f"OCR引擎: {status}")
     
-    def add_monitor_point(self):
-        dialog = AddMonitorDialog(self)
-        if dialog.exec() == QDialog.Accepted:
-            data = dialog.get_data()
-            row = self.table.rowCount()
-            self.table.insertRow(row)
-            self.table.setItem(row, 0, QTableWidgetItem(data['name']))
-            self.table.setItem(row, 1, QTableWidgetItem("--"))
-            self.table.setItem(row, 2, QTableWidgetItem(str(data['lower'])))
-            self.table.setItem(row, 3, QTableWidgetItem(str(data['upper'])))
-            self.table.setItem(row, 4, QTableWidgetItem(f"{data['x']},{data['y']},{data['width']},{data['height']}"))
-            self.table.setItem(row, 5, QTableWidgetItem("待监控"))
-            self.table.setItem(row, 6, QTableWidgetItem("--"))
-            self.status_label.setText(f"状态: 已添加 [{data['name']}]")
-    
-    def edit_monitor_point(self):
-        row = self.table.currentRow()
-        if row < 0:
-            QMessageBox.warning(self, "提示", "请先选择一行")
-            return
-        name = self.table.item(row, 0).text()
-        lower = float(self.table.item(row, 2).text())
-        upper = float(self.table.item(row, 3).text())
-        coords = self.table.item(row, 4).text()
-        import re
-        nums = re.findall(r'\d+', coords)
-        if len(nums) >= 4:
-            x, y, w, h = map(int, nums[:4])
-        else:
-            x, y, w, h = 100, 100, 150, 60
-        
-        dialog = AddMonitorDialog(self)
-        dialog.name_edit.setText(name)
-        dialog.x_edit.setValue(x)
-        dialog.y_edit.setValue(y)
-        dialog.w_edit.setValue(w)
-        dialog.h_edit.setValue(h)
-        dialog.lower_edit.setValue(lower)
-        dialog.upper_edit.setValue(upper)
-        if dialog.exec() == QDialog.Accepted:
-            data = dialog.get_data()
-            self.table.setItem(row, 0, QTableWidgetItem(data['name']))
-            self.table.setItem(row, 2, QTableWidgetItem(str(data['lower'])))
-            self.table.setItem(row, 3, QTableWidgetItem(str(data['upper'])))
-            self.table.setItem(row, 4, QTableWidgetItem(f"{data['x']},{data['y']},{data['width']},{data['height']}"))
-            self.status_label.setText(f"状态: 已编辑 [{data['name']}]")
-    
-    def delete_monitor_point(self):
-        row = self.table.currentRow()
-        if row < 0:
-            QMessageBox.warning(self, "提示", "请先选择一行")
-            return
-        name = self.table.item(row, 0).text()
-        reply = QMessageBox.question(self, "确认删除", f"确定要删除 [{name}] 吗？")
-        if reply == QMessageBox.Yes:
-            self.table.removeRow(row)
-            self.status_label.setText("状态: 已删除")
-    
     def start_monitor(self):
         if self.monitoring:
             return
@@ -602,11 +753,13 @@ class MainWindow(QMainWindow):
         
         monitors = []
         for row in range(self.table.rowCount()):
+            # 跳过编辑行
+            if self.table.cellWidget(row, 0) is not None:
+                continue
             name = self.table.item(row, 0).text()
             lower = float(self.table.item(row, 2).text())
             upper = float(self.table.item(row, 3).text())
             coords = self.table.item(row, 4).text()
-            import re
             nums = re.findall(r'\d+', coords)
             if len(nums) >= 4:
                 x, y, w, h = map(int, nums[:4])
@@ -619,6 +772,10 @@ class MainWindow(QMainWindow):
                 'lower': lower, 'upper': upper,
                 'row': row
             })
+        
+        if not monitors:
+            QMessageBox.warning(self, "提示", "没有有效的监控点")
+            return
         
         self.monitor_thread = MonitorThread(monitors)
         self.monitor_thread.value_updated.connect(self.on_value_updated)
@@ -641,9 +798,10 @@ class MainWindow(QMainWindow):
         self.btn_stop.setEnabled(False)
         self.status_label.setText("状态: 已停止")
         for row in range(self.table.rowCount()):
-            item = self.table.item(row, 5)
-            if item and "报警" not in item.text():
-                self.table.setItem(row, 5, QTableWidgetItem("已停止"))
+            if self.table.cellWidget(row, 0) is None:
+                item = self.table.item(row, 5)
+                if item and "报警" not in item.text():
+                    self.table.setItem(row, 5, QTableWidgetItem("已停止"))
     
     def on_value_updated(self, row, value):
         self.table.setItem(row, 1, QTableWidgetItem(f"{value:.2f}"))
@@ -660,7 +818,6 @@ class MainWindow(QMainWindow):
         self._update_alarm_count()
         self.status_label.setText(f"报警: {name} = {value:.2f} [范围: {lower}-{upper}]")
         
-        # 报警声音 - 警报声
         if self.alarm_sound_on:
             self.play_alarm_sound()
         
@@ -668,9 +825,7 @@ class MainWindow(QMainWindow):
             f.write(f"[{now}] 报警: {name} = {value:.2f} 超出范围 [{lower}, {upper}]\n")
     
     def play_alarm_sound(self):
-        """播放警报声音"""
         try:
-            # 警报声：高频脉冲音
             for _ in range(3):
                 winsound.Beep(1200, 150)
                 time.sleep(0.05)
@@ -695,6 +850,8 @@ class MainWindow(QMainWindow):
     def clear_all_alarms(self):
         count = 0
         for row in range(self.table.rowCount()):
+            if self.table.cellWidget(row, 0) is not None:
+                continue
             item = self.table.item(row, 5)
             if item and item.text() == "报警":
                 status_item = QTableWidgetItem("正常")
@@ -712,6 +869,8 @@ class MainWindow(QMainWindow):
     def _update_alarm_count(self):
         count = 0
         for row in range(self.table.rowCount()):
+            if self.table.cellWidget(row, 0) is not None:
+                continue
             item = self.table.item(row, 5)
             if item and item.text() == "报警":
                 count += 1
@@ -724,6 +883,8 @@ class MainWindow(QMainWindow):
     def save_config(self):
         config = []
         for row in range(self.table.rowCount()):
+            if self.table.cellWidget(row, 0) is not None:
+                continue
             config.append({
                 'name': self.table.item(row, 0).text(),
                 'lower': float(self.table.item(row, 2).text()),
