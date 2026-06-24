@@ -1,187 +1,568 @@
 import sys
+import json
+import os
+from datetime import datetime
 from PySide6.QtWidgets import (
-    QApplication, QMainWindow, QWidget,
-    QVBoxLayout, QPushButton, QLabel,
-    QTableWidget, QTableWidgetItem,
-    QInputDialog, QTextEdit, QMessageBox
+    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+    QPushButton, QTableWidget, QTableWidgetItem, QLabel, QMessageBox,
+    QAbstractItemView, QHeaderView, QFileDialog, QDialog,
+    QDialogButtonBox, QFormLayout, QSpinBox, QDoubleSpinBox, QLineEdit,
+    QGroupBox, QGridLayout, QSystemTrayIcon, QMenu
 )
+from PySide6.QtCore import Qt, QTimer, QThread, Signal
+from PySide6.QtGui import QColor, QBrush, QFont, QIcon, QAction
 
-from monitor import Monitor
+from monitor import MonitorThread
+from selector import ScreenSelector
+
+
+class AddMonitorDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("添加监控点")
+        self.setModal(True)
+        self.setMinimumWidth(420)
+        self.setStyleSheet("""
+            QDialog { background-color: #2d2d3d; }
+            QLabel { color: #e0e0e0; }
+            QLineEdit, QSpinBox, QDoubleSpinBox {
+                background-color: #3d3d4d;
+                color: #e0e0e0;
+                border: 1px solid #555;
+                border-radius: 4px;
+                padding: 6px;
+            }
+            QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus {
+                border-color: #4a9eff;
+            }
+            QGroupBox {
+                color: #e0e0e0;
+                border: 1px solid #555;
+                border-radius: 6px;
+                margin-top: 10px;
+                padding-top: 10px;
+            }
+            QGroupBox::title { left: 10px; padding: 0 6px; }
+            QPushButton {
+                background-color: #4a4a5a;
+                color: #e0e0e0;
+                border: none;
+                border-radius: 4px;
+                padding: 8px 16px;
+            }
+            QPushButton:hover { background-color: #5a5a6a; }
+            QPushButton[text="确定"] {
+                background-color: #4a9eff;
+                color: #1a1a2a;
+            }
+            QPushButton[text="确定"]:hover { background-color: #3a8eef; }
+            QPushButton#btn_select_area {
+                background-color: #4a9eff;
+                color: #1a1a2a;
+                font-weight: bold;
+                padding: 8px;
+            }
+            QPushButton#btn_select_area:hover { background-color: #3a8eef; }
+        """)
+        
+        layout = QFormLayout(self)
+        layout.setSpacing(10)
+        
+        self.name_edit = QLineEdit()
+        self.name_edit.setPlaceholderText("例如：温度表")
+        layout.addRow("名称:", self.name_edit)
+        
+        coord_group = QGroupBox("屏幕区域")
+        coord_layout = QGridLayout()
+        coord_layout.setSpacing(6)
+        
+        self.x_edit = QSpinBox()
+        self.x_edit.setRange(0, 9999)
+        self.x_edit.setValue(100)
+        coord_layout.addWidget(QLabel("X:"), 0, 0)
+        coord_layout.addWidget(self.x_edit, 0, 1)
+        
+        self.y_edit = QSpinBox()
+        self.y_edit.setRange(0, 9999)
+        self.y_edit.setValue(100)
+        coord_layout.addWidget(QLabel("Y:"), 0, 2)
+        coord_layout.addWidget(self.y_edit, 0, 3)
+        
+        self.w_edit = QSpinBox()
+        self.w_edit.setRange(10, 9999)
+        self.w_edit.setValue(150)
+        coord_layout.addWidget(QLabel("宽度:"), 1, 0)
+        coord_layout.addWidget(self.w_edit, 1, 1)
+        
+        self.h_edit = QSpinBox()
+        self.h_edit.setRange(10, 9999)
+        self.h_edit.setValue(60)
+        coord_layout.addWidget(QLabel("高度:"), 1, 2)
+        coord_layout.addWidget(self.h_edit, 1, 3)
+        
+        self.btn_select_area = QPushButton("在屏幕上框选区域")
+        self.btn_select_area.setObjectName("btn_select_area")
+        self.btn_select_area.clicked.connect(self.select_screen_area)
+        coord_layout.addWidget(self.btn_select_area, 2, 0, 1, 4)
+        
+        coord_group.setLayout(coord_layout)
+        layout.addRow(coord_group)
+        
+        threshold_group = QGroupBox("报警阈值")
+        threshold_layout = QGridLayout()
+        threshold_layout.setSpacing(6)
+        
+        self.lower_edit = QDoubleSpinBox()
+        self.lower_edit.setRange(-99999, 99999)
+        self.lower_edit.setValue(0)
+        threshold_layout.addWidget(QLabel("下限:"), 0, 0)
+        threshold_layout.addWidget(self.lower_edit, 0, 1)
+        
+        self.upper_edit = QDoubleSpinBox()
+        self.upper_edit.setRange(-99999, 99999)
+        self.upper_edit.setValue(100)
+        threshold_layout.addWidget(QLabel("上限:"), 0, 2)
+        threshold_layout.addWidget(self.upper_edit, 0, 3)
+        
+        threshold_group.setLayout(threshold_layout)
+        layout.addRow(threshold_group)
+        
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addRow(buttons)
+        
+        self.selector = None
+    
+    def select_screen_area(self):
+        self.hide()
+        self.selector = ScreenSelector()
+        self.selector.area_selected.connect(self.on_area_selected)
+    
+    def on_area_selected(self, x, y, width, height):
+        if width > 0 and height > 0:
+            self.x_edit.setValue(x)
+            self.y_edit.setValue(y)
+            self.w_edit.setValue(width)
+            self.h_edit.setValue(height)
+        self.show()
+        self.raise_()
+        self.activateWindow()
+        self.selector = None
+    
+    def get_data(self):
+        return {
+            'name': self.name_edit.text().strip() or "未命名",
+            'x': self.x_edit.value(),
+            'y': self.y_edit.value(),
+            'width': self.w_edit.value(),
+            'height': self.h_edit.value(),
+            'lower': self.lower_edit.value(),
+            'upper': self.upper_edit.value()
+        }
 
 
 class MainWindow(QMainWindow):
-
     def __init__(self):
         super().__init__()
-
-        self.setWindowTitle("ScreenAlarm V6 工业稳定版")
-        self.resize(1100, 750)
-
-        self.monitors = []
-
+        self.setWindowTitle("屏幕数字监控报警系统")
+        self.resize(1100, 700)
+        
+        self.setStyleSheet("""
+            QMainWindow { background-color: #1a1a2a; }
+            QLabel { color: #e0e0e0; }
+            QTableWidget {
+                background-color: #1a1a2a;
+                alternate-background-color: #2a2a3a;
+                color: #e0e0e0;
+                gridline-color: #3a3a4a;
+                selection-background-color: #4a9eff;
+                selection-color: #1a1a2a;
+            }
+            QTableWidget::item { padding: 6px; }
+            QHeaderView::section {
+                background-color: #2a2a3a;
+                color: #e0e0e0;
+                padding: 8px;
+                border: 1px solid #3a3a4a;
+            }
+            QPushButton {
+                background-color: #3a3a4a;
+                color: #e0e0e0;
+                border: none;
+                border-radius: 6px;
+                padding: 8px 18px;
+                font-weight: bold;
+            }
+            QPushButton:hover { background-color: #4a4a5a; }
+            QPushButton#btn_start {
+                background-color: #2a8a4a;
+                color: white;
+            }
+            QPushButton#btn_start:hover { background-color: #3a9a5a; }
+            QPushButton#btn_start:disabled {
+                background-color: #3a3a4a;
+                color: #6a6a7a;
+            }
+            QPushButton#btn_stop {
+                background-color: #aa3a3a;
+                color: white;
+            }
+            QPushButton#btn_stop:hover { background-color: #bb4a4a; }
+            QPushButton#btn_stop:disabled {
+                background-color: #3a3a4a;
+                color: #6a6a7a;
+            }
+            QPushButton#btn_delete { background-color: #aa3a3a; }
+            QPushButton#btn_delete:hover { background-color: #bb4a4a; }
+            QPushButton#btn_save { background-color: #2a4a7a; }
+            QPushButton#btn_save:hover { background-color: #3a5a8a; }
+            QTabWidget::pane {
+                border: 1px solid #3a3a4a;
+                border-radius: 6px;
+                background-color: #1a1a2a;
+            }
+            QTabBar::tab {
+                background-color: #2a2a3a;
+                color: #e0e0e0;
+                padding: 8px 16px;
+                border: 1px solid #3a3a4a;
+                border-bottom: none;
+                border-top-left-radius: 4px;
+                border-top-right-radius: 4px;
+            }
+            QTabBar::tab:selected { background-color: #3a3a4a; }
+        """)
+        
+        self.monitoring = False
+        self.monitor_thread = None
+        self.config_file = "monitor_config.json"
+        self.alarm_logs = []
+        
+        self._setup_ui()
+        self.load_config()
+        
+        self.status_timer = QTimer()
+        self.status_timer.timeout.connect(self._update_status_display)
+        self.status_timer.start(500)
+    
+    def _setup_ui(self):
         central = QWidget()
         self.setCentralWidget(central)
-
-        layout = QVBoxLayout(central)
-
-        # 状态
-        self.status = QLabel("状态：未启动")
-        layout.addWidget(self.status)
-
+        main_layout = QVBoxLayout(central)
+        main_layout.setSpacing(10)
+        main_layout.setContentsMargins(12, 12, 12, 12)
+        
+        # 标题
+        title_layout = QHBoxLayout()
+        title = QLabel("📊 屏幕数字监控报警系统")
+        title_font = QFont()
+        title_font.setPointSize(18)
+        title_font.setBold(True)
+        title.setFont(title_font)
+        title_layout.addWidget(title)
+        title_layout.addStretch()
+        subtitle = QLabel("-- 陈诚  (EasyOCR引擎)")
+        subtitle.setStyleSheet("color: #6a6a7a; font-size: 13px;")
+        title_layout.addWidget(subtitle)
+        main_layout.addLayout(title_layout)
+        
+        # OCR状态
+        self.ocr_status_label = QLabel("OCR引擎: 初始化中...")
+        self.ocr_status_label.setStyleSheet("padding: 4px 12px; background-color: #2a2a3a; border-radius: 4px; color: #ddaa44;")
+        main_layout.addWidget(self.ocr_status_label)
+        
         # 表格
         self.table = QTableWidget()
-        self.table.setColumnCount(6)
+        self.table.setColumnCount(7)
         self.table.setHorizontalHeaderLabels([
-            "区域", "备注", "当前值", "下限", "上限", "状态"
+            "名称", "当前值", "下限", "上限", "坐标", "状态", "报警时间"
         ])
-        layout.addWidget(self.table)
-
-        # 日志
-        self.log_box = QTextEdit()
-        self.log_box.setReadOnly(True)
-        layout.addWidget(self.log_box)
-
+        self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.table.setAlternatingRowColors(True)
+        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.table.setRowCount(0)
+        main_layout.addWidget(self.table)
+        
         # 按钮
-        self.btn_add = QPushButton("➕ 添加监控（一次性输入）")
-        self.btn_start = QPushButton("▶ 开始监控")
-        self.btn_stop = QPushButton("⏹ 停止监控")
-        self.btn_clear = QPushButton("✔ 清除报警")
-
-        layout.addWidget(self.btn_add)
-        layout.addWidget(self.btn_start)
-        layout.addWidget(self.btn_stop)
-        layout.addWidget(self.btn_clear)
-
-        self.btn_add.clicked.connect(self.add_region)
+        btn_layout = QHBoxLayout()
+        btn_layout.setSpacing(8)
+        
+        self.btn_add = QPushButton("添加监控点")
+        self.btn_add.clicked.connect(self.add_monitor_point)
+        btn_layout.addWidget(self.btn_add)
+        
+        self.btn_edit = QPushButton("编辑")
+        self.btn_edit.clicked.connect(self.edit_monitor_point)
+        btn_layout.addWidget(self.btn_edit)
+        
+        self.btn_delete = QPushButton("删除")
+        self.btn_delete.setObjectName("btn_delete")
+        self.btn_delete.clicked.connect(self.delete_monitor_point)
+        btn_layout.addWidget(self.btn_delete)
+        
+        btn_layout.addStretch()
+        
+        self.btn_start = QPushButton("开始监控")
+        self.btn_start.setObjectName("btn_start")
         self.btn_start.clicked.connect(self.start_monitor)
+        btn_layout.addWidget(self.btn_start)
+        
+        self.btn_stop = QPushButton("停止监控")
+        self.btn_stop.setObjectName("btn_stop")
         self.btn_stop.clicked.connect(self.stop_monitor)
-        self.btn_clear.clicked.connect(self.clear_alarm)
-
-    # =========================
-    # 一次性输入（重点）
-    # =========================
-    def add_region(self):
-
-        x1, ok1 = QInputDialog.getInt(self, "输入", "左上X")
-        y1, ok2 = QInputDialog.getInt(self, "输入", "左上Y")
-        x2, ok3 = QInputDialog.getInt(self, "输入", "右下X")
-        y2, ok4 = QInputDialog.getInt(self, "输入", "右下Y")
-
-        if not (ok1 and ok2 and ok3 and ok4):
+        self.btn_stop.setEnabled(False)
+        btn_layout.addWidget(self.btn_stop)
+        
+        btn_layout.addStretch()
+        
+        self.btn_clear_alarm = QPushButton("消除所有报警")
+        self.btn_clear_alarm.clicked.connect(self.clear_all_alarms)
+        btn_layout.addWidget(self.btn_clear_alarm)
+        
+        self.btn_save = QPushButton("保存配置")
+        self.btn_save.setObjectName("btn_save")
+        self.btn_save.clicked.connect(self.save_config)
+        btn_layout.addWidget(self.btn_save)
+        
+        self.btn_load = QPushButton("加载配置")
+        self.btn_load.clicked.connect(self.load_config_dialog)
+        btn_layout.addWidget(self.btn_load)
+        
+        main_layout.addLayout(btn_layout)
+        
+        # 状态栏
+        status_layout = QHBoxLayout()
+        self.status_label = QLabel("状态: 就绪")
+        self.status_label.setStyleSheet("padding: 6px; background-color: #2a2a3a; border-radius: 4px;")
+        status_layout.addWidget(self.status_label, 2)
+        
+        self.alarm_count_label = QLabel("报警数: 0")
+        self.alarm_count_label.setStyleSheet("padding: 6px; background-color: #2a2a3a; border-radius: 4px;")
+        status_layout.addWidget(self.alarm_count_label, 1)
+        
+        main_layout.addLayout(status_layout)
+    
+    def set_ocr_status(self, status, is_ready=False):
+        color = "#44ddaa" if is_ready else "#ddaa44"
+        self.ocr_status_label.setStyleSheet(
+            f"padding: 4px 12px; background-color: #2a2a3a; border-radius: 4px; color: {color};"
+        )
+        self.ocr_status_label.setText(f"OCR引擎: {status}")
+    
+    def add_monitor_point(self):
+        dialog = AddMonitorDialog(self)
+        if dialog.exec() == QDialog.Accepted:
+            data = dialog.get_data()
+            row = self.table.rowCount()
+            self.table.insertRow(row)
+            self.table.setItem(row, 0, QTableWidgetItem(data['name']))
+            self.table.setItem(row, 1, QTableWidgetItem("--"))
+            self.table.setItem(row, 2, QTableWidgetItem(str(data['lower'])))
+            self.table.setItem(row, 3, QTableWidgetItem(str(data['upper'])))
+            self.table.setItem(row, 4, QTableWidgetItem(f"{data['x']},{data['y']},{data['width']},{data['height']}"))
+            self.table.setItem(row, 5, QTableWidgetItem("待监控"))
+            self.table.setItem(row, 6, QTableWidgetItem("--"))
+            self.status_label.setText(f"状态: 已添加 [{data['name']}]")
+    
+    def edit_monitor_point(self):
+        row = self.table.currentRow()
+        if row < 0:
+            QMessageBox.warning(self, "提示", "请先选择一行")
             return
-
-        low, ok5 = QInputDialog.getDouble(self, "下限", "报警下限", 5)
-        high, ok6 = QInputDialog.getDouble(self, "上限", "报警上限", 10)
-
-        if not (ok5 and ok6):
+        name = self.table.item(row, 0).text()
+        lower = float(self.table.item(row, 2).text())
+        upper = float(self.table.item(row, 3).text())
+        coords = self.table.item(row, 4).text().split(',')
+        x, y, w, h = map(int, coords)
+        dialog = AddMonitorDialog(self)
+        dialog.name_edit.setText(name)
+        dialog.x_edit.setValue(x)
+        dialog.y_edit.setValue(y)
+        dialog.w_edit.setValue(w)
+        dialog.h_edit.setValue(h)
+        dialog.lower_edit.setValue(lower)
+        dialog.upper_edit.setValue(upper)
+        if dialog.exec() == QDialog.Accepted:
+            data = dialog.get_data()
+            self.table.setItem(row, 0, QTableWidgetItem(data['name']))
+            self.table.setItem(row, 2, QTableWidgetItem(str(data['lower'])))
+            self.table.setItem(row, 3, QTableWidgetItem(str(data['upper'])))
+            self.table.setItem(row, 4, QTableWidgetItem(f"{data['x']},{data['y']},{data['width']},{data['height']}"))
+            self.status_label.setText(f"状态: 已编辑 [{data['name']}]")
+    
+    def delete_monitor_point(self):
+        row = self.table.currentRow()
+        if row < 0:
+            QMessageBox.warning(self, "提示", "请先选择一行")
             return
-
-        text, ok7 = QInputDialog.getText(self, "备注", "输入备注（如：压力/流量/温度）")
-
-        if not ok7:
-            text = ""
-
-        region = (x1, y1, x2 - x1, y2 - y1)
-
-        self.monitors.append({
-            "region": region,
-            "low": low,
-            "high": high,
-            "remark": text,
-            "value": 0,
-            "status": "正常",
-            "thread": None,
-            "last_value": None  # ✔ 用于稳定滤波
-        })
-
-        self.refresh_table()
-
-    # =========================
-    # 启动监控
-    # =========================
+        name = self.table.item(row, 0).text()
+        reply = QMessageBox.question(self, "确认删除", f"确定要删除 [{name}] 吗？")
+        if reply == QMessageBox.Yes:
+            self.table.removeRow(row)
+            self.status_label.setText("状态: 已删除")
+    
     def start_monitor(self):
-
-        for i, m in enumerate(self.monitors):
-
-            if m["thread"] is None:
-
-                t = Monitor(
-                    m["region"],
-                    m["low"],
-                    m["high"],
-                    self,
-                    i
-                )
-
-                m["thread"] = t
-                t.start()
-
-        self.status.setText("状态：运行中")
-
-    # =========================
-    # 停止
-    # =========================
-    def stop_monitor(self):
-
-        for m in self.monitors:
-            if m["thread"]:
-                m["thread"].running = False
-
-        self.status.setText("状态：已停止")
-
-    # =========================
-    # 清除报警
-    # =========================
-    def clear_alarm(self):
-        self.status.setText("状态：报警已清除")
-
-    # =========================
-    # UI更新（带滤波）
-    # =========================
-    def update_value(self, index, value, status):
-
-        if index >= len(self.monitors):
+        if self.monitoring:
             return
-
-        m = self.monitors[index]
-
-        # =========================
-        # ✔ 滤波（解决跳数）
-        # =========================
-        if m["last_value"] is None:
-            m["last_value"] = value
+        if self.table.rowCount() == 0:
+            QMessageBox.warning(self, "提示", "请先添加监控点")
+            return
+        
+        monitors = []
+        for row in range(self.table.rowCount()):
+            name = self.table.item(row, 0).text()
+            lower = float(self.table.item(row, 2).text())
+            upper = float(self.table.item(row, 3).text())
+            coords = self.table.item(row, 4).text().split(',')
+            x, y, w, h = map(int, coords)
+            monitors.append({
+                'name': name, 'x': x, 'y': y,
+                'width': w, 'height': h,
+                'lower': lower, 'upper': upper,
+                'row': row
+            })
+        
+        self.monitor_thread = MonitorThread(monitors)
+        self.monitor_thread.value_updated.connect(self.on_value_updated)
+        self.monitor_thread.alarm_triggered.connect(self.on_alarm_triggered)
+        self.monitor_thread.status_updated.connect(self.on_status_updated)
+        self.monitor_thread.ocr_status.connect(self.set_ocr_status)
+        self.monitor_thread.start()
+        
+        self.monitoring = True
+        self.btn_start.setEnabled(False)
+        self.btn_stop.setEnabled(True)
+        self.status_label.setText("状态: 监控运行中")
+    
+    def stop_monitor(self):
+        if self.monitor_thread and self.monitor_thread.isRunning():
+            self.monitor_thread.stop()
+            self.monitor_thread.wait()
+        self.monitoring = False
+        self.btn_start.setEnabled(True)
+        self.btn_stop.setEnabled(False)
+        self.status_label.setText("状态: 已停止")
+        for row in range(self.table.rowCount()):
+            item = self.table.item(row, 5)
+            if item and "报警" not in item.text():
+                self.table.setItem(row, 5, QTableWidgetItem("已停止"))
+    
+    def on_value_updated(self, row, value):
+        self.table.setItem(row, 1, QTableWidgetItem(f"{value:.2f}"))
+    
+    def on_alarm_triggered(self, row, name, value, lower, upper):
+        status_item = QTableWidgetItem("报警")
+        status_item.setBackground(QBrush(QColor(200, 50, 50)))
+        status_item.setForeground(QBrush(QColor(255, 255, 255)))
+        self.table.setItem(row, 5, status_item)
+        
+        now = datetime.now().strftime("%H:%M:%S")
+        self.table.setItem(row, 6, QTableWidgetItem(now))
+        
+        self._update_alarm_count()
+        self.status_label.setText(f"报警: {name} = {value:.2f} [范围: {lower}-{upper}]")
+        
+        # 记录到日志文件
+        with open("alarm_log.txt", "a", encoding="utf-8") as f:
+            f.write(f"[{now}] 报警: {name} = {value:.2f} 超出范围 [{lower}, {upper}]\n")
+    
+    def on_status_updated(self, row, status):
+        if status == 'normal':
+            status_item = QTableWidgetItem("正常")
+            status_item.setBackground(QBrush(QColor(50, 150, 50)))
+            status_item.setForeground(QBrush(QColor(255, 255, 255)))
+        elif status == 'error':
+            status_item = QTableWidgetItem("识别失败")
+            status_item.setBackground(QBrush(QColor(100, 100, 100)))
+            status_item.setForeground(QBrush(QColor(255, 255, 255)))
         else:
-            value = (m["last_value"] * 0.7) + (value * 0.3)
-            m["last_value"] = value
-
-        m["value"] = round(value, 2)
-        m["status"] = status
-
-        # 日志
-        if status == "报警":
-            self.log_box.append(f"⚠ {m['remark']} 区域{index} 值={m['value']}")
-
-        self.refresh_table()
-
-    # =========================
-    # 表格刷新
-    # =========================
-    def refresh_table(self):
-
-        self.table.setRowCount(len(self.monitors))
-
-        for i, m in enumerate(self.monitors):
-
-            self.table.setItem(i, 0, QTableWidgetItem(str(m["region"])))
-            self.table.setItem(i, 1, QTableWidgetItem(m["remark"]))
-            self.table.setItem(i, 2, QTableWidgetItem(str(m["value"])))
-            self.table.setItem(i, 3, QTableWidgetItem(str(m["low"])))
-            self.table.setItem(i, 4, QTableWidgetItem(str(m["high"])))
-            self.table.setItem(i, 5, QTableWidgetItem(m["status"]))
+            status_item = QTableWidgetItem(status)
+        self.table.setItem(row, 5, status_item)
+    
+    def clear_all_alarms(self):
+        count = 0
+        for row in range(self.table.rowCount()):
+            item = self.table.item(row, 5)
+            if item and item.text() == "报警":
+                status_item = QTableWidgetItem("正常")
+                status_item.setBackground(QBrush(QColor(50, 150, 50)))
+                status_item.setForeground(QBrush(QColor(255, 255, 255)))
+                self.table.setItem(row, 5, status_item)
+                self.table.setItem(row, 6, QTableWidgetItem("--"))
+                count += 1
+        self._update_alarm_count()
+        if count > 0:
+            self.status_label.setText(f"状态: 已消除 {count} 个报警")
+        else:
+            QMessageBox.information(self, "提示", "没有报警需要消除")
+    
+    def _update_alarm_count(self):
+        count = 0
+        for row in range(self.table.rowCount()):
+            item = self.table.item(row, 5)
+            if item and item.text() == "报警":
+                count += 1
+        self.alarm_count_label.setText(f"报警数: {count}")
+    
+    def _update_status_display(self):
+        if self.monitoring:
+            self.status_label.setText("状态: 监控运行中")
+    
+    def save_config(self):
+        config = []
+        for row in range(self.table.rowCount()):
+            config.append({
+                'name': self.table.item(row, 0).text(),
+                'lower': float(self.table.item(row, 2).text()),
+                'upper': float(self.table.item(row, 3).text()),
+                'coords': self.table.item(row, 4).text()
+            })
+        try:
+            with open(self.config_file, 'w', encoding='utf-8') as f:
+                json.dump(config, f, ensure_ascii=False, indent=2)
+            self.status_label.setText("状态: 配置已保存")
+        except Exception as e:
+            QMessageBox.warning(self, "错误", f"保存失败: {e}")
+    
+    def load_config(self):
+        if not os.path.exists(self.config_file):
+            return
+        try:
+            with open(self.config_file, 'r', encoding='utf-8') as f:
+                config = json.load(f)
+            self.table.setRowCount(0)
+            for item in config:
+                row = self.table.rowCount()
+                self.table.insertRow(row)
+                self.table.setItem(row, 0, QTableWidgetItem(item['name']))
+                self.table.setItem(row, 1, QTableWidgetItem("--"))
+                self.table.setItem(row, 2, QTableWidgetItem(str(item['lower'])))
+                self.table.setItem(row, 3, QTableWidgetItem(str(item['upper'])))
+                self.table.setItem(row, 4, QTableWidgetItem(item['coords']))
+                self.table.setItem(row, 5, QTableWidgetItem("待监控"))
+                self.table.setItem(row, 6, QTableWidgetItem("--"))
+            self.status_label.setText("状态: 配置已加载")
+        except Exception as e:
+            print(f"加载失败: {e}")
+    
+    def load_config_dialog(self):
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "选择配置文件", "", "JSON文件 (*.json)"
+        )
+        if file_path:
+            self.config_file = file_path
+            self.load_config()
+    
+    def closeEvent(self, event):
+        self.stop_monitor()
+        event.accept()
 
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
+    app.setApplicationName("屏幕数字监控报警")
+    app.setStyle("Fusion")
     win = MainWindow()
     win.show()
     sys.exit(app.exec())
