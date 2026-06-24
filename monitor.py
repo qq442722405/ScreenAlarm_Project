@@ -26,7 +26,12 @@ class MonitorThread(QThread):
         self.sct = None
         self.reader = None
         self.ocr_ready = False
+        self.interval_ms = 500  # 默认500ms
         
+    def set_interval(self, ms):
+        """设置检测间隔（毫秒）"""
+        self.interval_ms = max(100, ms)
+    
     def stop(self):
         self.running = False
     
@@ -79,6 +84,8 @@ class MonitorThread(QThread):
             status[m['row']] = {'alarm': False, 'count': 0}
             self.status_updated.emit(m['row'], '监控中')
         
+        interval_sec = self.interval_ms / 1000.0
+        
         while self.running:
             for monitor in self.monitors:
                 if not self.running:
@@ -110,7 +117,8 @@ class MonitorThread(QThread):
                         self.status_updated.emit(row, '识别失败')
                 
                 time.sleep(0.05)
-            time.sleep(0.3)
+            
+            time.sleep(max(0.1, interval_sec - 0.3))
         
         if self.sct:
             self.sct.close()
