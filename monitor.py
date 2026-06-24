@@ -3,6 +3,7 @@ import re
 import numpy as np
 import os
 import sys
+import shutil
 from PySide6.QtCore import QThread, Signal
 import cv2
 
@@ -41,26 +42,38 @@ class MonitorThread(QThread):
     def stop(self):
         self.running = False
     
+    def _delete_model_cache(self):
+        """删除PaddleOCR模型缓存"""
+        try:
+            # PaddleOCR 模型缓存目录
+            cache_dir = os.path.join(os.path.expanduser("~"), ".paddleocr")
+            if os.path.exists(cache_dir):
+                shutil.rmtree(cache_dir)
+                return True
+            return False
+        except Exception as e:
+            print(f"删除缓存失败: {e}")
+            return False
+    
     def _init_ocr(self):
         """初始化OCR - 使用PaddleOCR，自动下载模型"""
         if not OCR_AVAILABLE:
-            self.ocr_status.emit("PaddleOCR未安装", False)
+            self.ocr_status.emit("PaddleOCR未安装，请运行: pip install paddleocr", False)
             return False
         
         try:
             import warnings
             warnings.filterwarnings("ignore")
             
-            self.ocr_status.emit("正在加载PaddleOCR (首次使用自动下载模型)...", False)
+            self.ocr_status.emit("正在下载/加载PaddleOCR模型...", False)
             self.download_progress.emit(0)
             
-            # 创建PaddleOCR实例 - 使用正确的参数
+            # 使用正确的参数
+            # 注意：不同版本的PaddleOCR参数不同，使用基础参数
             self.ocr = PaddleOCR(
                 lang='en',           # 英文
                 use_angle_cls=False, # 不使用角度分类
-                use_gpu=False,       # 不使用GPU
-                show_log=False,      # 不显示日志
-                enable_mkldnn=False  # 不使用MKLDNN
+                show_log=False       # 不显示日志
             )
             
             # 如果初始化成功，标记就绪
@@ -69,13 +82,61 @@ class MonitorThread(QThread):
             self.ocr_status.emit("就绪 ✅", True)
             return True
             
+        except TypeError as e:
+            # 参数错误，尝试使用更基础的参数
+            if "use_gpu" in str(e):
+                try:
+                    self.ocr = PaddleOCR(
+                        lang='en',
+                        use_angle_cls=False,
+                        show_log=False
+                    )
+                    self.ocr_ready = True
+                    self.download_progress.emit(100)
+                    self.ocr_status.emit("就绪 ✅", True)
+                    return True
+                except Exception as e2:
+                    error_msg = str(e2)
+                    if "Connection" in error_msg or "timeout" in error_msg.lower():
+                        self.ocr_status.emit("网络连接失败，请检查网络后点击「重新下载模型」", False)
+                    else:
+                        self.ocr_status.emit(f"加载失败: {error_msg[:50]}", False)
+                    return False
+            else:
+                # 尝试最简参数
+                try:
+                    self.ocr = PaddleOCR(lang='en', show_log=False)
+                    self.ocr_ready = True
+                    self.download_progress.emit(100)
+                    self.ocr_status.emit("就绪 ✅", True)
+                    return True
+                except Exception as e3:
+                    error_msg = str(e3)
+                    if "Connection" in error_msg or "timeout" in error_msg.lower():
+                        self.ocr_status.emit("网络连接失败，请检查网络后点击「重新下载模型」", False)
+                    else:
+                        self.ocr_status.emit(f"加载失败: {error_msg[:50]}", False)
+                    return False
+                    
         except Exception as e:
             error_msg = str(e)
             if "Connection" in error_msg or "timeout" in error_msg.lower():
-                self.ocr_status.emit("网络连接失败，请检查网络后点击「重新加载OCR」", False)
+                self.ocr_status.emit("网络连接失败，请检查网络后点击「重新下载模型」", False)
             else:
                 self.ocr_status.emit(f"加载失败: {error_msg[:50]}", False)
             return False
+    
+    def reinit_ocr(self):
+        """重新初始化OCR（删除缓存后重新下载）"""
+        self.ocr_ready = False
+        self.ocr = None
+        
+        # 删除缓存
+        self.ocr_status.emit("正在删除旧模型缓存...", False)
+        self._delete_model_cache()
+        
+        # 重新初始化
+        return self._init_ocr()
     
     def _preprocess_image(self, img_np):
         """图像预处理 - 针对数字优化"""
@@ -141,7 +202,6 @@ class MonitorThread(QThread):
             processed = self._preprocess_image(img_np)
             
             # PaddleOCR识别
-            # 只检测文字，不进行检测和角度分类
             result = self.ocr.ocr(processed, cls=False)
             
             if result and len(result) > 0:
@@ -149,7 +209,6 @@ class MonitorThread(QThread):
                 for line in result:
                     if line:
                         for word_info in line:
-                            # word_info 格式: [bbox, (text, confidence)]
                             if len(word_info) >= 2:
                                 text = word_info[1][0] if isinstance(word_info[1], tuple) else word_info[1]
                                 # 提取数字
@@ -164,7 +223,7 @@ class MonitorThread(QThread):
     
     def run(self):
         if not self._init_ocr():
-            self.status_updated.emit(-1, 'OCR加载失败，请检查网络后点击「重新加载OCR」')
+            self.status_updated.emit(-1, 'OCR加载失败，请点击「重新下载模型」重试')
             return
         
         status = {}
