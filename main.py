@@ -8,12 +8,139 @@ from PySide6.QtWidgets import (
     QPushButton, QTableWidget, QTableWidgetItem, QLabel, QMessageBox,
     QAbstractItemView, QHeaderView, QFileDialog, QDialog,
     QDialogButtonBox, QFormLayout, QSpinBox, QDoubleSpinBox, QLineEdit,
-    QGroupBox, QGridLayout
+    QGroupBox, QGridLayout, QFrame
 )
-from PySide6.QtCore import Qt, QTimer, QThread, Signal
-from PySide6.QtGui import QColor, QBrush, QFont
+from PySide6.QtCore import Qt, QTimer, QThread, Signal, QPoint
+from PySide6.QtGui import QColor, QBrush, QFont, QMouseEvent, QPainter, QPen
 
 from monitor import MonitorThread
+
+
+class CoordinatePicker(QWidget):
+    """鼠标坐标拾取器 - 全屏透明窗口显示鼠标坐标"""
+    coord_selected = Signal(int, int)  # x, y
+    
+    def __init__(self, parent=None, coord_type="左上角"):
+        super().__init__(parent)
+        self.coord_type = coord_type
+        self.setWindowTitle(f"选择{coord_type}")
+        self.setWindowFlags(
+            Qt.WindowStaysOnTopHint | 
+            Qt.FramelessWindowHint | 
+        Qt.Tool
+        )
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setAttribute(Qt.WA_NoSystemBackground)
+        self.setMouseTracking(True)
+        
+        # 获取屏幕尺寸
+        from PySide6.QtWidgets import QApplication
+        screens = QApplication.screens()
+        total_rect = self.geometry()
+        for s in screens:
+            total_rect = total_rect.united(s.geometry())
+        self.setGeometry(total_rect)
+        
+        self.showFullScreen()
+        self.raise_()
+        self.activateWindow()
+        
+        # 当前鼠标位置
+        self.current_pos = QPoint(0, 0)
+        
+        # 提示标签
+        self.label = QLabel(f"🖱 移动鼠标到{coord_type}位置，点击确认 | 按 ESC 取消", self)
+        self.label.setAlignment(Qt.AlignCenter)
+        self.label.setStyleSheet("""
+            QLabel {
+                color: white;
+                background: rgba(0,0,0,200);
+                padding: 12px 24px;
+                border-radius: 12px;
+                font-size: 16px;
+                font-weight: bold;
+                border: 2px solid rgba(255,255,255,0.3);
+            }
+        """)
+        self.label.adjustSize()
+        self.label.move(
+            (self.width() - self.label.width()) // 2,
+            self.height() - self.label.height() - 60
+        )
+        
+        # 坐标显示
+        self.coord_label = QLabel("X: 0  Y: 0", self)
+        self.coord_label.setAlignment(Qt.AlignCenter)
+        self.coord_label.setStyleSheet("""
+            QLabel {
+                color: #4a9eff;
+                background: rgba(0,0,0,200);
+                padding: 8px 20px;
+                border-radius: 8px;
+                font-size: 20px;
+                font-weight: bold;
+                border: 2px solid #4a9eff;
+            }
+        """)
+        self.coord_label.adjustSize()
+        self.coord_label.move(
+            (self.width() - self.coord_label.width()) // 2,
+            60
+        )
+        
+        # 设置鼠标追踪
+        self.setMouseTracking(True)
+        self.setFocus(Qt.OtherFocusReason)
+    
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        
+        # 半透明背景
+        painter.fillRect(self.rect(), QColor(0, 0, 0, 100))
+        
+        # 绘制十字线
+        painter.setPen(QPen(QColor(255, 255, 255, 80), 1, Qt.DashLine))
+        painter.drawLine(self.current_pos.x(), 0, self.current_pos.x(), self.height())
+        painter.drawLine(0, self.current_pos.y(), self.width(), self.current_pos.y())
+        
+        # 绘制坐标圆点
+        painter.setPen(QPen(QColor(255, 50, 50), 2))
+        painter.setBrush(QBrush(QColor(255, 0, 0, 80)))
+        painter.drawEllipse(self.current_pos, 6, 6)
+        
+        # 显示坐标数字
+        painter.setPen(QColor(255, 255, 255, 200))
+        painter.setFont(QFont("Arial", 12))
+        painter.drawText(
+            self.current_pos.x() + 15,
+            self.current_pos.y() - 10,
+            f"({self.current_pos.x()}, {self.current_pos.y()})"
+        )
+    
+    def mouseMoveEvent(self, event):
+        self.current_pos = event.position().toPoint()
+        self.coord_label.setText(f"X: {self.current_pos.x()}  Y: {self.current_pos.y()}")
+        self.coord_label.adjustSize()
+        self.coord_label.move(
+            (self.width() - self.coord_label.width()) // 2,
+            60
+        )
+        self.update()
+    
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self.coord_selected.emit(self.current_pos.x(), self.current_pos.y())
+            self.close()
+    
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key_Escape:
+            self.coord_selected.emit(-1, -1)
+            self.close()
+    
+    def closeEvent(self, event):
+        self.setCursor(Qt.ArrowCursor)
+        event.accept()
 
 
 class AddMonitorDialog(QDialog):
@@ -21,7 +148,7 @@ class AddMonitorDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("添加监控点")
         self.setModal(True)
-        self.setMinimumWidth(400)
+        self.setMinimumWidth(450)
         self.setStyleSheet("""
             QDialog { background-color: #2d2d3d; }
             QLabel { color: #e0e0e0; }
@@ -56,6 +183,13 @@ class AddMonitorDialog(QDialog):
                 color: #1a1a2a;
             }
             QPushButton[text="确定"]:hover { background-color: #3a8eef; }
+            QPushButton#btn_pick {
+                background-color: #4a9eff;
+                color: #1a1a2a;
+                font-weight: bold;
+                padding: 4px 12px;
+            }
+            QPushButton#btn_pick:hover { background-color: #3a8eef; }
         """)
         
         layout = QFormLayout(self)
@@ -65,33 +199,53 @@ class AddMonitorDialog(QDialog):
         self.name_edit.setPlaceholderText("例如：温度表")
         layout.addRow("名称:", self.name_edit)
         
-        coord_group = QGroupBox("屏幕区域 (使用QQ截图查看坐标)")
+        coord_group = QGroupBox("屏幕区域 (点击按钮拾取鼠标坐标)")
         coord_layout = QGridLayout()
         coord_layout.setSpacing(6)
         
+        # 左上X
         self.x1_edit = QSpinBox()
         self.x1_edit.setRange(0, 9999)
         self.x1_edit.setValue(100)
         coord_layout.addWidget(QLabel("左上X:"), 0, 0)
         coord_layout.addWidget(self.x1_edit, 0, 1)
+        self.btn_pick_x1 = QPushButton("拾取")
+        self.btn_pick_x1.setObjectName("btn_pick")
+        self.btn_pick_x1.clicked.connect(lambda: self.pick_coordinate("左上X", self.x1_edit))
+        coord_layout.addWidget(self.btn_pick_x1, 0, 2)
         
+        # 左上Y
         self.y1_edit = QSpinBox()
         self.y1_edit.setRange(0, 9999)
         self.y1_edit.setValue(100)
-        coord_layout.addWidget(QLabel("左上Y:"), 0, 2)
-        coord_layout.addWidget(self.y1_edit, 0, 3)
+        coord_layout.addWidget(QLabel("左上Y:"), 1, 0)
+        coord_layout.addWidget(self.y1_edit, 1, 1)
+        self.btn_pick_y1 = QPushButton("拾取")
+        self.btn_pick_y1.setObjectName("btn_pick")
+        self.btn_pick_y1.clicked.connect(lambda: self.pick_coordinate("左上Y", self.y1_edit))
+        coord_layout.addWidget(self.btn_pick_y1, 1, 2)
         
+        # 右下X
         self.x2_edit = QSpinBox()
         self.x2_edit.setRange(0, 9999)
         self.x2_edit.setValue(250)
-        coord_layout.addWidget(QLabel("右下X:"), 1, 0)
-        coord_layout.addWidget(self.x2_edit, 1, 1)
+        coord_layout.addWidget(QLabel("右下X:"), 2, 0)
+        coord_layout.addWidget(self.x2_edit, 2, 1)
+        self.btn_pick_x2 = QPushButton("拾取")
+        self.btn_pick_x2.setObjectName("btn_pick")
+        self.btn_pick_x2.clicked.connect(lambda: self.pick_coordinate("右下X", self.x2_edit))
+        coord_layout.addWidget(self.btn_pick_x2, 2, 2)
         
+        # 右下Y
         self.y2_edit = QSpinBox()
         self.y2_edit.setRange(0, 9999)
         self.y2_edit.setValue(160)
-        coord_layout.addWidget(QLabel("右下Y:"), 1, 2)
-        coord_layout.addWidget(self.y2_edit, 1, 3)
+        coord_layout.addWidget(QLabel("右下Y:"), 3, 0)
+        coord_layout.addWidget(self.y2_edit, 3, 1)
+        self.btn_pick_y2 = QPushButton("拾取")
+        self.btn_pick_y2.setObjectName("btn_pick")
+        self.btn_pick_y2.clicked.connect(lambda: self.pick_coordinate("右下Y", self.y2_edit))
+        coord_layout.addWidget(self.btn_pick_y2, 3, 2)
         
         coord_group.setLayout(coord_layout)
         layout.addRow(coord_group)
@@ -119,6 +273,22 @@ class AddMonitorDialog(QDialog):
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addRow(buttons)
+        
+        self.picker = None
+    
+    def pick_coordinate(self, coord_name, spinbox):
+        """打开坐标拾取器"""
+        self.hide()
+        self.picker = CoordinatePicker(self, coord_name)
+        self.picker.coord_selected.connect(lambda x, y: self.on_coord_picked(x, y, spinbox))
+    
+    def on_coord_picked(self, x, y, spinbox):
+        if x >= 0 and y >= 0:
+            spinbox.setValue(x if "X" in spinbox.objectName() or spinbox == self.x1_edit or spinbox == self.x2_edit else y)
+        self.show()
+        self.raise_()
+        self.activateWindow()
+        self.picker = None
     
     def get_data(self):
         return {
@@ -187,6 +357,11 @@ class MainWindow(QMainWindow):
             QPushButton#btn_delete:hover { background-color: #bb4a4a; }
             QPushButton#btn_save { background-color: #2a4a7a; }
             QPushButton#btn_save:hover { background-color: #3a5a8a; }
+            QFrame#hint_frame {
+                background-color: #2a2a3a;
+                border-radius: 4px;
+                padding: 4px 8px;
+            }
         """)
         
         self.monitoring = False
@@ -223,10 +398,15 @@ class MainWindow(QMainWindow):
         title_layout.addWidget(subtitle)
         main_layout.addLayout(title_layout)
         
-        # 提示：如何获取坐标
-        hint_label = QLabel("💡 提示：使用QQ截图(Ctrl+Alt+A)可以查看鼠标坐标，填入左上角和右下角坐标即可")
-        hint_label.setStyleSheet("color: #ddaa44; padding: 4px 8px; background-color: #2a2a3a; border-radius: 4px;")
-        main_layout.addWidget(hint_label)
+        # 使用提示
+        hint_frame = QFrame()
+        hint_frame.setObjectName("hint_frame")
+        hint_layout = QHBoxLayout(hint_frame)
+        hint_layout.setContentsMargins(8, 4, 8, 4)
+        hint_label = QLabel("💡 点击「拾取」按钮，移动鼠标到目标位置点击即可获取坐标")
+        hint_label.setStyleSheet("color: #ddaa44;")
+        hint_layout.addWidget(hint_label)
+        main_layout.addWidget(hint_frame)
         
         # OCR状态
         self.ocr_status_label = QLabel("OCR引擎: 初始化中...")
@@ -343,7 +523,6 @@ class MainWindow(QMainWindow):
         lower = float(self.table.item(row, 2).text())
         upper = float(self.table.item(row, 3).text())
         coords = self.table.item(row, 4).text()
-        # 解析坐标: "(x1,y1)-(x2,y2)"
         import re
         nums = re.findall(r'\d+', coords)
         if len(nums) >= 4:
@@ -453,7 +632,6 @@ class MainWindow(QMainWindow):
             except:
                 pass
         
-        # 记录到日志文件
         with open("alarm_log.txt", "a", encoding="utf-8") as f:
             f.write(f"[{now}] 报警: {name} = {value:.2f} 超出范围 [{lower}, {upper}]\n")
     
