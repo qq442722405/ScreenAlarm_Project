@@ -1,19 +1,19 @@
 import sys
 import json
 import os
+import winsound
 from datetime import datetime
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QTableWidget, QTableWidgetItem, QLabel, QMessageBox,
     QAbstractItemView, QHeaderView, QFileDialog, QDialog,
     QDialogButtonBox, QFormLayout, QSpinBox, QDoubleSpinBox, QLineEdit,
-    QGroupBox, QGridLayout, QSystemTrayIcon, QMenu
+    QGroupBox, QGridLayout
 )
 from PySide6.QtCore import Qt, QTimer, QThread, Signal
-from PySide6.QtGui import QColor, QBrush, QFont, QIcon, QAction
+from PySide6.QtGui import QColor, QBrush, QFont
 
 from monitor import MonitorThread
-from selector import ScreenSelector
 
 
 class AddMonitorDialog(QDialog):
@@ -21,7 +21,7 @@ class AddMonitorDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("添加监控点")
         self.setModal(True)
-        self.setMinimumWidth(420)
+        self.setMinimumWidth(400)
         self.setStyleSheet("""
             QDialog { background-color: #2d2d3d; }
             QLabel { color: #e0e0e0; }
@@ -56,13 +56,6 @@ class AddMonitorDialog(QDialog):
                 color: #1a1a2a;
             }
             QPushButton[text="确定"]:hover { background-color: #3a8eef; }
-            QPushButton#btn_select_area {
-                background-color: #4a9eff;
-                color: #1a1a2a;
-                font-weight: bold;
-                padding: 8px;
-            }
-            QPushButton#btn_select_area:hover { background-color: #3a8eef; }
         """)
         
         layout = QFormLayout(self)
@@ -72,38 +65,33 @@ class AddMonitorDialog(QDialog):
         self.name_edit.setPlaceholderText("例如：温度表")
         layout.addRow("名称:", self.name_edit)
         
-        coord_group = QGroupBox("屏幕区域")
+        coord_group = QGroupBox("屏幕区域 (使用QQ截图查看坐标)")
         coord_layout = QGridLayout()
         coord_layout.setSpacing(6)
         
-        self.x_edit = QSpinBox()
-        self.x_edit.setRange(0, 9999)
-        self.x_edit.setValue(100)
-        coord_layout.addWidget(QLabel("X:"), 0, 0)
-        coord_layout.addWidget(self.x_edit, 0, 1)
+        self.x1_edit = QSpinBox()
+        self.x1_edit.setRange(0, 9999)
+        self.x1_edit.setValue(100)
+        coord_layout.addWidget(QLabel("左上X:"), 0, 0)
+        coord_layout.addWidget(self.x1_edit, 0, 1)
         
-        self.y_edit = QSpinBox()
-        self.y_edit.setRange(0, 9999)
-        self.y_edit.setValue(100)
-        coord_layout.addWidget(QLabel("Y:"), 0, 2)
-        coord_layout.addWidget(self.y_edit, 0, 3)
+        self.y1_edit = QSpinBox()
+        self.y1_edit.setRange(0, 9999)
+        self.y1_edit.setValue(100)
+        coord_layout.addWidget(QLabel("左上Y:"), 0, 2)
+        coord_layout.addWidget(self.y1_edit, 0, 3)
         
-        self.w_edit = QSpinBox()
-        self.w_edit.setRange(10, 9999)
-        self.w_edit.setValue(150)
-        coord_layout.addWidget(QLabel("宽度:"), 1, 0)
-        coord_layout.addWidget(self.w_edit, 1, 1)
+        self.x2_edit = QSpinBox()
+        self.x2_edit.setRange(0, 9999)
+        self.x2_edit.setValue(250)
+        coord_layout.addWidget(QLabel("右下X:"), 1, 0)
+        coord_layout.addWidget(self.x2_edit, 1, 1)
         
-        self.h_edit = QSpinBox()
-        self.h_edit.setRange(10, 9999)
-        self.h_edit.setValue(60)
-        coord_layout.addWidget(QLabel("高度:"), 1, 2)
-        coord_layout.addWidget(self.h_edit, 1, 3)
-        
-        self.btn_select_area = QPushButton("在屏幕上框选区域")
-        self.btn_select_area.setObjectName("btn_select_area")
-        self.btn_select_area.clicked.connect(self.select_screen_area)
-        coord_layout.addWidget(self.btn_select_area, 2, 0, 1, 4)
+        self.y2_edit = QSpinBox()
+        self.y2_edit.setRange(0, 9999)
+        self.y2_edit.setValue(160)
+        coord_layout.addWidget(QLabel("右下Y:"), 1, 2)
+        coord_layout.addWidget(self.y2_edit, 1, 3)
         
         coord_group.setLayout(coord_layout)
         layout.addRow(coord_group)
@@ -131,32 +119,14 @@ class AddMonitorDialog(QDialog):
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addRow(buttons)
-        
-        self.selector = None
-    
-    def select_screen_area(self):
-        self.hide()
-        self.selector = ScreenSelector()
-        self.selector.area_selected.connect(self.on_area_selected)
-    
-    def on_area_selected(self, x, y, width, height):
-        if width > 0 and height > 0:
-            self.x_edit.setValue(x)
-            self.y_edit.setValue(y)
-            self.w_edit.setValue(width)
-            self.h_edit.setValue(height)
-        self.show()
-        self.raise_()
-        self.activateWindow()
-        self.selector = None
     
     def get_data(self):
         return {
             'name': self.name_edit.text().strip() or "未命名",
-            'x': self.x_edit.value(),
-            'y': self.y_edit.value(),
-            'width': self.w_edit.value(),
-            'height': self.h_edit.value(),
+            'x1': self.x1_edit.value(),
+            'y1': self.y1_edit.value(),
+            'x2': self.x2_edit.value(),
+            'y2': self.y2_edit.value(),
             'lower': self.lower_edit.value(),
             'upper': self.upper_edit.value()
         }
@@ -217,27 +187,13 @@ class MainWindow(QMainWindow):
             QPushButton#btn_delete:hover { background-color: #bb4a4a; }
             QPushButton#btn_save { background-color: #2a4a7a; }
             QPushButton#btn_save:hover { background-color: #3a5a8a; }
-            QTabWidget::pane {
-                border: 1px solid #3a3a4a;
-                border-radius: 6px;
-                background-color: #1a1a2a;
-            }
-            QTabBar::tab {
-                background-color: #2a2a3a;
-                color: #e0e0e0;
-                padding: 8px 16px;
-                border: 1px solid #3a3a4a;
-                border-bottom: none;
-                border-top-left-radius: 4px;
-                border-top-right-radius: 4px;
-            }
-            QTabBar::tab:selected { background-color: #3a3a4a; }
         """)
         
         self.monitoring = False
         self.monitor_thread = None
         self.config_file = "monitor_config.json"
         self.alarm_logs = []
+        self.alarm_sound_on = True
         
         self._setup_ui()
         self.load_config()
@@ -262,10 +218,15 @@ class MainWindow(QMainWindow):
         title.setFont(title_font)
         title_layout.addWidget(title)
         title_layout.addStretch()
-        subtitle = QLabel("-- 陈诚  (EasyOCR引擎)")
+        subtitle = QLabel("-- 陈诚 (EasyOCR)")
         subtitle.setStyleSheet("color: #6a6a7a; font-size: 13px;")
         title_layout.addWidget(subtitle)
         main_layout.addLayout(title_layout)
+        
+        # 提示：如何获取坐标
+        hint_label = QLabel("💡 提示：使用QQ截图(Ctrl+Alt+A)可以查看鼠标坐标，填入左上角和右下角坐标即可")
+        hint_label.setStyleSheet("color: #ddaa44; padding: 4px 8px; background-color: #2a2a3a; border-radius: 4px;")
+        main_layout.addWidget(hint_label)
         
         # OCR状态
         self.ocr_status_label = QLabel("OCR引擎: 初始化中...")
@@ -276,7 +237,7 @@ class MainWindow(QMainWindow):
         self.table = QTableWidget()
         self.table.setColumnCount(7)
         self.table.setHorizontalHeaderLabels([
-            "名称", "当前值", "下限", "上限", "坐标", "状态", "报警时间"
+            "名称", "当前值", "下限", "上限", "坐标区域", "状态", "报警时间"
         ])
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.setAlternatingRowColors(True)
@@ -320,6 +281,10 @@ class MainWindow(QMainWindow):
         self.btn_clear_alarm.clicked.connect(self.clear_all_alarms)
         btn_layout.addWidget(self.btn_clear_alarm)
         
+        self.btn_sound = QPushButton("🔊 声音开启")
+        self.btn_sound.clicked.connect(self.toggle_sound)
+        btn_layout.addWidget(self.btn_sound)
+        
         self.btn_save = QPushButton("保存配置")
         self.btn_save.setObjectName("btn_save")
         self.btn_save.clicked.connect(self.save_config)
@@ -343,6 +308,10 @@ class MainWindow(QMainWindow):
         
         main_layout.addLayout(status_layout)
     
+    def toggle_sound(self):
+        self.alarm_sound_on = not self.alarm_sound_on
+        self.btn_sound.setText("🔊 声音开启" if self.alarm_sound_on else "🔇 声音关闭")
+    
     def set_ocr_status(self, status, is_ready=False):
         color = "#44ddaa" if is_ready else "#ddaa44"
         self.ocr_status_label.setStyleSheet(
@@ -360,7 +329,7 @@ class MainWindow(QMainWindow):
             self.table.setItem(row, 1, QTableWidgetItem("--"))
             self.table.setItem(row, 2, QTableWidgetItem(str(data['lower'])))
             self.table.setItem(row, 3, QTableWidgetItem(str(data['upper'])))
-            self.table.setItem(row, 4, QTableWidgetItem(f"{data['x']},{data['y']},{data['width']},{data['height']}"))
+            self.table.setItem(row, 4, QTableWidgetItem(f"({data['x1']},{data['y1']})-({data['x2']},{data['y2']})"))
             self.table.setItem(row, 5, QTableWidgetItem("待监控"))
             self.table.setItem(row, 6, QTableWidgetItem("--"))
             self.status_label.setText(f"状态: 已添加 [{data['name']}]")
@@ -373,14 +342,21 @@ class MainWindow(QMainWindow):
         name = self.table.item(row, 0).text()
         lower = float(self.table.item(row, 2).text())
         upper = float(self.table.item(row, 3).text())
-        coords = self.table.item(row, 4).text().split(',')
-        x, y, w, h = map(int, coords)
+        coords = self.table.item(row, 4).text()
+        # 解析坐标: "(x1,y1)-(x2,y2)"
+        import re
+        nums = re.findall(r'\d+', coords)
+        if len(nums) >= 4:
+            x1, y1, x2, y2 = map(int, nums[:4])
+        else:
+            x1, y1, x2, y2 = 100, 100, 250, 160
+        
         dialog = AddMonitorDialog(self)
         dialog.name_edit.setText(name)
-        dialog.x_edit.setValue(x)
-        dialog.y_edit.setValue(y)
-        dialog.w_edit.setValue(w)
-        dialog.h_edit.setValue(h)
+        dialog.x1_edit.setValue(x1)
+        dialog.y1_edit.setValue(y1)
+        dialog.x2_edit.setValue(x2)
+        dialog.y2_edit.setValue(y2)
         dialog.lower_edit.setValue(lower)
         dialog.upper_edit.setValue(upper)
         if dialog.exec() == QDialog.Accepted:
@@ -388,7 +364,7 @@ class MainWindow(QMainWindow):
             self.table.setItem(row, 0, QTableWidgetItem(data['name']))
             self.table.setItem(row, 2, QTableWidgetItem(str(data['lower'])))
             self.table.setItem(row, 3, QTableWidgetItem(str(data['upper'])))
-            self.table.setItem(row, 4, QTableWidgetItem(f"{data['x']},{data['y']},{data['width']},{data['height']}"))
+            self.table.setItem(row, 4, QTableWidgetItem(f"({data['x1']},{data['y1']})-({data['x2']},{data['y2']})"))
             self.status_label.setText(f"状态: 已编辑 [{data['name']}]")
     
     def delete_monitor_point(self):
@@ -414,11 +390,17 @@ class MainWindow(QMainWindow):
             name = self.table.item(row, 0).text()
             lower = float(self.table.item(row, 2).text())
             upper = float(self.table.item(row, 3).text())
-            coords = self.table.item(row, 4).text().split(',')
-            x, y, w, h = map(int, coords)
+            coords = self.table.item(row, 4).text()
+            import re
+            nums = re.findall(r'\d+', coords)
+            if len(nums) >= 4:
+                x1, y1, x2, y2 = map(int, nums[:4])
+            else:
+                continue
             monitors.append({
-                'name': name, 'x': x, 'y': y,
-                'width': w, 'height': h,
+                'name': name,
+                'x1': x1, 'y1': y1,
+                'x2': x2, 'y2': y2,
                 'lower': lower, 'upper': upper,
                 'row': row
             })
@@ -462,6 +444,14 @@ class MainWindow(QMainWindow):
         
         self._update_alarm_count()
         self.status_label.setText(f"报警: {name} = {value:.2f} [范围: {lower}-{upper}]")
+        
+        # 报警声音
+        if self.alarm_sound_on:
+            try:
+                winsound.Beep(800, 300)
+                winsound.Beep(1000, 300)
+            except:
+                pass
         
         # 记录到日志文件
         with open("alarm_log.txt", "a", encoding="utf-8") as f:
