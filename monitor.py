@@ -54,15 +54,13 @@ class MonitorThread(QThread):
             self.ocr_status.emit("正在加载PaddleOCR (首次使用自动下载模型)...", False)
             self.download_progress.emit(0)
             
-            # 创建PaddleOCR实例 - 会自动下载模型
+            # 创建PaddleOCR实例 - 使用正确的参数
             self.ocr = PaddleOCR(
-                lang='en',  # 英文
-                use_angle_cls=False,
-                use_gpu=False,
-                det_db_thresh=0.3,
-                rec_char_type='en',  # 只识别英文数字
-                show_log=False,  # 不显示日志
-                enable_mkldnn=False
+                lang='en',           # 英文
+                use_angle_cls=False, # 不使用角度分类
+                use_gpu=False,       # 不使用GPU
+                show_log=False,      # 不显示日志
+                enable_mkldnn=False  # 不使用MKLDNN
             )
             
             # 如果初始化成功，标记就绪
@@ -142,16 +140,22 @@ class MonitorThread(QThread):
             # 预处理
             processed = self._preprocess_image(img_np)
             
-            # PaddleOCR识别 - 只识别英文数字
-            result = self.ocr.ocr(processed, det=False, rec=True, cls=False)
+            # PaddleOCR识别
+            # 只检测文字，不进行检测和角度分类
+            result = self.ocr.ocr(processed, cls=False)
             
             if result and len(result) > 0:
-                # 提取识别的文本
-                text = result[0][0] if isinstance(result[0], list) else result[0]
-                # 提取数字
-                numbers = re.findall(r'-?\d+\.?\d*', text)
-                if numbers:
-                    return float(numbers[0])
+                # 遍历所有识别结果
+                for line in result:
+                    if line:
+                        for word_info in line:
+                            # word_info 格式: [bbox, (text, confidence)]
+                            if len(word_info) >= 2:
+                                text = word_info[1][0] if isinstance(word_info[1], tuple) else word_info[1]
+                                # 提取数字
+                                numbers = re.findall(r'-?\d+\.?\d*', text)
+                                if numbers:
+                                    return float(numbers[0])
             
             return None
             
