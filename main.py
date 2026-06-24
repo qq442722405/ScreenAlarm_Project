@@ -734,7 +734,7 @@ class MainWindow(QMainWindow):
         
         # 检查该行是否启用声音
         sound_check = self.table.cellWidget(row, 8)
-        if sound_check and not sound_check.isChecked():
+        if sound_check and isinstance(sound_check, QCheckBox) and not sound_check.isChecked():
             return
         
         self.setWindowFlags(self.windowFlags() | Qt.WindowStaysOnTopHint)
@@ -907,6 +907,16 @@ class MainWindow(QMainWindow):
         )
         self.ocr_status_label.setText(f"OCR引擎: {status}")
     
+    def _is_row_enabled(self, row):
+        """检查某行是否启用"""
+        try:
+            widget = self.table.cellWidget(row, 0)
+            if widget and isinstance(widget, QCheckBox):
+                return widget.isChecked()
+            return False
+        except:
+            return False
+    
     def start_monitor(self):
         if self.monitoring:
             return
@@ -919,8 +929,7 @@ class MainWindow(QMainWindow):
         for row in range(self.table.rowCount()):
             if self.table.cellWidget(row, 0) is not None:
                 continue
-            enable_check = self.table.cellWidget(row, 0)
-            if enable_check and enable_check.isChecked():
+            if self._is_row_enabled(row):
                 has_enabled = True
                 break
         
@@ -928,7 +937,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "提示", "没有启用的监控点，请勾选「启用」复选框")
             return
         
-        # 收集所有监控点（包括未启用的，传给线程但线程内判断）
+        # 收集所有监控点数据
         monitors = []
         for row in range(self.table.rowCount()):
             if self.table.cellWidget(row, 0) is not None:
@@ -962,9 +971,8 @@ class MainWindow(QMainWindow):
         self.monitor_thread.ocr_status.connect(self.set_ocr_status)
         self.monitor_thread.download_progress.connect(self.on_download_progress)
         
-        # 传入表格引用，让线程检查启用状态
-        self.monitor_thread.table = self.table
-        self.monitor_thread.get_enabled = self._get_row_enabled
+        # 传入检查方法
+        self.monitor_thread.is_row_enabled = self._is_row_enabled
         
         self.monitor_thread.start()
         
@@ -972,16 +980,6 @@ class MainWindow(QMainWindow):
         self.btn_start.setEnabled(False)
         self.btn_stop.setEnabled(True)
         self.status_label.setText("状态: 监控运行中")
-    
-    def _get_row_enabled(self, row):
-        """获取某行是否启用"""
-        try:
-            widget = self.table.cellWidget(row, 0)
-            if widget and isinstance(widget, QCheckBox):
-                return widget.isChecked()
-            return True
-        except:
-            return True
     
     def stop_monitor(self):
         if self.monitor_thread and self.monitor_thread.isRunning():
