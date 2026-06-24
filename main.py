@@ -52,7 +52,6 @@ class AlarmSoundPlayer:
         
         if os.path.exists(sound_path):
             self.sound_file = sound_path
-            print(f"✅ 加载报警音频: {sound_path}")
             return
         
         if getattr(sys, 'frozen', False):
@@ -60,10 +59,7 @@ class AlarmSoundPlayer:
             sound_path = os.path.join(exe_dir, "警报声.mp3")
             if os.path.exists(sound_path):
                 self.sound_file = sound_path
-                print(f"✅ 加载报警音频: {sound_path}")
                 return
-        
-        print("⚠️ 未找到 警报声.mp3，将使用系统Beep")
     
     def play(self):
         if not self.sound_file or not os.path.exists(self.sound_file):
@@ -557,7 +553,6 @@ class MainWindow(QMainWindow):
         self.alarm_sound_on = True
         self.add_row_widget = None
         self.detect_interval = 500
-        self.monitor_data = []  # 存储每个监控点的数据
         
         self.alarm_player = AlarmSoundPlayer()
         self.alarm_file = self.alarm_player.sound_file or ""
@@ -599,12 +594,10 @@ class MainWindow(QMainWindow):
         hint_layout.addWidget(hint_label)
         main_layout.addWidget(hint_frame)
         
-        # OCR状态
         self.ocr_status_label = QLabel("OCR引擎: 初始化中...")
         self.ocr_status_label.setStyleSheet("padding: 4px 12px; background-color: #2a2a3a; border-radius: 4px; color: #ddaa44;")
         main_layout.addWidget(self.ocr_status_label)
         
-        # 下载进度条
         self.download_progress = QProgressBar()
         self.download_progress.setVisible(False)
         self.download_progress.setRange(0, 100)
@@ -629,7 +622,7 @@ class MainWindow(QMainWindow):
         self.table.setColumnWidth(5, 120)
         self.table.setColumnWidth(6, 80)
         self.table.setColumnWidth(7, 100)
-        self.table.setColumnWidth(8, 60)
+        self.table.setColumnWidth(8, 50)
         self.table.horizontalHeader().setStretchLastSection(True)
         main_layout.addWidget(self.table)
         
@@ -796,13 +789,13 @@ class MainWindow(QMainWindow):
         row = self.table.rowCount()
         self.table.insertRow(row)
         
-        # 启用复选框
+        # 启用复选框 - 默认勾选
         enable_check = QCheckBox()
         enable_check.setChecked(True)
         enable_check.setStyleSheet("margin-left: 10px;")
         self.table.setCellWidget(row, 0, enable_check)
         
-        # 声音复选框
+        # 声音复选框 - 默认勾选
         sound_check = QCheckBox()
         sound_check.setChecked(True)
         sound_check.setStyleSheet("margin-left: 10px;")
@@ -921,16 +914,25 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "提示", "请先添加监控点")
             return
         
+        # 检查是否有启用的监控点
+        has_enabled = False
+        for row in range(self.table.rowCount()):
+            if self.table.cellWidget(row, 0) is not None:
+                continue
+            enable_check = self.table.cellWidget(row, 0)
+            if enable_check and enable_check.isChecked():
+                has_enabled = True
+                break
+        
+        if not has_enabled:
+            QMessageBox.warning(self, "提示", "没有启用的监控点，请勾选「启用」复选框")
+            return
+        
+        # 收集所有监控点（包括未启用的，传给线程但线程内判断）
         monitors = []
         for row in range(self.table.rowCount()):
             if self.table.cellWidget(row, 0) is not None:
                 continue
-            
-            # 检查是否启用
-            enable_check = self.table.cellWidget(row, 0)
-            if enable_check and not enable_check.isChecked():
-                continue
-            
             name = self.table.item(row, 1).text()
             lower = float(self.table.item(row, 3).text())
             upper = float(self.table.item(row, 4).text())
@@ -949,7 +951,7 @@ class MainWindow(QMainWindow):
             })
         
         if not monitors:
-            QMessageBox.warning(self, "提示", "没有启用的监控点")
+            QMessageBox.warning(self, "提示", "没有有效的监控点数据")
             return
         
         self.monitor_thread = MonitorThread(monitors)
@@ -959,12 +961,27 @@ class MainWindow(QMainWindow):
         self.monitor_thread.status_updated.connect(self.on_status_updated)
         self.monitor_thread.ocr_status.connect(self.set_ocr_status)
         self.monitor_thread.download_progress.connect(self.on_download_progress)
+        
+        # 传入表格引用，让线程检查启用状态
+        self.monitor_thread.table = self.table
+        self.monitor_thread.get_enabled = self._get_row_enabled
+        
         self.monitor_thread.start()
         
         self.monitoring = True
         self.btn_start.setEnabled(False)
         self.btn_stop.setEnabled(True)
         self.status_label.setText("状态: 监控运行中")
+    
+    def _get_row_enabled(self, row):
+        """获取某行是否启用"""
+        try:
+            widget = self.table.cellWidget(row, 0)
+            if widget and isinstance(widget, QCheckBox):
+                return widget.isChecked()
+            return True
+        except:
+            return True
     
     def stop_monitor(self):
         if self.monitor_thread and self.monitor_thread.isRunning():
@@ -997,7 +1014,6 @@ class MainWindow(QMainWindow):
         self._update_alarm_count()
         self.status_label.setText(f"报警: {name} = {value:.2f} [范围: {lower}-{upper}]")
         
-        # 播放声音（检查该行是否启用声音）
         self.play_alarm(row)
         
         with open("alarm_log.txt", "a", encoding="utf-8") as f:
@@ -1012,6 +1028,10 @@ class MainWindow(QMainWindow):
             status_item = QTableWidgetItem("识别失败")
             status_item.setBackground(QBrush(QColor(100, 100, 100)))
             status_item.setForeground(QBrush(QColor(255, 255, 255)))
+        elif status == 'disabled':
+            status_item = QTableWidgetItem("已禁用")
+            status_item.setBackground(QBrush(QColor(80, 80, 80)))
+            status_item.setForeground(QBrush(QColor(200, 200, 200)))
         else:
             status_item = QTableWidgetItem(status)
         self.table.setItem(row, 6, status_item)
