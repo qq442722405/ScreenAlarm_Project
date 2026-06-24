@@ -558,6 +558,9 @@ class MainWindow(QMainWindow):
         self.alarm_file = self.alarm_player.sound_file or ""
         self.alarm_playing = False
         
+        # 存储每行的启用状态 {row: True/False}
+        self.row_enabled = {}
+        
         self._setup_ui()
         self.load_config()
         
@@ -708,6 +711,32 @@ class MainWindow(QMainWindow):
         status_layout.addWidget(self.alarm_status_label, 1)
         
         main_layout.addLayout(status_layout)
+        
+        # 连接表格信号，跟踪行变化
+        self.table.model().rowsInserted.connect(self._on_rows_inserted)
+        self.table.model().rowsRemoved.connect(self._on_rows_removed)
+    
+    def _on_rows_inserted(self, parent, first, last):
+        """行插入时更新状态字典"""
+        for row in range(first, last + 1):
+            # 检查是否已经有控件
+            widget = self.table.cellWidget(row, 0)
+            if widget and isinstance(widget, QCheckBox):
+                self.row_enabled[row] = widget.isChecked()
+    
+    def _on_rows_removed(self, parent, first, last):
+        """行删除时更新状态字典"""
+        for row in range(first, last + 1):
+            if row in self.row_enabled:
+                del self.row_enabled[row]
+    
+    def _get_row_enabled(self, row):
+        """获取某行是否启用"""
+        return self.row_enabled.get(row, True)
+    
+    def _set_row_enabled(self, row, enabled):
+        """设置某行启用状态"""
+        self.row_enabled[row] = enabled
     
     def on_interval_changed(self, text):
         self.detect_interval = int(text.replace("ms", ""))
@@ -794,6 +823,10 @@ class MainWindow(QMainWindow):
         enable_check.setChecked(True)
         enable_check.setStyleSheet("margin-left: 10px;")
         self.table.setCellWidget(row, 0, enable_check)
+        # 存储启用状态
+        self.row_enabled[row] = True
+        # 连接状态变化信号
+        enable_check.stateChanged.connect(lambda state, r=row: self._on_enable_changed(r, state))
         
         # 声音复选框 - 默认勾选
         sound_check = QCheckBox()
@@ -810,6 +843,10 @@ class MainWindow(QMainWindow):
         self.table.setItem(row, 7, QTableWidgetItem("--"))
         
         self.status_label.setText(f"状态: 已添加 [{data['name']}]")
+    
+    def _on_enable_changed(self, row, state):
+        """启用复选框状态变化"""
+        self.row_enabled[row] = (state == 2)  # 2表示选中
     
     def on_add_canceled(self):
         self.table.removeRow(0)
@@ -836,7 +873,11 @@ class MainWindow(QMainWindow):
         if self.add_row_widget:
             return
         self.btn_add.setEnabled(False)
+        # 删除旧行
         self.table.removeRow(row)
+        if row in self.row_enabled:
+            del self.row_enabled[row]
+        # 插入新行
         self.table.insertRow(row)
         self.table.setRowHeight(row, 50)
         self.add_row_widget = AddMonitorRow(self.table)
@@ -862,6 +903,8 @@ class MainWindow(QMainWindow):
         enable_check.setChecked(True)
         enable_check.setStyleSheet("margin-left: 10px;")
         self.table.setCellWidget(row, 0, enable_check)
+        self.row_enabled[row] = True
+        enable_check.stateChanged.connect(lambda state, r=row: self._on_enable_changed(r, state))
         
         sound_check = QCheckBox()
         sound_check.setChecked(True)
@@ -881,6 +924,8 @@ class MainWindow(QMainWindow):
         for row in range(self.table.rowCount()):
             if self.table.cellWidget(row, 0) == self.add_row_widget:
                 self.table.removeRow(row)
+                if row in self.row_enabled:
+                    del self.row_enabled[row]
                 break
         self.add_row_widget = None
         self.btn_add.setEnabled(True)
@@ -898,6 +943,8 @@ class MainWindow(QMainWindow):
         reply = QMessageBox.question(self, "确认删除", f"确定要删除 [{name}] 吗？")
         if reply == QMessageBox.Yes:
             self.table.removeRow(row)
+            if row in self.row_enabled:
+                del self.row_enabled[row]
             self.status_label.setText("状态: 已删除")
     
     def set_ocr_status(self, status, is_ready=False):
@@ -907,16 +954,6 @@ class MainWindow(QMainWindow):
         )
         self.ocr_status_label.setText(f"OCR引擎: {status}")
     
-    def _is_row_enabled(self, row):
-        """检查某行是否启用"""
-        try:
-            widget = self.table.cellWidget(row, 0)
-            if widget and isinstance(widget, QCheckBox):
-                return widget.isChecked()
-            return False
-        except:
-            return False
-    
     def start_monitor(self):
         if self.monitoring:
             return
@@ -924,12 +961,12 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "提示", "请先添加监控点")
             return
         
-        # 检查是否有启用的监控点
+        # 检查是否有启用的监控点 (1=启用, 0=不启用)
         has_enabled = False
         for row in range(self.table.rowCount()):
             if self.table.cellWidget(row, 0) is not None:
                 continue
-            if self._is_row_enabled(row):
+            if self._get_row_enabled(row):
                 has_enabled = True
                 break
         
@@ -956,7 +993,8 @@ class MainWindow(QMainWindow):
                 'x': x, 'y': y,
                 'width': w, 'height': h,
                 'lower': lower, 'upper': upper,
-                'row': row
+                'row': row,
+                'enabled': self._get_row_enabled(row)  # 传递启用状态
             })
         
         if not monitors:
@@ -972,7 +1010,7 @@ class MainWindow(QMainWindow):
         self.monitor_thread.download_progress.connect(self.on_download_progress)
         
         # 传入检查方法
-        self.monitor_thread.is_row_enabled = self._is_row_enabled
+        self.monitor_thread.get_row_enabled = self._get_row_enabled
         
         self.monitor_thread.start()
         
@@ -1086,7 +1124,7 @@ class MainWindow(QMainWindow):
                 'lower': float(self.table.item(row, 3).text()),
                 'upper': float(self.table.item(row, 4).text()),
                 'coords': self.table.item(row, 5).text(),
-                'enabled': enable_check.isChecked() if enable_check else True,
+                'enabled': self._get_row_enabled(row),
                 'sound_enabled': sound_check.isChecked() if sound_check else True
             })
         try:
@@ -1103,6 +1141,7 @@ class MainWindow(QMainWindow):
             with open(self.config_file, 'r', encoding='utf-8') as f:
                 config = json.load(f)
             self.table.setRowCount(0)
+            self.row_enabled.clear()
             for item in config.get('monitors', []):
                 row = self.table.rowCount()
                 self.table.insertRow(row)
@@ -1111,6 +1150,8 @@ class MainWindow(QMainWindow):
                 enable_check.setChecked(item.get('enabled', True))
                 enable_check.setStyleSheet("margin-left: 10px;")
                 self.table.setCellWidget(row, 0, enable_check)
+                self.row_enabled[row] = item.get('enabled', True)
+                enable_check.stateChanged.connect(lambda state, r=row: self._on_enable_changed(r, state))
                 
                 sound_check = QCheckBox()
                 sound_check.setChecked(item.get('sound_enabled', True))
