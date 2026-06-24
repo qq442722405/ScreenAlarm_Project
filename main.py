@@ -504,6 +504,8 @@ class MainWindow(QMainWindow):
             QPushButton#btn_delete:hover { background-color: #bb4a4a; }
             QPushButton#btn_save { background-color: #2a4a7a; }
             QPushButton#btn_save:hover { background-color: #3a5a8a; }
+            QPushButton#btn_retry_ocr { background-color: #2a5a8a; }
+            QPushButton#btn_retry_ocr:hover { background-color: #3a6a9a; }
             QPushButton#btn_clear_cache { background-color: #8a4a2a; }
             QPushButton#btn_clear_cache:hover { background-color: #aa5a3a; }
             QFrame#hint_frame {
@@ -593,7 +595,7 @@ class MainWindow(QMainWindow):
         title.setFont(title_font)
         title_layout.addWidget(title)
         title_layout.addStretch()
-        subtitle = QLabel("-- 陈诚 (Tesseract)")
+        subtitle = QLabel("-- 陈诚 (PaddleOCR)")
         subtitle.setStyleSheet("color: #6a6a7a; font-size: 13px;")
         title_layout.addWidget(subtitle)
         main_layout.addLayout(title_layout)
@@ -612,7 +614,7 @@ class MainWindow(QMainWindow):
         self.ocr_status_label.setStyleSheet("padding: 4px 12px; background-color: #2a2a3a; border-radius: 4px; color: #ddaa44;")
         main_layout.addWidget(self.ocr_status_label)
         
-        # 下载进度条（Tesseract不需要下载，但保留用于兼容）
+        # 下载进度条
         self.download_progress = QProgressBar()
         self.download_progress.setVisible(False)
         self.download_progress.setRange(0, 100)
@@ -719,7 +721,79 @@ class MainWindow(QMainWindow):
         self.alarm_status_label.setStyleSheet("padding: 6px; background-color: #2a2a3a; border-radius: 4px; color: #6a6a7a;")
         status_layout.addWidget(self.alarm_status_label, 1)
         
+        # OCR重试按钮
+        self.btn_retry_ocr = QPushButton("🔄 重新加载OCR")
+        self.btn_retry_ocr.setObjectName("btn_retry_ocr")
+        self.btn_retry_ocr.clicked.connect(self.retry_ocr)
+        status_layout.addWidget(self.btn_retry_ocr)
+        
+        # 删除缓存按钮
+        self.btn_clear_cache = QPushButton("🗑️ 删除模型缓存")
+        self.btn_clear_cache.setObjectName("btn_clear_cache")
+        self.btn_clear_cache.clicked.connect(self.clear_model_cache)
+        status_layout.addWidget(self.btn_clear_cache)
+        
         main_layout.addLayout(status_layout)
+    
+    def retry_ocr(self):
+        """重新加载OCR"""
+        if self.monitoring:
+            QMessageBox.warning(self, "提示", "请先停止监控再重新加载OCR")
+            return
+        
+        self.ocr_status_label.setText("OCR引擎: 正在重新加载...")
+        self.ocr_status_label.setStyleSheet("padding: 4px 12px; background-color: #2a2a3a; border-radius: 4px; color: #ddaa44;")
+        
+        # 重新创建监控线程并初始化OCR
+        if self.monitor_thread:
+            self.monitor_thread.stop()
+            self.monitor_thread.wait()
+        
+        # 创建一个临时线程来重新加载OCR
+        temp_thread = MonitorThread([])
+        temp_thread.ocr_status.connect(self.set_ocr_status)
+        temp_thread.download_progress.connect(self.on_download_progress)
+        temp_thread._init_ocr()
+        temp_thread.deleteLater()
+        
+        self.status_label.setText("状态: OCR已重新加载")
+    
+    def clear_model_cache(self):
+        """删除下载的OCR模型缓存"""
+        # PaddleOCR 模型缓存目录
+        paddle_cache = os.path.join(os.path.expanduser("~"), ".paddleocr")
+        
+        if not os.path.exists(paddle_cache):
+            QMessageBox.information(self, "提示", "没有找到模型缓存文件")
+            return
+        
+        # 计算大小
+        total_size = 0
+        for dirpath, dirnames, filenames in os.walk(paddle_cache):
+            for f in filenames:
+                fp = os.path.join(dirpath, f)
+                total_size += os.path.getsize(fp)
+        
+        size_mb = total_size / (1024 * 1024)
+        
+        reply = QMessageBox.question(
+            self, 
+            "确认删除", 
+            f"确定要删除PaddleOCR模型缓存吗？\n\n"
+            f"目录: {paddle_cache}\n"
+            f"大小: {size_mb:.1f} MB\n\n"
+            "删除后下次启动会重新下载模型",
+            QMessageBox.Yes | QMessageBox.No
+        )
+        
+        if reply == QMessageBox.Yes:
+            try:
+                shutil.rmtree(paddle_cache)
+                self.status_label.setText(f"状态: 已删除模型缓存 ({size_mb:.1f} MB)")
+                self.ocr_status_label.setText("OCR引擎: 已清除缓存，重启后将重新下载")
+                QMessageBox.information(self, "提示", "模型缓存已删除")
+            except Exception as e:
+                QMessageBox.warning(self, "错误", f"删除失败: {str(e)}")
     
     def on_interval_changed(self, text):
         self.detect_interval = int(text.replace("ms", ""))
@@ -882,8 +956,11 @@ class MainWindow(QMainWindow):
         self.ocr_status_label.setText(f"OCR引擎: {status}")
     
     def on_download_progress(self, value):
-        """下载进度更新（Tesseract不需要下载）"""
-        pass
+        """下载进度更新"""
+        self.download_progress.setVisible(True)
+        self.download_progress.setValue(value)
+        if value >= 100:
+            QTimer.singleShot(1000, lambda: self.download_progress.setVisible(False))
     
     def start_monitor(self):
         if self.monitoring:
@@ -923,6 +1000,7 @@ class MainWindow(QMainWindow):
         self.monitor_thread.alarm_triggered.connect(self.on_alarm_triggered)
         self.monitor_thread.status_updated.connect(self.on_status_updated)
         self.monitor_thread.ocr_status.connect(self.set_ocr_status)
+        self.monitor_thread.download_progress.connect(self.on_download_progress)
         self.monitor_thread.start()
         
         self.monitoring = True
