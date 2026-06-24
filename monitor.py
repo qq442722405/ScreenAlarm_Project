@@ -55,7 +55,7 @@ class MonitorThread(QThread):
             return False
     
     def _init_ocr(self):
-        """初始化OCR - 使用最简参数"""
+        """初始化OCR - 兼容所有版本"""
         if not OCR_AVAILABLE:
             self.ocr_status.emit("PaddleOCR未安装，请运行: pip install paddleocr", False)
             return False
@@ -67,14 +67,30 @@ class MonitorThread(QThread):
             self.ocr_status.emit("正在下载/加载PaddleOCR模型...", False)
             self.download_progress.emit(0)
             
-            # 使用最简参数 - 兼容所有版本
-            # 只传 lang 参数，其他都用默认值
-            self.ocr = PaddleOCR(lang='en')
+            # 方法1：使用最简参数创建OCR对象
+            try:
+                self.ocr = PaddleOCR(
+                    use_angle_cls=False,
+                    lang='en',
+                    show_log=False
+                )
+            except:
+                try:
+                    # 方法2：如果方法1失败，尝试更简参数
+                    self.ocr = PaddleOCR(lang='en')
+                except:
+                    # 方法3：如果都失败，使用空参数
+                    self.ocr = PaddleOCR()
             
-            self.ocr_ready = True
-            self.download_progress.emit(100)
-            self.ocr_status.emit("就绪 ✅", True)
-            return True
+            # 测试OCR是否可用
+            if self.ocr is not None:
+                self.ocr_ready = True
+                self.download_progress.emit(100)
+                self.ocr_status.emit("就绪 ✅", True)
+                return True
+            else:
+                self.ocr_status.emit("创建OCR对象失败", False)
+                return False
             
         except Exception as e:
             error_msg = str(e)
@@ -89,11 +105,9 @@ class MonitorThread(QThread):
         self.ocr_ready = False
         self.ocr = None
         
-        # 删除缓存
         self.ocr_status.emit("正在删除旧模型缓存...", False)
         self._delete_model_cache()
         
-        # 重新初始化
         return self._init_ocr()
     
     def _preprocess_image(self, img_np):
@@ -148,18 +162,35 @@ class MonitorThread(QThread):
             
             processed = self._preprocess_image(img_np)
             
-            # 使用 ocr 方法识别
-            result = self.ocr.ocr(processed, cls=False)
+            # 兼容新旧版本的OCR调用
+            try:
+                # 新版PaddleOCR使用 ocr 方法
+                result = self.ocr.ocr(processed, cls=False)
+            except AttributeError:
+                try:
+                    # 旧版PaddleOCR使用 predict 方法
+                    result = self.ocr.predict(processed)
+                except:
+                    # 如果都失败，尝试直接调用
+                    result = self.ocr(processed)
             
             if result and len(result) > 0:
+                # 处理不同版本的返回格式
                 for line in result:
                     if line:
-                        for word_info in line:
-                            if len(word_info) >= 2:
-                                text = word_info[1][0] if isinstance(word_info[1], tuple) else word_info[1]
-                                numbers = re.findall(r'-?\d+\.?\d*', text)
-                                if numbers:
-                                    return float(numbers[0])
+                        # 检查是否是列表嵌套结构
+                        if isinstance(line, list) and len(line) > 0:
+                            for word_info in line:
+                                if isinstance(word_info, (list, tuple)) and len(word_info) >= 2:
+                                    text = word_info[1][0] if isinstance(word_info[1], (list, tuple)) else str(word_info[1])
+                                    numbers = re.findall(r'-?\d+\.?\d*', text)
+                                    if numbers:
+                                        return float(numbers[0])
+                        elif isinstance(line, (list, tuple)) and len(line) >= 2:
+                            text = line[1][0] if isinstance(line[1], (list, tuple)) else str(line[1])
+                            numbers = re.findall(r'-?\d+\.?\d*', text)
+                            if numbers:
+                                return float(numbers[0])
             
             return None
             
