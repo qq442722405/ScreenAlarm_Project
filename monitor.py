@@ -84,8 +84,7 @@ class MonitorThread(QThread):
         while self.running:
             for monitor in self.monitors:
                 if not self.running:
-                    break
-                row = monitor['row']
+                    break                row = monitor['row']
                 value = self._capture_and_ocr(
                     monitor['x1'], monitor['y1'],
                     monitor['x2'], monitor['y2']
