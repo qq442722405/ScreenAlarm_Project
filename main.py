@@ -721,8 +721,8 @@ class MainWindow(QMainWindow):
         self.alarm_status_label.setStyleSheet("padding: 6px; background-color: #2a2a3a; border-radius: 4px; color: #6a6a7a;")
         status_layout.addWidget(self.alarm_status_label, 1)
         
-        # OCR重试按钮
-        self.btn_retry_ocr = QPushButton("🔄 重新加载OCR")
+        # 重新下载模型按钮
+        self.btn_retry_ocr = QPushButton("🔄 重新下载模型")
         self.btn_retry_ocr.setObjectName("btn_retry_ocr")
         self.btn_retry_ocr.clicked.connect(self.retry_ocr)
         status_layout.addWidget(self.btn_retry_ocr)
@@ -736,27 +736,31 @@ class MainWindow(QMainWindow):
         main_layout.addLayout(status_layout)
     
     def retry_ocr(self):
-        """重新加载OCR"""
+        """重新下载模型"""
         if self.monitoring:
-            QMessageBox.warning(self, "提示", "请先停止监控再重新加载OCR")
+            QMessageBox.warning(self, "提示", "请先停止监控再重新下载模型")
             return
         
-        self.ocr_status_label.setText("OCR引擎: 正在重新加载...")
+        self.ocr_status_label.setText("OCR引擎: 正在删除缓存并重新下载...")
         self.ocr_status_label.setStyleSheet("padding: 4px 12px; background-color: #2a2a3a; border-radius: 4px; color: #ddaa44;")
         
-        # 重新创建监控线程并初始化OCR
+        # 重新创建监控线程并重新初始化OCR
         if self.monitor_thread:
             self.monitor_thread.stop()
             self.monitor_thread.wait()
         
-        # 创建一个临时线程来重新加载OCR
+        # 创建一个临时线程来重新下载模型
         temp_thread = MonitorThread([])
         temp_thread.ocr_status.connect(self.set_ocr_status)
         temp_thread.download_progress.connect(self.on_download_progress)
-        temp_thread._init_ocr()
-        temp_thread.deleteLater()
         
-        self.status_label.setText("状态: OCR已重新加载")
+        # 调用重新初始化方法
+        if temp_thread.reinit_ocr():
+            self.status_label.setText("状态: 模型已重新下载")
+        else:
+            self.status_label.setText("状态: 下载失败，请检查网络")
+        
+        temp_thread.deleteLater()
     
     def clear_model_cache(self):
         """删除下载的OCR模型缓存"""
