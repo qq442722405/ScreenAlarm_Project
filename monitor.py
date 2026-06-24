@@ -2,7 +2,6 @@ import time
 import re
 import os
 import sys
-import urllib.request
 from PySide6.QtCore import QThread, Signal
 import cv2
 import numpy as np
@@ -22,7 +21,7 @@ class MonitorThread(QThread):
     alarm_triggered = Signal(int, str, float, float, float)
     status_updated = Signal(int, str)
     ocr_status = Signal(str, bool)
-    download_progress = Signal(int)  # 下载进度
+    download_progress = Signal(int)
     
     def __init__(self, monitors):
         super().__init__()
@@ -32,6 +31,8 @@ class MonitorThread(QThread):
         self.reader = None
         self.ocr_ready = False
         self.interval_ms = 500
+        self.table = None
+        self.get_enabled = None
         
         self.value_cache = {}
         self.cache_count = {}
@@ -41,6 +42,15 @@ class MonitorThread(QThread):
     
     def stop(self):
         self.running = False
+    
+    def _is_row_enabled(self, row):
+        """检查某行是否启用"""
+        if self.get_enabled:
+            try:
+                return self.get_enabled(row)
+            except:
+                return True
+        return True
     
     def _init_ocr(self):
         """初始化EasyOCR - 自动下载模型"""
@@ -62,7 +72,6 @@ class MonitorThread(QThread):
             self.ocr_status.emit("正在下载/加载EasyOCR模型 (首次约200MB)...", False)
             self.download_progress.emit(0)
             
-            # 创建Reader，自动下载模型
             self.reader = easyocr.Reader(
                 ['en'],
                 gpu=False,
@@ -143,7 +152,6 @@ class MonitorThread(QThread):
                     if numbers:
                         return float(numbers[0])
             
-            # 尝试原图
             result2 = self.reader.readtext(
                 img_np,
                 allowlist='0123456789.-',
@@ -158,7 +166,6 @@ class MonitorThread(QThread):
             return None
             
         except Exception as e:
-            print(f"识别异常: {e}")
             return None
     
     def run(self):
@@ -178,6 +185,14 @@ class MonitorThread(QThread):
                 if not self.running:
                     break
                 row = monitor['row']
+                
+                # 检查该行是否启用
+                if not self._is_row_enabled(row):
+                    # 如果禁用，更新状态为"已禁用"
+                    self.status_updated.emit(row, 'disabled')
+                    status[row]['alarm'] = False
+                    continue
+                
                 value = self._capture_and_ocr(
                     monitor['x'], monitor['y'],
                     monitor['width'], monitor['height']
