@@ -41,24 +41,39 @@ class MonitorThread(QThread):
         self.running = False
     
     def _get_model_path(self):
-        """获取包内模型路径"""
+        """获取包内模型路径 - 支持多种场景"""
+        possible_paths = []
+        
+        # 1. 打包后：exe同目录下的 ocr_models
         if getattr(sys, 'frozen', False):
-            base_dir = os.path.dirname(sys.executable)
-        else:
-            base_dir = os.path.dirname(os.path.abspath(__file__))
+            exe_dir = os.path.dirname(sys.executable)
+            possible_paths.append(os.path.join(exe_dir, 'ocr_models'))
+            # 2. 打包后：PyInstaller 临时解压目录
+            if hasattr(sys, '_MEIPASS'):
+                possible_paths.append(os.path.join(sys._MEIPASS, 'ocr_models'))
         
-        model_dir = os.path.join(base_dir, 'ocr_models')
-        english_path = os.path.join(model_dir, 'english_g2.pth')
+        # 3. 开发环境：当前文件所在目录
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        possible_paths.append(os.path.join(script_dir, 'ocr_models'))
         
-        if os.path.exists(english_path):
-            return model_dir
-        else:
-            return None
+        # 4. 开发环境：当前工作目录
+        possible_paths.append(os.path.join(os.getcwd(), 'ocr_models'))
+        
+        # 遍历所有可能的路径
+        for path in possible_paths:
+            model_file = os.path.join(path, 'english_g2.pth')
+            if os.path.exists(model_file):
+                print(f"✅ 找到模型: {model_file}")
+                return path
+        
+        print("❌ 未找到 english_g2.pth")
+        print(f"   查找路径: {possible_paths}")
+        return None
     
     def _init_ocr(self):
-        """初始化OCR - 使用DB检测器（不需要craft模型）"""
+        """初始化OCR"""
         if not OCR_AVAILABLE:
-            self.ocr_status.emit("EasyOCR未安装，请运行: pip install easyocr", False)
+            self.ocr_status.emit("EasyOCR未安装", False)
             return False
         
         try:
@@ -68,18 +83,26 @@ class MonitorThread(QThread):
             model_dir = self._get_model_path()
             
             if model_dir:
-                self.ocr_status.emit("加载本地模型 (DB检测器)...", False)
-                # 使用 DB 检测器，不需要 craft_mlt_25k.pth
+                self.ocr_status.emit("加载本地模型...", False)
+                # 检查模型文件是否存在
+                model_file = os.path.join(model_dir, 'english_g2.pth')
+                if os.path.exists(model_file):
+                    print(f"✅ 模型文件存在: {model_file}")
+                else:
+                    print(f"❌ 模型文件不存在: {model_file}")
+                    self.ocr_status.emit("模型文件不存在", False)
+                    return False
+                
                 self.reader = easyocr.Reader(
                     ['en'],
                     gpu=False,
                     model_storage_directory=model_dir,
                     download_enabled=False,
                     verbose=False,
-                    detector='db'  # 使用 DB 检测器（内置，不需要额外模型文件）
+                    detector='db'
                 )
             else:
-                self.ocr_status.emit("未找到 english_g2.pth，请将模型放入 ocr_models 目录", False)
+                self.ocr_status.emit("未找到 english_g2.pth，请检查 ocr_models 目录", False)
                 return False
             
             if self.reader is not None:
@@ -93,10 +116,11 @@ class MonitorThread(QThread):
         except Exception as e:
             error_msg = str(e)
             self.ocr_status.emit(f"加载失败: {error_msg[:80]}", False)
+            print(f"OCR初始化异常: {e}")
             return False
     
     def _preprocess_image(self, img_np):
-        """图像预处理 - 针对数字优化"""
+        """图像预处理"""
         try:
             if len(img_np.shape) == 3:
                 gray = cv2.cvtColor(img_np, cv2.COLOR_RGB2GRAY)
@@ -161,7 +185,6 @@ class MonitorThread(QThread):
                     if numbers:
                         return float(numbers[0])
             
-            # 如果第一次失败，尝试原图
             result2 = self.reader.readtext(
                 img_np,
                 allowlist='0123456789.-',
