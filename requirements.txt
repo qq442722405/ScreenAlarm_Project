@@ -6,3 +6,4 @@ Pillow>=9.5.0
 opencv-python>=4.7.0
 torch>=2.0.0
 torchvision>=0.15.0
+pygame>=2.5.0
