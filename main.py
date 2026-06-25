@@ -26,14 +26,14 @@ except ImportError:
 
 
 class AlarmSoundPlayer:
-    """报警声音播放器 - 支持音量控制"""
+    """报警声音播放器 - 独立控制每个任务的声音"""
     def __init__(self):
         self.is_playing = False
         self.sound_file = None
         self.play_thread = None
         self.stop_flag = False
-        self.volume = 1.0  # 默认最大音量
-        self.current_sound = None  # 当前播放的声音对象
+        self.volume = 1.0
+        self.current_sound = None
         self.lock = threading.Lock()
         
         self._load_sound()
@@ -54,7 +54,6 @@ class AlarmSoundPlayer:
         
         if os.path.exists(sound_path):
             self.sound_file = sound_path
-            print(f"✅ 加载报警音频: {sound_path}")
             return
         
         if getattr(sys, 'frozen', False):
@@ -62,10 +61,7 @@ class AlarmSoundPlayer:
             sound_path = os.path.join(exe_dir, "警报声.mp3")
             if os.path.exists(sound_path):
                 self.sound_file = sound_path
-                print(f"✅ 加载报警音频: {sound_path}")
                 return
-        
-        print("⚠️ 未找到 警报声.mp3，将使用系统Beep")
     
     def play(self):
         """播放报警声音（循环）"""
@@ -85,23 +81,18 @@ class AlarmSoundPlayer:
             self._play_beep()
     
     def _play_with_pygame(self):
-        """使用pygame播放"""
         def play_loop():
             try:
-                # 加载声音
                 sound = pygame.mixer.Sound(self.sound_file)
                 self.current_sound = sound
-                # 设置音量
                 sound.set_volume(self.volume)
                 
                 while not self.stop_flag:
                     sound.play()
-                    # 等待播放完成
                     while pygame.mixer.get_busy() and not self.stop_flag:
                         pygame.time.wait(50)
                     if self.stop_flag:
                         break
-                    # 小延迟避免CPU过载
                     time.sleep(0.05)
             except Exception as e:
                 print(f"播放失败: {e}")
@@ -114,7 +105,6 @@ class AlarmSoundPlayer:
         self.play_thread.start()
     
     def _play_beep(self):
-        """使用系统Beep作为备选"""
         def beep_loop():
             try:
                 import winsound
@@ -150,14 +140,11 @@ class AlarmSoundPlayer:
     def set_volume(self, volume):
         """设置音量 (0.0 - 1.0)"""
         self.volume = max(0.0, min(1.0, volume))
-        
-        # 如果当前有声音正在播放，立即应用新音量
-        with self.lock:
-            if self.current_sound is not None:
-                try:
-                    self.current_sound.set_volume(self.volume)
-                except:
-                    pass
+        if self.current_sound is not None:
+            try:
+                self.current_sound.set_volume(self.volume)
+            except:
+                pass
     
     def is_loaded(self):
         return self.sound_file is not None and os.path.exists(self.sound_file)
@@ -590,6 +577,7 @@ class MainWindow(QMainWindow):
         self.config_file = "monitor_config.json"
         self.alarm_logs = []
         self.alarm_sound_on = True
+        self.alarm_loop_enabled = True  # 报警循环默认开启
         self.add_row_widget = None
         self.detect_interval = 500
         
@@ -633,7 +621,7 @@ class MainWindow(QMainWindow):
         hint_frame.setObjectName("hint_frame")
         hint_layout = QHBoxLayout(hint_frame)
         hint_layout.setContentsMargins(8, 4, 8, 4)
-        hint_label = QLabel("💡 点击「拾取」依次点击左上角和右下角 | 取消勾选可暂停该点监控 | 首次启动自动下载OCR模型")
+        hint_label = QLabel("💡 点击「拾取」依次点击左上角和右下角 | 取消勾选可暂停该点监控 | 声音复选框控制报警音源")
         hint_label.setStyleSheet("color: #ddaa44;")
         hint_layout.addWidget(hint_label)
         main_layout.addWidget(hint_frame)
@@ -648,6 +636,7 @@ class MainWindow(QMainWindow):
         self.download_progress.setValue(0)
         main_layout.addWidget(self.download_progress)
         
+        # 表格
         self.table = QTableWidget()
         self.table.setColumnCount(9)
         self.table.setHorizontalHeaderLabels([
@@ -669,6 +658,7 @@ class MainWindow(QMainWindow):
         self.table.horizontalHeader().setStretchLastSection(True)
         main_layout.addWidget(self.table)
         
+        # 按钮
         btn_layout = QHBoxLayout()
         btn_layout.setSpacing(8)
         
@@ -700,23 +690,22 @@ class MainWindow(QMainWindow):
         
         btn_layout.addStretch()
         
-        self.btn_clear_alarm = QPushButton("消除所有报警")
-        self.btn_clear_alarm.clicked.connect(self.clear_all_alarms)
-        btn_layout.addWidget(self.btn_clear_alarm)
-        
-        self.btn_sound = QPushButton("🔊 全局声音")
-        self.btn_sound.clicked.connect(self.toggle_sound)
-        btn_layout.addWidget(self.btn_sound)
+        # 报警循环开关
+        btn_layout.addWidget(QLabel("报警循环:"))
+        self.btn_loop = QPushButton("🔁 开启")
+        self.btn_loop.setObjectName("btn_loop")
+        self.btn_loop.setStyleSheet("background-color: #2a8a4a; color: white;")
+        self.btn_loop.clicked.connect(self.toggle_loop)
+        btn_layout.addWidget(self.btn_loop)
         
         btn_layout.addWidget(QLabel("音量:"))
         self.volume_slider = QSlider(Qt.Horizontal)
         self.volume_slider.setRange(0, 100)
-        self.volume_slider.setValue(80)  # 默认80%
+        self.volume_slider.setValue(80)
         self.volume_slider.setFixedWidth(100)
         self.volume_slider.valueChanged.connect(self.on_volume_changed)
         btn_layout.addWidget(self.volume_slider)
         
-        # 音量数值显示
         self.volume_label = QLabel("80%")
         self.volume_label.setFixedWidth(40)
         btn_layout.addWidget(self.volume_label)
@@ -740,6 +729,7 @@ class MainWindow(QMainWindow):
         
         main_layout.addLayout(btn_layout)
         
+        # 状态栏
         status_layout = QHBoxLayout()
         self.status_label = QLabel("状态: 就绪")
         self.status_label.setStyleSheet("padding: 6px; background-color: #2a2a3a; border-radius: 4px;")
@@ -757,6 +747,19 @@ class MainWindow(QMainWindow):
         
         self.table.model().rowsInserted.connect(self._on_rows_inserted)
         self.table.model().rowsRemoved.connect(self._on_rows_removed)
+    
+    def toggle_loop(self):
+        """切换报警循环开关"""
+        self.alarm_loop_enabled = not self.alarm_loop_enabled
+        if self.alarm_loop_enabled:
+            self.btn_loop.setText("🔁 开启")
+            self.btn_loop.setStyleSheet("background-color: #2a8a4a; color: white;")
+        else:
+            self.btn_loop.setText("🔁 关闭")
+            self.btn_loop.setStyleSheet("background-color: #aa3a3a; color: white;")
+            # 关闭循环时停止当前声音
+            self.alarm_player.stop()
+            self.alarm_playing = False
     
     def _on_rows_inserted(self, parent, first, last):
         for row in range(first, last + 1):
@@ -777,9 +780,6 @@ class MainWindow(QMainWindow):
     def _get_row_enabled(self, row):
         return self.row_enabled.get(row, True)
     
-    def _set_row_enabled(self, row, enabled):
-        self.row_enabled[row] = enabled
-    
     def _on_sound_changed(self, row, state):
         """声音复选框状态变化 - 取消勾选立即停止该任务的报警声音"""
         if state != 2:  # 取消勾选
@@ -799,24 +799,13 @@ class MainWindow(QMainWindow):
             self.monitor_thread.set_interval(self.detect_interval)
     
     def on_volume_changed(self, value):
-        """音量滑块变化"""
         volume = value / 100.0
         self.volume_label.setText(f"{value}%")
         self.alarm_player.set_volume(volume)
     
-    def toggle_sound(self):
-        self.alarm_sound_on = not self.alarm_sound_on
-        self.btn_sound.setText("🔊 全局声音" if self.alarm_sound_on else "🔇 全局声音")
-        if not self.alarm_sound_on:
-            self.alarm_player.stop()
-            self.alarm_playing = False
-            self.alarm_status_label.setText("🔇 声音已关闭")
-            self.alarm_status_label.setStyleSheet("padding: 6px; background-color: #2a2a3a; border-radius: 4px; color: #aa3a3a;")
-    
     def play_alarm(self, row):
-        if not self.alarm_sound_on:
-            return
-        
+        """播放报警声音 - 由任务的声音复选框控制"""
+        # 检查该行是否启用声音
         sound_check = self.table.cellWidget(row, 8)
         if sound_check and isinstance(sound_check, QCheckBox) and not sound_check.isChecked():
             return
@@ -829,7 +818,7 @@ class MainWindow(QMainWindow):
         if self.alarm_player.is_loaded():
             self.alarm_player.play()
             self.alarm_playing = True
-            self.alarm_status_label.setText("🔊 报警中... (循环)")
+            self.alarm_status_label.setText("🔊 报警中...")
             self.alarm_status_label.setStyleSheet("padding: 6px; background-color: #aa3a3a; border-radius: 4px; color: white;")
         else:
             self.alarm_player._play_beep()
@@ -1063,6 +1052,7 @@ class MainWindow(QMainWindow):
         self.monitor_thread.download_progress.connect(self.on_download_progress)
         
         self.monitor_thread.get_row_enabled = self._get_row_enabled
+        self.monitor_thread.set_alarm_loop(self.alarm_loop_enabled)
         
         self.monitor_thread.start()
         
@@ -1087,19 +1077,19 @@ class MainWindow(QMainWindow):
             if item and "报警" not in item.text():
                 self.table.setItem(row, 6, QTableWidgetItem("已停止"))
             self.row_alarm[row] = False
-            self._set_row_color(row, False)
+            # 恢复名称颜色
+            self._set_name_color(row, False)
     
-    def _set_row_color(self, row, alarm):
-        """设置行颜色"""
-        for col in range(1, 8):
-            item = self.table.item(row, col)
-            if item:
-                if alarm:
-                    item.setBackground(QBrush(QColor(200, 50, 50)))
-                    item.setForeground(QBrush(QColor(255, 255, 255)))
-                else:
-                    item.setBackground(QBrush(QColor(0, 0, 0, 0)))
-                    item.setForeground(QBrush(QColor(255, 255, 255)))
+    def _set_name_color(self, row, alarm):
+        """只设置名称列的颜色"""
+        item = self.table.item(row, 1)  # 名称列
+        if item:
+            if alarm:
+                item.setBackground(QBrush(QColor(200, 50, 50)))
+                item.setForeground(QBrush(QColor(255, 255, 255)))
+            else:
+                item.setBackground(QBrush(QColor(0, 0, 0, 0)))
+                item.setForeground(QBrush(QColor(255, 255, 255)))
     
     def on_value_updated(self, row, value):
         self.table.setItem(row, 2, QTableWidgetItem(f"{value:.2f}"))
@@ -1115,7 +1105,8 @@ class MainWindow(QMainWindow):
         now = datetime.now().strftime("%H:%M:%S")
         self.table.setItem(row, 7, QTableWidgetItem(now))
         
-        self._set_row_color(row, True)
+        # 名称列变红
+        self._set_name_color(row, True)
         
         self._update_alarm_count()
         self.status_label.setText(f"报警: {name} = {value:.2f} [范围: {lower}-{upper}]")
@@ -1133,7 +1124,7 @@ class MainWindow(QMainWindow):
             self.table.setItem(row, 6, status_item)
             if self.row_alarm.get(row, False):
                 self.row_alarm[row] = False
-                self._set_row_color(row, False)
+                self._set_name_color(row, False)
         elif status == 'error':
             status_item = QTableWidgetItem("识别失败")
             status_item.setBackground(QBrush(QColor(100, 100, 100)))
@@ -1147,34 +1138,6 @@ class MainWindow(QMainWindow):
         else:
             status_item = QTableWidgetItem(status)
             self.table.setItem(row, 6, status_item)
-    
-    def clear_all_alarms(self):
-        """消除所有报警"""
-        count = 0
-        for row in range(self.table.rowCount()):
-            if self.table.cellWidget(row, 0) is not None:
-                continue
-            item = self.table.item(row, 6)
-            if item and item.text() == "报警":
-                status_item = QTableWidgetItem("正常")
-                status_item.setBackground(QBrush(QColor(50, 150, 50)))
-                status_item.setForeground(QBrush(QColor(255, 255, 255)))
-                self.table.setItem(row, 6, status_item)
-                self.table.setItem(row, 7, QTableWidgetItem("--"))
-                self._set_row_color(row, False)
-                self.row_alarm[row] = False
-                count += 1
-        
-        if count > 0:
-            if self.monitor_thread and self.monitor_thread.isRunning():
-                self.monitor_thread.reset_all_alarms()
-            self.stop_alarm()
-        
-        self._update_alarm_count()
-        if count > 0:
-            self.status_label.setText(f"状态: 已消除 {count} 个报警")
-        else:
-            QMessageBox.information(self, "提示", "没有报警需要消除")
     
     def _update_alarm_count(self):
         count = 0
@@ -1195,7 +1158,7 @@ class MainWindow(QMainWindow):
             'monitors': [],
             'volume': self.volume_slider.value(),
             'interval': self.interval_combo.currentText(),
-            'sound_enabled': self.alarm_sound_on
+            'loop_enabled': self.alarm_loop_enabled
         }
         for row in range(self.table.rowCount()):
             if self.table.cellWidget(row, 0) is not None:
@@ -1261,9 +1224,14 @@ class MainWindow(QMainWindow):
                 self.interval_combo.setCurrentIndex(idx)
                 self.detect_interval = int(interval.replace("ms", ""))
             
-            sound_enabled = config.get('sound_enabled', True)
-            self.alarm_sound_on = sound_enabled
-            self.btn_sound.setText("🔊 全局声音" if sound_enabled else "🔇 全局声音")
+            loop_enabled = config.get('loop_enabled', True)
+            self.alarm_loop_enabled = loop_enabled
+            if loop_enabled:
+                self.btn_loop.setText("🔁 开启")
+                self.btn_loop.setStyleSheet("background-color: #2a8a4a; color: white;")
+            else:
+                self.btn_loop.setText("🔁 关闭")
+                self.btn_loop.setStyleSheet("background-color: #aa3a3a; color: white;")
             
             self.status_label.setText("状态: 配置已加载")
         except Exception as e:
