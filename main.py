@@ -26,7 +26,7 @@ except ImportError:
 
 
 class AlarmSoundPlayer:
-    """报警声音播放器 - 独立控制每个任务的声音"""
+    """报警声音播放器"""
     def __init__(self):
         self.is_playing = False
         self.sound_file = None
@@ -35,6 +35,7 @@ class AlarmSoundPlayer:
         self.volume = 1.0
         self.current_sound = None
         self.lock = threading.Lock()
+        self.loop_enabled = True  # 循环报警开关
         
         self._load_sound()
         
@@ -46,6 +47,10 @@ class AlarmSoundPlayer:
                 self.mixer_ready = False
         else:
             self.mixer_ready = False
+    
+    def set_loop(self, enabled):
+        """设置循环模式"""
+        self.loop_enabled = enabled
     
     def _load_sound(self):
         script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -63,6 +68,7 @@ class AlarmSoundPlayer:
                 return
     
     def play(self):
+        """播放报警声音"""
         if not self.sound_file or not os.path.exists(self.sound_file):
             self._play_beep()
             return
@@ -85,13 +91,21 @@ class AlarmSoundPlayer:
                 self.current_sound = sound
                 sound.set_volume(self.volume)
                 
-                while not self.stop_flag:
+                if self.loop_enabled:
+                    # 循环播放
+                    while not self.stop_flag:
+                        sound.play()
+                        while pygame.mixer.get_busy() and not self.stop_flag:
+                            pygame.time.wait(50)
+                        if self.stop_flag:
+                            break
+                        time.sleep(0.05)
+                else:
+                    # 只播放一次
                     sound.play()
+                    # 等待播放完成或停止
                     while pygame.mixer.get_busy() and not self.stop_flag:
                         pygame.time.wait(50)
-                    if self.stop_flag:
-                        break
-                    time.sleep(0.05)
             except Exception as e:
                 print(f"播放失败: {e}")
             finally:
@@ -106,13 +120,18 @@ class AlarmSoundPlayer:
         def beep_loop():
             try:
                 import winsound
-                while not self.stop_flag:
+                if self.loop_enabled:
+                    while not self.stop_flag:
+                        winsound.Beep(800, 200)
+                        time.sleep(0.1)
+                        if self.stop_flag:
+                            break
+                        winsound.Beep(1000, 200)
+                        time.sleep(0.1)
+                else:
                     winsound.Beep(800, 200)
                     time.sleep(0.1)
-                    if self.stop_flag:
-                        break
                     winsound.Beep(1000, 200)
-                    time.sleep(0.1)
             except:
                 pass
             finally:
@@ -147,13 +166,12 @@ class AlarmSoundPlayer:
 
 
 class CoordinatePicker(QWidget):
-    coord_selected = Signal(int, int)
+    """屏幕区域选择器 - 框选后自动返回坐标"""
+    coord_selected = Signal(int, int, int, int)  # x, y, width, height
     
-    def __init__(self, parent=None, coord_type="左上角"):
+    def __init__(self, parent=None):
         super().__init__(parent)
-        self.coord_type = coord_type
-        self.parent_widget = parent
-        self.setWindowTitle(f"选择{coord_type}")
+        self.setWindowTitle("选择监控区域")
         self.setWindowFlags(
             Qt.WindowStaysOnTopHint | 
             Qt.FramelessWindowHint | 
@@ -174,9 +192,13 @@ class CoordinatePicker(QWidget):
         self.raise_()
         self.activateWindow()
         
-        self.current_pos = QPoint(0, 0)
+        self.is_selecting = False
+        self.start_pos = QPoint()
+        self.current_pos = QPoint()
+        self.selection_rect = QRect()
         
-        self.label = QLabel(f"🖱 移动鼠标到{coord_type}位置，点击确认 | 按 ESC 取消", self)
+        # 提示标签
+        self.label = QLabel("🖱 按住鼠标左键拖拽选择监控区域 | 松开自动保存 | 按 ESC 取消", self)
         self.label.setAlignment(Qt.AlignCenter)
         self.label.setStyleSheet("""
             QLabel {
@@ -195,7 +217,8 @@ class CoordinatePicker(QWidget):
             self.height() - self.label.height() - 60
         )
         
-        self.coord_label = QLabel("X: 0  Y: 0", self)
+        # 坐标显示
+        self.coord_label = QLabel("", self)
         self.coord_label.setAlignment(Qt.AlignCenter)
         self.coord_label.setStyleSheet("""
             QLabel {
@@ -203,7 +226,7 @@ class CoordinatePicker(QWidget):
                 background: rgba(0,0,0,200);
                 padding: 8px 20px;
                 border-radius: 8px;
-                font-size: 20px;
+                font-size: 18px;
                 font-weight: bold;
                 border: 2px solid #4a9eff;
             }
@@ -214,48 +237,98 @@ class CoordinatePicker(QWidget):
             60
         )
         
-        self.setMouseTracking(True)
         self.setFocus(Qt.OtherFocusReason)
     
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
+        
+        # 半透明背景
         painter.fillRect(self.rect(), QColor(0, 0, 0, 100))
         
-        painter.setPen(QPen(QColor(255, 255, 255, 80), 1, Qt.DashLine))
-        painter.drawLine(self.current_pos.x(), 0, self.current_pos.x(), self.height())
-        painter.drawLine(0, self.current_pos.y(), self.width(), self.current_pos.y())
-        
-        painter.setPen(QPen(QColor(255, 50, 50), 2))
-        painter.setBrush(QBrush(QColor(255, 0, 0, 80)))
-        painter.drawEllipse(self.current_pos, 6, 6)
-        
-        painter.setPen(QColor(255, 255, 255, 200))
-        painter.setFont(QFont("Arial", 12))
-        painter.drawText(
-            self.current_pos.x() + 15,
-            self.current_pos.y() - 10,
-            f"({self.current_pos.x()}, {self.current_pos.y()})"
-        )
+        if self.is_selecting:
+            rect = self._get_current_rect()
+            if not rect.isNull() and rect.width() > 5 and rect.height() > 5:
+                # 清除选中区域
+                painter.setCompositionMode(QPainter.CompositionMode_Clear)
+                painter.fillRect(rect, Qt.transparent)
+                painter.setCompositionMode(QPainter.CompositionMode_SourceOver)
+                
+                # 绘制边框
+                pen = QPen(QColor(0, 255, 136), 2)
+                pen.setStyle(Qt.DashLine)
+                painter.setPen(pen)
+                painter.drawRect(rect)
+                
+                # 绘制角落标记
+                painter.setPen(QPen(QColor(0, 255, 136), 2))
+                size = 10
+                painter.drawLine(rect.topLeft(), rect.topLeft() + QPoint(size, 0))
+                painter.drawLine(rect.topLeft(), rect.topLeft() + QPoint(0, size))
+                painter.drawLine(rect.topRight(), rect.topRight() + QPoint(-size, 0))
+                painter.drawLine(rect.topRight(), rect.topRight() + QPoint(0, size))
+                painter.drawLine(rect.bottomLeft(), rect.bottomLeft() + QPoint(size, 0))
+                painter.drawLine(rect.bottomLeft(), rect.bottomLeft() + QPoint(0, -size))
+                painter.drawLine(rect.bottomRight(), rect.bottomRight() + QPoint(-size, 0))
+                painter.drawLine(rect.bottomRight(), rect.bottomRight() + QPoint(0, -size))
+                
+                # 显示尺寸
+                painter.setPen(Qt.white)
+                painter.setFont(QFont("Arial", 12))
+                painter.drawText(
+                    rect.x() + 10,
+                    rect.y() - 10 if rect.y() > 30 else rect.y() + rect.height() + 25,
+                    f"{rect.width()} × {rect.height()}"
+                )
+        else:
+            painter.setPen(Qt.white)
+            painter.setFont(QFont("Arial", 18))
+            painter.drawText(
+                self.rect(),
+                Qt.AlignCenter,
+                "按住鼠标左键并拖拽选择监控区域\n\n按 ESC 取消"
+            )
     
-    def mouseMoveEvent(self, event):
-        self.current_pos = event.position().toPoint()
-        self.coord_label.setText(f"X: {self.current_pos.x()}  Y: {self.current_pos.y()}")
-        self.coord_label.adjustSize()
-        self.coord_label.move(
-            (self.width() - self.coord_label.width()) // 2,
-            60
-        )
-        self.update()
+    def _get_current_rect(self):
+        if not self.is_selecting:
+            return self.selection_rect
+        x = min(self.start_pos.x(), self.current_pos.x())
+        y = min(self.start_pos.y(), self.current_pos.y())
+        w = abs(self.current_pos.x() - self.start_pos.x())
+        h = abs(self.current_pos.y() - self.start_pos.y())
+        return QRect(x, y, w, h)
     
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
-            self.coord_selected.emit(self.current_pos.x(), self.current_pos.y())
-            self.close()
+            self.is_selecting = True
+            self.start_pos = event.position().toPoint()
+            self.current_pos = self.start_pos
+            self.coord_label.setText("")
+            self.update()
+    
+    def mouseMoveEvent(self, event):
+        if self.is_selecting:
+            self.current_pos = event.position().toPoint()
+            self.update()
+    
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.LeftButton and self.is_selecting:
+            self.is_selecting = False
+            rect = self._get_current_rect()
+            if rect.width() > 20 and rect.height() > 20:
+                # 自动保存并返回
+                self.coord_selected.emit(
+                    rect.x(), rect.y(),
+                    rect.width(), rect.height()
+                )
+                self.close()
+            else:
+                self.selection_rect = QRect()
+                self.update()
     
     def keyPressEvent(self, event):
         if event.key() == Qt.Key_Escape:
-            self.coord_selected.emit(-1, -1)
+            self.coord_selected.emit(0, 0, 0, 0)
             self.close()
     
     def closeEvent(self, event):
@@ -263,194 +336,11 @@ class CoordinatePicker(QWidget):
         event.accept()
 
 
-class AddMonitorRow(QWidget):
-    add_completed = Signal(dict)
-    cancel = Signal()
-    
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.parent_table = parent
-        self.setStyleSheet("""
-            QWidget {
-                background-color: #2a2a3a;
-                border-radius: 4px;
-            }
-            QLabel { 
-                color: #e0e0e0;
-                font-size: 12px;
-            }
-            QLineEdit, QSpinBox, QDoubleSpinBox {
-                background-color: #3d3d4d;
-                color: #e0e0e0;
-                border: 1px solid #555;
-                border-radius: 4px;
-                padding: 2px 4px;
-                font-size: 12px;
-            }
-            QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus {
-                border-color: #4a9eff;
-            }
-            QPushButton {
-                background-color: #4a4a5a;
-                color: #e0e0e0;
-                border: none;
-                border-radius: 4px;
-                padding: 4px 10px;
-                font-size: 12px;
-            }
-            QPushButton:hover { background-color: #5a5a6a; }
-            QPushButton#btn_pick {
-                background-color: #4a9eff;
-                color: #1a1a2a;
-                font-weight: bold;
-            }
-            QPushButton#btn_pick:hover { background-color: #3a8eef; }
-            QPushButton#btn_ok {
-                background-color: #2a8a4a;
-                color: white;
-            }
-            QPushButton#btn_ok:hover { background-color: #3a9a5a; }
-            QPushButton#btn_cancel {
-                background-color: #aa3a3a;
-                color: white;
-            }
-            QPushButton#btn_cancel:hover { background-color: #bb4a4a; }
-        """)
-        
-        layout = QHBoxLayout(self)
-        layout.setSpacing(4)
-        layout.setContentsMargins(4, 4, 4, 4)
-        
-        self.name_edit = QLineEdit()
-        self.name_edit.setPlaceholderText("名称")
-        self.name_edit.setFixedWidth(70)
-        layout.addWidget(self.name_edit)
-        
-        self.x_edit = QSpinBox()
-        self.x_edit.setRange(0, 9999)
-        self.x_edit.setValue(100)
-        self.x_edit.setFixedWidth(50)
-        layout.addWidget(QLabel("X:"))
-        layout.addWidget(self.x_edit)
-        
-        self.y_edit = QSpinBox()
-        self.y_edit.setRange(0, 9999)
-        self.y_edit.setValue(100)
-        self.y_edit.setFixedWidth(50)
-        layout.addWidget(QLabel("Y:"))
-        layout.addWidget(self.y_edit)
-        
-        self.w_edit = QSpinBox()
-        self.w_edit.setRange(10, 9999)
-        self.w_edit.setValue(150)
-        self.w_edit.setFixedWidth(50)
-        layout.addWidget(QLabel("W:"))
-        layout.addWidget(self.w_edit)
-        
-        self.h_edit = QSpinBox()
-        self.h_edit.setRange(10, 9999)
-        self.h_edit.setValue(60)
-        self.h_edit.setFixedWidth(50)
-        layout.addWidget(QLabel("H:"))
-        layout.addWidget(self.h_edit)
-        
-        self.btn_pick = QPushButton("拾取")
-        self.btn_pick.setObjectName("btn_pick")
-        self.btn_pick.clicked.connect(self.start_pick)
-        layout.addWidget(self.btn_pick)
-        
-        self.lower_edit = QDoubleSpinBox()
-        self.lower_edit.setRange(-99999, 99999)
-        self.lower_edit.setValue(0)
-        self.lower_edit.setFixedWidth(60)
-        layout.addWidget(QLabel("下限:"))
-        layout.addWidget(self.lower_edit)
-        
-        self.upper_edit = QDoubleSpinBox()
-        self.upper_edit.setRange(-99999, 99999)
-        self.upper_edit.setValue(100)
-        self.upper_edit.setFixedWidth(60)
-        layout.addWidget(QLabel("上限:"))
-        layout.addWidget(self.upper_edit)
-        
-        self.btn_ok = QPushButton("确定")
-        self.btn_ok.setObjectName("btn_ok")
-        self.btn_ok.clicked.connect(self.confirm_add)
-        layout.addWidget(self.btn_ok)
-        
-        self.btn_cancel = QPushButton("取消")
-        self.btn_cancel.setObjectName("btn_cancel")
-        self.btn_cancel.clicked.connect(self.cancel.emit)
-        layout.addWidget(self.btn_cancel)
-        
-        self.pick_stage = 0
-        self.temp_x = 0
-        self.temp_y = 0
-        self.picker = None
-        self.name_edit.setFocus()
-    
-    def start_pick(self):
-        self.pick_stage = 1
-        self.btn_pick.setText("左上角...")
-        self.btn_pick.setEnabled(False)
-        self.picker = CoordinatePicker(self, "左上角")
-        self.picker.coord_selected.connect(self.on_first_pick)
-    
-    def on_first_pick(self, x, y):
-        if x >= 0 and y >= 0:
-            self.temp_x = x
-            self.temp_y = y
-            self.pick_stage = 2
-            self.btn_pick.setText("右下角...")
-            self.btn_pick.setEnabled(True)
-            QTimer.singleShot(200, self.pick_bottom_right)
-        else:
-            self.pick_stage = 0
-            self.btn_pick.setText("拾取")
-            self.btn_pick.setEnabled(True)
-            self.picker = None
-    
-    def pick_bottom_right(self):
-        if self.pick_stage == 2:
-            self.picker = CoordinatePicker(self, "右下角")
-            self.picker.coord_selected.connect(self.on_second_pick)
-    
-    def on_second_pick(self, x, y):
-        if x >= 0 and y >= 0 and self.temp_x >= 0 and self.temp_y >= 0:
-            width = x - self.temp_x
-            height = y - self.temp_y
-            if width > 0 and height > 0:
-                self.x_edit.setValue(self.temp_x)
-                self.y_edit.setValue(self.temp_y)
-                self.w_edit.setValue(width)
-                self.h_edit.setValue(height)
-            else:
-                QMessageBox.warning(self, "提示", "右下角必须在左上角的右下方！")
-        
-        self.pick_stage = 0
-        self.btn_pick.setText("拾取")
-        self.btn_pick.setEnabled(True)
-        self.picker = None
-    
-    def confirm_add(self):
-        name = self.name_edit.text().strip() or "未命名"
-        data = {
-            'name': name,
-            'x': self.x_edit.value(),
-            'y': self.y_edit.value(),
-            'width': self.w_edit.value(),
-            'height': self.h_edit.value(),
-            'lower': self.lower_edit.value(),
-            'upper': self.upper_edit.value()
-        }
-        self.add_completed.emit(data)
-
-
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("屏幕数字监控报警系统")
-        self.resize(1250, 750)
+        self.resize(1200, 750)
         
         self.setStyleSheet("""
             QMainWindow { background-color: #1a1a2a; }
@@ -529,17 +419,7 @@ class MainWindow(QMainWindow):
                 border-radius: 4px;
                 padding: 4px 8px;
             }
-            QComboBox:hover {
-                border-color: #4a9eff;
-            }
-            QComboBox::drop-down {
-                border: none;
-            }
-            QComboBox QAbstractItemView {
-                background-color: #2a2a3a;
-                color: #e0e0e0;
-                selection-background-color: #4a9eff;
-            }
+            QComboBox:hover { border-color: #4a9eff; }
             QProgressBar {
                 background-color: #2a2a3a;
                 border: 1px solid #3a3a4a;
@@ -572,8 +452,7 @@ class MainWindow(QMainWindow):
         self.monitor_thread = None
         self.config_file = "monitor_config.json"
         self.alarm_logs = []
-        self.alarm_sound_on = True
-        self.alarm_loop_enabled = True
+        self.loop_enabled = True  # 循环报警默认开启
         self.add_row_widget = None
         self.detect_interval = 500
         
@@ -583,6 +462,7 @@ class MainWindow(QMainWindow):
         
         self.row_enabled = {}
         self.row_alarm = {}
+        self.row_muted = {}  # 静音状态
         
         self._setup_ui()
         self.load_config()
@@ -617,7 +497,7 @@ class MainWindow(QMainWindow):
         hint_frame.setObjectName("hint_frame")
         hint_layout = QHBoxLayout(hint_frame)
         hint_layout.setContentsMargins(8, 4, 8, 4)
-        hint_label = QLabel("💡 点击「添加监控点」自动进入拾取 | 修改上下限立即生效 | 声音复选框实时控制")
+        hint_label = QLabel("💡 点击「添加监控点」自动进入拾取 | 修改上下限立即生效 | 勾选「静音」该点报警不出声")
         hint_label.setStyleSheet("color: #ddaa44;")
         hint_layout.addWidget(hint_label)
         main_layout.addWidget(hint_frame)
@@ -632,11 +512,12 @@ class MainWindow(QMainWindow):
         self.download_progress.setValue(0)
         main_layout.addWidget(self.download_progress)
         
+        # 表格 - 列索引: 0启用, 1名称, 2当前值, 3下限, 4上限, 5坐标, 6状态, 7报警时间, 8静音
         self.table = QTableWidget()
         self.table.setColumnCount(9)
         self.table.setHorizontalHeaderLabels([
             "启用", "名称", "当前值", "下限", "上限", 
-            "坐标 (X,Y,W,H)", "状态", "报警时间", "声音"
+            "坐标 (X,Y,W,H)", "状态", "报警时间", "🔇 静音"
         ])
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.setAlternatingRowColors(True)
@@ -649,10 +530,11 @@ class MainWindow(QMainWindow):
         self.table.setColumnWidth(5, 120)
         self.table.setColumnWidth(6, 80)
         self.table.setColumnWidth(7, 100)
-        self.table.setColumnWidth(8, 50)
+        self.table.setColumnWidth(8, 55)
         self.table.horizontalHeader().setStretchLastSection(True)
         main_layout.addWidget(self.table)
         
+        # 按钮
         btn_layout = QHBoxLayout()
         btn_layout.setSpacing(8)
         
@@ -684,23 +566,23 @@ class MainWindow(QMainWindow):
         
         btn_layout.addStretch()
         
-        btn_layout.addWidget(QLabel("报警循环:"))
-        self.btn_loop = QPushButton("🔁 开启")
-        self.btn_loop.setObjectName("btn_loop")
-        self.btn_loop.setStyleSheet("background-color: #2a8a4a; color: white;")
-        self.btn_loop.clicked.connect(self.toggle_loop)
-        btn_layout.addWidget(self.btn_loop)
+        # 循环报警开关
+        self.loop_check = QCheckBox("循环报警")
+        self.loop_check.setChecked(True)
+        self.loop_check.setStyleSheet("color: #e0e0e0;")
+        self.loop_check.stateChanged.connect(self._on_loop_changed)
+        btn_layout.addWidget(self.loop_check)
         
         btn_layout.addWidget(QLabel("音量:"))
         self.volume_slider = QSlider(Qt.Horizontal)
         self.volume_slider.setRange(0, 100)
         self.volume_slider.setValue(80)
-        self.volume_slider.setFixedWidth(100)
+        self.volume_slider.setFixedWidth(80)
         self.volume_slider.valueChanged.connect(self.on_volume_changed)
         btn_layout.addWidget(self.volume_slider)
         
         self.volume_label = QLabel("80%")
-        self.volume_label.setFixedWidth(40)
+        self.volume_label.setFixedWidth(35)
         btn_layout.addWidget(self.volume_label)
         
         btn_layout.addWidget(QLabel("间隔:"))
@@ -722,6 +604,7 @@ class MainWindow(QMainWindow):
         
         main_layout.addLayout(btn_layout)
         
+        # 状态栏
         status_layout = QHBoxLayout()
         self.status_label = QLabel("状态: 就绪")
         self.status_label.setStyleSheet("padding: 6px; background-color: #2a2a3a; border-radius: 4px;")
@@ -739,6 +622,13 @@ class MainWindow(QMainWindow):
         
         self.table.model().rowsInserted.connect(self._on_rows_inserted)
         self.table.model().rowsRemoved.connect(self._on_rows_removed)
+    
+    def _on_loop_changed(self, state):
+        """循环报警开关变化"""
+        self.loop_enabled = (state == 2)
+        self.alarm_player.set_loop(self.loop_enabled)
+        if self.monitor_thread and self.monitor_thread.isRunning():
+            self.monitor_thread.set_alarm_loop(self.loop_enabled)
     
     def _on_table_item_changed(self, item):
         if not self.monitoring or self.monitor_thread is None:
@@ -760,28 +650,15 @@ class MainWindow(QMainWindow):
             except ValueError:
                 pass
     
-    def toggle_loop(self):
-        self.alarm_loop_enabled = not self.alarm_loop_enabled
-        if self.alarm_loop_enabled:
-            self.btn_loop.setText("🔁 开启")
-            self.btn_loop.setStyleSheet("background-color: #2a8a4a; color: white;")
-        else:
-            self.btn_loop.setText("🔁 关闭")
-            self.btn_loop.setStyleSheet("background-color: #aa3a3a; color: white;")
-            self.alarm_player.stop()
-            self.alarm_playing = False
-        
-        if self.monitor_thread and self.monitor_thread.isRunning():
-            self.monitor_thread.set_alarm_loop(self.alarm_loop_enabled)
-    
     def _on_rows_inserted(self, parent, first, last):
         for row in range(first, last + 1):
             widget = self.table.cellWidget(row, 0)
             if widget and isinstance(widget, QCheckBox):
                 self.row_enabled[row] = widget.isChecked()
-            sound_widget = self.table.cellWidget(row, 8)
-            if sound_widget and isinstance(sound_widget, QCheckBox):
-                sound_widget.stateChanged.connect(lambda state, r=row: self._on_sound_changed(r, state))
+            mute_widget = self.table.cellWidget(row, 8)
+            if mute_widget and isinstance(mute_widget, QCheckBox):
+                self.row_muted[row] = mute_widget.isChecked()
+                mute_widget.stateChanged.connect(lambda state, r=row: self._on_mute_changed(r, state))
     
     def _on_rows_removed(self, parent, first, last):
         for row in range(first, last + 1):
@@ -789,18 +666,29 @@ class MainWindow(QMainWindow):
                 del self.row_enabled[row]
             if row in self.row_alarm:
                 del self.row_alarm[row]
+            if row in self.row_muted:
+                del self.row_muted[row]
     
     def _get_row_enabled(self, row):
         return self.row_enabled.get(row, True)
     
-    def _on_sound_changed(self, row, state):
-        if state != 2:
-            has_other_alarm = False
+    def _is_row_muted(self, row):
+        """检查该行是否静音"""
+        return self.row_muted.get(row, False)
+    
+    def _on_mute_changed(self, row, state):
+        """静音复选框变化 - 立即生效"""
+        self.row_muted[row] = (state == 2)
+        
+        # 如果该行正在报警且被静音，停止该行的声音
+        if state == 2 and self.row_alarm.get(row, False):
+            # 检查是否还有其他非静音的报警
+            has_active_alarm = False
             for r, alarm in self.row_alarm.items():
-                if r != row and alarm:
-                    has_other_alarm = True
+                if r != row and alarm and not self._is_row_muted(r):
+                    has_active_alarm = True
                     break
-            if not has_other_alarm:
+            if not has_active_alarm:
                 self.stop_alarm()
     
     def on_interval_changed(self, text):
@@ -814,8 +702,9 @@ class MainWindow(QMainWindow):
         self.alarm_player.set_volume(volume)
     
     def play_alarm(self, row):
-        sound_check = self.table.cellWidget(row, 8)
-        if sound_check and isinstance(sound_check, QCheckBox) and not sound_check.isChecked():
+        """播放报警声音 - 检查静音状态"""
+        # 如果该行被静音，不播放声音
+        if self._is_row_muted(row):
             return
         
         self.setWindowFlags(self.windowFlags() | Qt.WindowStaysOnTopHint)
@@ -823,16 +712,10 @@ class MainWindow(QMainWindow):
         self.raise_()
         self.activateWindow()
         
-        if self.alarm_player.is_loaded():
-            self.alarm_player.play()
-            self.alarm_playing = True
-            self.alarm_status_label.setText("🔊 报警中...")
-            self.alarm_status_label.setStyleSheet("padding: 6px; background-color: #aa3a3a; border-radius: 4px; color: white;")
-        else:
-            self.alarm_player._play_beep()
-            self.alarm_playing = True
-            self.alarm_status_label.setText("🔊 报警中... (系统提示音)")
-            self.alarm_status_label.setStyleSheet("padding: 6px; background-color: #aa3a3a; border-radius: 4px; color: white;")
+        self.alarm_player.play()
+        self.alarm_playing = True
+        self.alarm_status_label.setText("🔊 报警中...")
+        self.alarm_status_label.setStyleSheet("padding: 6px; background-color: #aa3a3a; border-radius: 4px; color: white;")
     
     def stop_alarm(self):
         self.alarm_player.stop()
@@ -849,25 +732,20 @@ class MainWindow(QMainWindow):
             QTimer.singleShot(1000, lambda: self.download_progress.setVisible(False))
     
     def add_monitor_row(self):
-        if self.add_row_widget:
-            return
-        self.btn_add.setEnabled(False)
-        row = 0
-        self.table.insertRow(row)
-        self.table.setRowHeight(row, 50)
-        self.add_row_widget = AddMonitorRow(self.table)
-        self.add_row_widget.add_completed.connect(self.on_add_completed)
-        self.add_row_widget.cancel.connect(self.on_add_canceled)
-        self.table.setCellWidget(row, 0, self.add_row_widget)
-        self.table.setSpan(row, 0, 1, 9)
-        self.table.scrollToTop()
-        
-        QTimer.singleShot(200, self.add_row_widget.start_pick)
+        """添加监控点 - 自动进入拾取状态"""
+        # 创建拾取器
+        self.picker = CoordinatePicker(self)
+        self.picker.coord_selected.connect(self._on_picker_completed)
+        self.picker.showFullScreen()
     
-    def on_add_completed(self, data):
-        self.table.removeRow(0)
-        self.add_row_widget = None
-        self.btn_add.setEnabled(True)
+    def _on_picker_completed(self, x, y, width, height):
+        """拾取完成 - 自动保存监控点"""
+        self.picker = None
+        
+        if x == 0 and y == 0 and width == 0 and height == 0:
+            return  # 用户取消
+        
+        # 直接添加监控点
         row = self.table.rowCount()
         self.table.insertRow(row)
         
@@ -878,113 +756,51 @@ class MainWindow(QMainWindow):
         self.row_enabled[row] = True
         enable_check.stateChanged.connect(lambda state, r=row: self._on_enable_changed(r, state))
         
-        sound_check = QCheckBox()
-        sound_check.setChecked(True)
-        sound_check.setStyleSheet("margin-left: 10px;")
-        self.table.setCellWidget(row, 8, sound_check)
-        sound_check.stateChanged.connect(lambda state, r=row: self._on_sound_changed(r, state))
+        mute_check = QCheckBox()
+        mute_check.setChecked(False)
+        mute_check.setStyleSheet("margin-left: 10px;")
+        self.table.setCellWidget(row, 8, mute_check)
+        self.row_muted[row] = False
+        mute_check.stateChanged.connect(lambda state, r=row: self._on_mute_changed(r, state))
         
-        self.table.setItem(row, 1, QTableWidgetItem(data['name']))
+        self.table.setItem(row, 1, QTableWidgetItem(f"区域{row+1}"))
         self.table.setItem(row, 2, QTableWidgetItem("--"))
-        self.table.setItem(row, 3, QTableWidgetItem(str(data['lower'])))
-        self.table.setItem(row, 4, QTableWidgetItem(str(data['upper'])))
-        self.table.setItem(row, 5, QTableWidgetItem(f"{data['x']},{data['y']},{data['width']},{data['height']}"))
+        self.table.setItem(row, 3, QTableWidgetItem("0"))
+        self.table.setItem(row, 4, QTableWidgetItem("100"))
+        self.table.setItem(row, 5, QTableWidgetItem(f"{x},{y},{width},{height}"))
         self.table.setItem(row, 6, QTableWidgetItem("待监控"))
         self.table.setItem(row, 7, QTableWidgetItem("--"))
         
-        self.status_label.setText(f"状态: 已添加 [{data['name']}]")
+        self.status_label.setText(f"状态: 已添加 区域{row+1}")
     
     def _on_enable_changed(self, row, state):
         self.row_enabled[row] = (state == 2)
     
-    def on_add_canceled(self):
-        self.table.removeRow(0)
-        self.add_row_widget = None
-        self.btn_add.setEnabled(True)
-        self.status_label.setText("状态: 已取消添加")
-    
     def edit_monitor_point(self):
+        """编辑监控点 - 重新拾取"""
         row = self.table.currentRow()
         if row < 0:
             QMessageBox.warning(self, "提示", "请先选择一行")
             return
-        if self.table.cellWidget(row, 0) is not None:
-            return
-        name = self.table.item(row, 1).text()
-        lower = float(self.table.item(row, 3).text())
-        upper = float(self.table.item(row, 4).text())
+        
+        # 获取当前坐标
         coords = self.table.item(row, 5).text()
         nums = re.findall(r'\d+', coords)
-        if len(nums) >= 4:
-            x, y, w, h = map(int, nums[:4])
-        else:
-            x, y, w, h = 100, 100, 150, 60
-        if self.add_row_widget:
+        
+        # 创建拾取器
+        self.picker = CoordinatePicker(self)
+        self.picker.coord_selected.connect(lambda x, y, w, h, r=row: self._on_edit_picker_completed(r, x, y, w, h))
+        self.picker.showFullScreen()
+    
+    def _on_edit_picker_completed(self, row, x, y, width, height):
+        """编辑拾取完成"""
+        self.picker = None
+        
+        if x == 0 and y == 0 and width == 0 and height == 0:
             return
-        self.btn_add.setEnabled(False)
-        self.table.removeRow(row)
-        if row in self.row_enabled:
-            del self.row_enabled[row]
-        if row in self.row_alarm:
-            del self.row_alarm[row]
-        self.table.insertRow(row)
-        self.table.setRowHeight(row, 50)
-        self.add_row_widget = AddMonitorRow(self.table)
-        self.add_row_widget.add_completed.connect(lambda data: self.on_edit_completed(row, data))
-        self.add_row_widget.cancel.connect(self.on_edit_canceled)
-        self.add_row_widget.name_edit.setText(name)
-        self.add_row_widget.x_edit.setValue(x)
-        self.add_row_widget.y_edit.setValue(y)
-        self.add_row_widget.w_edit.setValue(w)
-        self.add_row_widget.h_edit.setValue(h)
-        self.add_row_widget.lower_edit.setValue(lower)
-        self.add_row_widget.upper_edit.setValue(upper)
-        self.table.setCellWidget(row, 0, self.add_row_widget)
-        self.table.setSpan(row, 0, 1, 9)
         
-        QTimer.singleShot(200, self.add_row_widget.start_pick)
-    
-    def on_edit_completed(self, row, data):
-        self.table.removeRow(row)
-        self.add_row_widget = None
-        self.btn_add.setEnabled(True)
-        self.table.insertRow(row)
-        
-        enable_check = QCheckBox()
-        enable_check.setChecked(True)
-        enable_check.setStyleSheet("margin-left: 10px;")
-        self.table.setCellWidget(row, 0, enable_check)
-        self.row_enabled[row] = True
-        enable_check.stateChanged.connect(lambda state, r=row: self._on_enable_changed(r, state))
-        
-        sound_check = QCheckBox()
-        sound_check.setChecked(True)
-        sound_check.setStyleSheet("margin-left: 10px;")
-        self.table.setCellWidget(row, 8, sound_check)
-        sound_check.stateChanged.connect(lambda state, r=row: self._on_sound_changed(r, state))
-        
-        self.table.setItem(row, 1, QTableWidgetItem(data['name']))
-        self.table.setItem(row, 2, QTableWidgetItem("--"))
-        self.table.setItem(row, 3, QTableWidgetItem(str(data['lower'])))
-        self.table.setItem(row, 4, QTableWidgetItem(str(data['upper'])))
-        self.table.setItem(row, 5, QTableWidgetItem(f"{data['x']},{data['y']},{data['width']},{data['height']}"))
-        self.table.setItem(row, 6, QTableWidgetItem("待监控"))
-        self.table.setItem(row, 7, QTableWidgetItem("--"))
-        self.status_label.setText(f"状态: 已编辑 [{data['name']}]")
-    
-    def on_edit_canceled(self):
-        for row in range(self.table.rowCount()):
-            if self.table.cellWidget(row, 0) == self.add_row_widget:
-                self.table.removeRow(row)
-                if row in self.row_enabled:
-                    del self.row_enabled[row]
-                if row in self.row_alarm:
-                    del self.row_alarm[row]
-                break
-        self.add_row_widget = None
-        self.btn_add.setEnabled(True)
-        self.status_label.setText("状态: 已取消编辑")
-        self.load_config()
+        self.table.setItem(row, 5, QTableWidgetItem(f"{x},{y},{width},{height}"))
+        self.status_label.setText(f"状态: 已更新坐标")
     
     def delete_monitor_point(self):
         row = self.table.currentRow()
@@ -1001,6 +817,8 @@ class MainWindow(QMainWindow):
                 del self.row_enabled[row]
             if row in self.row_alarm:
                 del self.row_alarm[row]
+            if row in self.row_muted:
+                del self.row_muted[row]
             self.status_label.setText("状态: 已删除")
     
     def set_ocr_status(self, status, is_ready=False):
@@ -1057,7 +875,7 @@ class MainWindow(QMainWindow):
         
         self.monitor_thread = MonitorThread(monitors)
         self.monitor_thread.set_interval(self.detect_interval)
-        self.monitor_thread.set_alarm_loop(self.alarm_loop_enabled)
+        self.monitor_thread.set_alarm_loop(self.loop_enabled)
         self.monitor_thread.value_updated.connect(self.on_value_updated)
         self.monitor_thread.alarm_triggered.connect(self.on_alarm_triggered)
         self.monitor_thread.status_updated.connect(self.on_status_updated)
@@ -1065,6 +883,7 @@ class MainWindow(QMainWindow):
         self.monitor_thread.download_progress.connect(self.on_download_progress)
         
         self.monitor_thread.get_row_enabled = self._get_row_enabled
+        self.monitor_thread.is_row_muted = self._is_row_muted
         
         self.monitor_thread.start()
         
@@ -1092,26 +911,21 @@ class MainWindow(QMainWindow):
             self._reset_row_colors(row)
     
     def _reset_row_colors(self, row):
-        """重置行的所有颜色"""
-        # 重置名称列
         name_item = self.table.item(row, 1)
         if name_item:
             name_item.setBackground(QBrush(QColor(0, 0, 0, 0)))
             name_item.setForeground(QBrush(QColor(255, 255, 255)))
         
-        # 重置状态列
         status_item = self.table.item(row, 6)
         if status_item:
             status_item.setBackground(QBrush(QColor(0, 0, 0, 0)))
             status_item.setForeground(QBrush(QColor(255, 255, 255)))
-            # 如果有状态值，保留状态文字
             if status_item.text() == "报警":
                 status_item.setText("正常")
                 status_item.setBackground(QBrush(QColor(50, 150, 50)))
                 status_item.setForeground(QBrush(QColor(255, 255, 255)))
     
     def _set_name_color(self, row, alarm):
-        """只设置名称列的颜色"""
         item = self.table.item(row, 1)
         if item:
             if alarm:
@@ -1140,7 +954,12 @@ class MainWindow(QMainWindow):
         self._update_alarm_count()
         self.status_label.setText(f"报警: {name} = {value:.2f} [范围: {lower}-{upper}]")
         
-        self.play_alarm(row)
+        # 检查是否静音
+        if not self._is_row_muted(row):
+            self.play_alarm(row)
+        else:
+            self.alarm_status_label.setText("🔇 报警(静音)")
+            self.alarm_status_label.setStyleSheet("padding: 6px; background-color: #8a5a2a; border-radius: 4px; color: white;")
         
         with open("alarm_log.txt", "a", encoding="utf-8") as f:
             f.write(f"[{now}] 报警: {name} = {value:.2f} 超出范围 [{lower}, {upper}]\n")
@@ -1154,6 +973,9 @@ class MainWindow(QMainWindow):
             if self.row_alarm.get(row, False):
                 self.row_alarm[row] = False
                 self._set_name_color(row, False)
+                # 检查是否还有其他报警，没有则停止声音
+                if not any(self.row_alarm.values()):
+                    self.stop_alarm()
         elif status == 'error':
             status_item = QTableWidgetItem("识别失败")
             status_item.setBackground(QBrush(QColor(100, 100, 100)))
@@ -1170,34 +992,6 @@ class MainWindow(QMainWindow):
         else:
             status_item = QTableWidgetItem(status)
             self.table.setItem(row, 6, status_item)
-    
-    def clear_all_alarms(self):
-        """消除所有报警 - 点击按钮触发"""
-        count = 0
-        for row in range(self.table.rowCount()):
-            if self.table.cellWidget(row, 0) is not None:
-                continue
-            item = self.table.item(row, 6)
-            if item and item.text() == "报警":
-                status_item = QTableWidgetItem("正常")
-                status_item.setBackground(QBrush(QColor(50, 150, 50)))
-                status_item.setForeground(QBrush(QColor(255, 255, 255)))
-                self.table.setItem(row, 6, status_item)
-                self.table.setItem(row, 7, QTableWidgetItem("--"))
-                self.row_alarm[row] = False
-                self._set_name_color(row, False)
-                count += 1
-        
-        if count > 0:
-            if self.monitor_thread and self.monitor_thread.isRunning():
-                self.monitor_thread.reset_all_alarms()
-            self.stop_alarm()
-        
-        self._update_alarm_count()
-        if count > 0:
-            self.status_label.setText(f"状态: 已消除 {count} 个报警")
-        else:
-            QMessageBox.information(self, "提示", "没有报警需要消除")
     
     def _update_alarm_count(self):
         count = 0
@@ -1218,20 +1012,20 @@ class MainWindow(QMainWindow):
             'monitors': [],
             'volume': self.volume_slider.value(),
             'interval': self.interval_combo.currentText(),
-            'loop_enabled': self.alarm_loop_enabled
+            'loop_enabled': self.loop_enabled
         }
         for row in range(self.table.rowCount()):
             if self.table.cellWidget(row, 0) is not None:
                 continue
             enable_check = self.table.cellWidget(row, 0)
-            sound_check = self.table.cellWidget(row, 8)
+            mute_check = self.table.cellWidget(row, 8)
             config['monitors'].append({
                 'name': self.table.item(row, 1).text(),
                 'lower': float(self.table.item(row, 3).text()),
                 'upper': float(self.table.item(row, 4).text()),
                 'coords': self.table.item(row, 5).text(),
-                'enabled': self._get_row_enabled(row),
-                'sound_enabled': sound_check.isChecked() if sound_check else True
+                'enabled': enable_check.isChecked() if enable_check else True,
+                'muted': mute_check.isChecked() if mute_check else False
             })
         try:
             with open(self.config_file, 'w', encoding='utf-8') as f:
@@ -1249,6 +1043,7 @@ class MainWindow(QMainWindow):
             self.table.setRowCount(0)
             self.row_enabled.clear()
             self.row_alarm.clear()
+            self.row_muted.clear()
             for item in config.get('monitors', []):
                 row = self.table.rowCount()
                 self.table.insertRow(row)
@@ -1260,11 +1055,12 @@ class MainWindow(QMainWindow):
                 self.row_enabled[row] = item.get('enabled', True)
                 enable_check.stateChanged.connect(lambda state, r=row: self._on_enable_changed(r, state))
                 
-                sound_check = QCheckBox()
-                sound_check.setChecked(item.get('sound_enabled', True))
-                sound_check.setStyleSheet("margin-left: 10px;")
-                self.table.setCellWidget(row, 8, sound_check)
-                sound_check.stateChanged.connect(lambda state, r=row: self._on_sound_changed(r, state))
+                mute_check = QCheckBox()
+                mute_check.setChecked(item.get('muted', False))
+                mute_check.setStyleSheet("margin-left: 10px;")
+                self.table.setCellWidget(row, 8, mute_check)
+                self.row_muted[row] = item.get('muted', False)
+                mute_check.stateChanged.connect(lambda state, r=row: self._on_mute_changed(r, state))
                 
                 self.table.setItem(row, 1, QTableWidgetItem(item['name']))
                 self.table.setItem(row, 2, QTableWidgetItem("--"))
@@ -1274,7 +1070,7 @@ class MainWindow(QMainWindow):
                 self.table.setItem(row, 6, QTableWidgetItem("待监控"))
                 self.table.setItem(row, 7, QTableWidgetItem("--"))
             
-            volume = config.get('volume', 100)
+            volume = config.get('volume', 80)
             self.volume_slider.setValue(volume)
             self.on_volume_changed(volume)
             
@@ -1285,13 +1081,8 @@ class MainWindow(QMainWindow):
                 self.detect_interval = int(interval.replace("ms", ""))
             
             loop_enabled = config.get('loop_enabled', True)
-            self.alarm_loop_enabled = loop_enabled
-            if loop_enabled:
-                self.btn_loop.setText("🔁 开启")
-                self.btn_loop.setStyleSheet("background-color: #2a8a4a; color: white;")
-            else:
-                self.btn_loop.setText("🔁 关闭")
-                self.btn_loop.setStyleSheet("background-color: #aa3a3a; color: white;")
+            self.loop_enabled = loop_enabled
+            self.loop_check.setChecked(loop_enabled)
             
             self.status_label.setText("状态: 配置已加载")
         except Exception as e:
