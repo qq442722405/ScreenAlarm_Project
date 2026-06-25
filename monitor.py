@@ -32,6 +32,10 @@ class MonitorThread(QThread):
         self.ocr_ready = False
         self.interval_ms = 500
         self.get_row_enabled = None
+        self.alarm_loop_enabled = True  # 默认循环开启
+        
+        self.alarm_status = {}
+        self.manual_clear = False
         
         self.value_cache = {}
         self.cache_count = {}
@@ -39,11 +43,23 @@ class MonitorThread(QThread):
     def set_interval(self, ms):
         self.interval_ms = max(100, ms)
     
+    def set_alarm_loop(self, enabled):
+        """设置报警循环开关"""
+        self.alarm_loop_enabled = enabled
+    
     def stop(self):
         self.running = False
     
+    def reset_all_alarms(self):
+        """重置所有报警状态"""
+        self.manual_clear = True
+        for row in self.alarm_status:
+            self.alarm_status[row]['alarm'] = False
+            self.alarm_status[row]['count'] = 0
+        for row in self.alarm_status:
+            self.status_updated.emit(row, 'normal')
+    
     def _is_enabled(self, row):
-        """检查某行是否启用"""
         if self.get_row_enabled:
             try:
                 return self.get_row_enabled(row)
@@ -52,7 +68,6 @@ class MonitorThread(QThread):
         return True
     
     def _init_ocr(self):
-        """初始化EasyOCR - 自动下载模型"""
         if not OCR_AVAILABLE:
             self.ocr_status.emit("EasyOCR未安装，请运行: pip install easyocr", False)
             return False
@@ -97,7 +112,6 @@ class MonitorThread(QThread):
             return False
     
     def _preprocess_image(self, img_np):
-        """图像预处理"""
         try:
             if len(img_np.shape) == 3:
                 gray = cv2.cvtColor(img_np, cv2.COLOR_RGB2GRAY)
@@ -121,7 +135,6 @@ class MonitorThread(QThread):
             return img_np
     
     def _capture_and_ocr(self, x, y, width, height):
-        """截图并识别"""
         if not self.ocr_ready or self.reader is None:
             return None
         if self.sct is None:
@@ -172,9 +185,8 @@ class MonitorThread(QThread):
             self.status_updated.emit(-1, 'OCR加载失败，请检查网络后重启')
             return
         
-        status = {}
         for m in self.monitors:
-            status[m['row']] = {'alarm': False, 'count': 0}
+            self.alarm_status[m['row']] = {'alarm': False, 'count': 0}
             self.status_updated.emit(m['row'], '监控中')
         
         interval_sec = self.interval_ms / 1000.0
@@ -185,10 +197,9 @@ class MonitorThread(QThread):
                     break
                 row = monitor['row']
                 
-                # 检查该行是否启用
                 if not self._is_enabled(row):
                     self.status_updated.emit(row, 'disabled')
-                    status[row]['alarm'] = False
+                    self.alarm_status[row]['alarm'] = False
                     continue
                 
                 value = self._capture_and_ocr(
@@ -201,19 +212,27 @@ class MonitorThread(QThread):
                     lower, upper = monitor['lower'], monitor['upper']
                     
                     if value < lower or value > upper:
-                        if not status[row]['alarm']:
-                            status[row]['alarm'] = True
+                        # 报警触发
+                        if not self.alarm_status[row]['alarm']:
+                            self.alarm_status[row]['alarm'] = True
                             self.alarm_triggered.emit(
                                 row, monitor['name'], float(value), lower, upper
                             )
+                        # 如果循环关闭，只触发一次
+                        if not self.alarm_loop_enabled and self.alarm_status[row]['alarm']:
+                            # 已经触发过，不再重复触发
+                            pass
                         self.status_updated.emit(row, '报警')
                     else:
-                        status[row]['alarm'] = False
-                        self.status_updated.emit(row, '正常')
-                    status[row]['count'] = 0
+                        if not self.manual_clear:
+                            self.alarm_status[row]['alarm'] = False
+                            self.status_updated.emit(row, '正常')
+                        else:
+                            self.alarm_status[row]['alarm'] = False
+                    self.alarm_status[row]['count'] = 0
                 else:
-                    status[row]['count'] += 1
-                    if status[row]['count'] >= 3:
+                    self.alarm_status[row]['count'] += 1
+                    if self.alarm_status[row]['count'] >= 3:
                         self.status_updated.emit(row, '识别失败')
                 
                 time.sleep(0.05)
