@@ -32,26 +32,25 @@ class MonitorThread(QThread):
         self.ocr_ready = False
         self.interval_ms = 500
         self.get_row_enabled = None
-        self.alarm_loop_enabled = True  # 默认循环开启
+        self.alarm_loop_enabled = True
         
         self.alarm_status = {}
         self.manual_clear = False
         
-        self.value_cache = {}
-        self.cache_count = {}
+        # 数值平滑滤波 - 每个监控点保存最近5个值
+        self.value_history = {}  # {row: [list of values]}
+        self.smooth_count = 5  # 平滑窗口大小
         
     def set_interval(self, ms):
         self.interval_ms = max(100, ms)
     
     def set_alarm_loop(self, enabled):
-        """设置报警循环开关"""
         self.alarm_loop_enabled = enabled
     
     def stop(self):
         self.running = False
     
     def reset_all_alarms(self):
-        """重置所有报警状态"""
         self.manual_clear = True
         for row in self.alarm_status:
             self.alarm_status[row]['alarm'] = False
@@ -66,6 +65,30 @@ class MonitorThread(QThread):
             except:
                 return True
         return True
+    
+    def _smooth_value(self, row, raw_value):
+        """数值平滑滤波"""
+        if row not in self.value_history:
+            self.value_history[row] = []
+        
+        # 添加新值
+        self.value_history[row].append(raw_value)
+        
+        # 限制历史长度
+        if len(self.value_history[row]) > self.smooth_count:
+            self.value_history[row].pop(0)
+        
+        # 计算平均值
+        if len(self.value_history[row]) >= 2:
+            # 去除最大最小值后平均（防抖）
+            sorted_vals = sorted(self.value_history[row])
+            if len(sorted_vals) >= 3:
+                trimmed = sorted_vals[1:-1]  # 去掉最大最小
+                if trimmed:
+                    return sum(trimmed) / len(trimmed)
+            return sum(self.value_history[row]) / len(self.value_history[row])
+        else:
+            return raw_value
     
     def _init_ocr(self):
         if not OCR_AVAILABLE:
@@ -186,7 +209,11 @@ class MonitorThread(QThread):
             return
         
         for m in self.monitors:
-            self.alarm_status[m['row']] = {'alarm': False, 'count': 0}
+            self.alarm_status[m['row']] = {
+                'alarm': False, 
+                'count': 0,
+                'last_alarm_time': 0
+            }
             self.status_updated.emit(m['row'], '监控中')
         
         interval_sec = self.interval_ms / 1000.0
@@ -202,26 +229,39 @@ class MonitorThread(QThread):
                     self.alarm_status[row]['alarm'] = False
                     continue
                 
-                value = self._capture_and_ocr(
+                raw_value = self._capture_and_ocr(
                     monitor['x'], monitor['y'],
                     monitor['width'], monitor['height']
                 )
                 
-                if value is not None:
-                    self.value_updated.emit(row, float(value))
+                if raw_value is not None:
+                    # 应用数值平滑滤波
+                    smooth_value = self._smooth_value(row, raw_value)
+                    
+                    self.value_updated.emit(row, float(smooth_value))
                     lower, upper = monitor['lower'], monitor['upper']
                     
-                    if value < lower or value > upper:
-                        # 报警触发
+                    if smooth_value < lower or smooth_value > upper:
+                        now = time.time()
+                        last_time = self.alarm_status[row]['last_alarm_time']
+                        
+                        # 循环报警逻辑
                         if not self.alarm_status[row]['alarm']:
+                            # 首次报警，立即触发
                             self.alarm_status[row]['alarm'] = True
+                            self.alarm_status[row]['last_alarm_time'] = now
                             self.alarm_triggered.emit(
-                                row, monitor['name'], float(value), lower, upper
+                                row, monitor['name'], float(smooth_value), lower, upper
                             )
-                        # 如果循环关闭，只触发一次
-                        if not self.alarm_loop_enabled and self.alarm_status[row]['alarm']:
-                            # 已经触发过，不再重复触发
-                            pass
+                        elif self.alarm_loop_enabled:
+                            # 循环报警开启：每10秒重新触发
+                            if now - last_time > 10:
+                                self.alarm_status[row]['last_alarm_time'] = now
+                                self.alarm_triggered.emit(
+                                    row, monitor['name'], float(smooth_value), lower, upper
+                                )
+                        # 循环报警关闭：不再触发
+                        
                         self.status_updated.emit(row, '报警')
                     else:
                         if not self.manual_clear:
