@@ -32,6 +32,7 @@ class MonitorThread(QThread):
         self.ocr_ready = False
         self.interval_ms = 500
         self.get_row_enabled = None
+        self.is_row_muted = None
         self.alarm_loop_enabled = True
         
         self.alarm_status = {}
@@ -64,6 +65,14 @@ class MonitorThread(QThread):
             except:
                 return True
         return True
+    
+    def _is_muted(self, row):
+        if self.is_row_muted:
+            try:
+                return self.is_row_muted(row)
+            except:
+                return False
+        return False
     
     def _smooth_value(self, row, raw_value):
         if row not in self.value_history:
@@ -239,12 +248,14 @@ class MonitorThread(QThread):
                         last_time = self.alarm_status[row]['last_alarm_time']
                         
                         if not self.alarm_status[row]['alarm']:
+                            # 首次报警
                             self.alarm_status[row]['alarm'] = True
                             self.alarm_status[row]['last_alarm_time'] = now
                             self.alarm_triggered.emit(
                                 row, monitor['name'], float(smooth_value), lower, upper
                             )
                         elif self.alarm_loop_enabled:
+                            # 循环报警：每10秒重新触发
                             if now - last_time > 10:
                                 self.alarm_status[row]['last_alarm_time'] = now
                                 self.alarm_triggered.emit(
