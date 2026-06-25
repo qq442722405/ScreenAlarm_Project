@@ -560,6 +560,8 @@ class MainWindow(QMainWindow):
         
         # 存储每行的启用状态 {row: True/False}
         self.row_enabled = {}
+        # 存储报警状态 {row: True/False}
+        self.row_alarm = {}
         
         self._setup_ui()
         self.load_config()
@@ -717,25 +719,42 @@ class MainWindow(QMainWindow):
         self.table.model().rowsRemoved.connect(self._on_rows_removed)
     
     def _on_rows_inserted(self, parent, first, last):
-        """行插入时更新状态字典"""
         for row in range(first, last + 1):
             widget = self.table.cellWidget(row, 0)
             if widget and isinstance(widget, QCheckBox):
                 self.row_enabled[row] = widget.isChecked()
+            # 连接声音复选框的信号
+            sound_widget = self.table.cellWidget(row, 8)
+            if sound_widget and isinstance(sound_widget, QCheckBox):
+                sound_widget.stateChanged.connect(lambda state, r=row: self._on_sound_changed(r, state))
     
     def _on_rows_removed(self, parent, first, last):
-        """行删除时更新状态字典"""
         for row in range(first, last + 1):
             if row in self.row_enabled:
                 del self.row_enabled[row]
+            if row in self.row_alarm:
+                del self.row_alarm[row]
     
     def _get_row_enabled(self, row):
-        """获取某行是否启用"""
         return self.row_enabled.get(row, True)
     
     def _set_row_enabled(self, row, enabled):
-        """设置某行启用状态"""
         self.row_enabled[row] = enabled
+    
+    def _on_sound_changed(self, row, state):
+        """声音复选框状态变化 - 取消勾选立即停止该任务的报警声音"""
+        if state != 2:  # 取消勾选
+            # 如果该行正在报警，停止声音
+            if self.row_alarm.get(row, False):
+                # 检查是否还有其他行在报警
+                has_other_alarm = False
+                for r, alarm in self.row_alarm.items():
+                    if r != row and alarm:
+                        has_other_alarm = True
+                        break
+                # 如果没有其他报警，停止全局声音
+                if not has_other_alarm:
+                    self.stop_alarm()
     
     def on_interval_changed(self, text):
         self.detect_interval = int(text.replace("ms", ""))
@@ -790,7 +809,6 @@ class MainWindow(QMainWindow):
         self.show()
     
     def on_download_progress(self, value):
-        """下载进度更新"""
         self.download_progress.setVisible(True)
         self.download_progress.setValue(value)
         if value >= 100:
@@ -817,7 +835,6 @@ class MainWindow(QMainWindow):
         row = self.table.rowCount()
         self.table.insertRow(row)
         
-        # 启用复选框 - 默认勾选
         enable_check = QCheckBox()
         enable_check.setChecked(True)
         enable_check.setStyleSheet("margin-left: 10px;")
@@ -825,11 +842,11 @@ class MainWindow(QMainWindow):
         self.row_enabled[row] = True
         enable_check.stateChanged.connect(lambda state, r=row: self._on_enable_changed(r, state))
         
-        # 声音复选框 - 默认勾选
         sound_check = QCheckBox()
         sound_check.setChecked(True)
         sound_check.setStyleSheet("margin-left: 10px;")
         self.table.setCellWidget(row, 8, sound_check)
+        sound_check.stateChanged.connect(lambda state, r=row: self._on_sound_changed(r, state))
         
         self.table.setItem(row, 1, QTableWidgetItem(data['name']))
         self.table.setItem(row, 2, QTableWidgetItem("--"))
@@ -842,8 +859,7 @@ class MainWindow(QMainWindow):
         self.status_label.setText(f"状态: 已添加 [{data['name']}]")
     
     def _on_enable_changed(self, row, state):
-        """启用复选框状态变化"""
-        self.row_enabled[row] = (state == 2)  # 2表示选中
+        self.row_enabled[row] = (state == 2)
     
     def on_add_canceled(self):
         self.table.removeRow(0)
@@ -873,6 +889,8 @@ class MainWindow(QMainWindow):
         self.table.removeRow(row)
         if row in self.row_enabled:
             del self.row_enabled[row]
+        if row in self.row_alarm:
+            del self.row_alarm[row]
         self.table.insertRow(row)
         self.table.setRowHeight(row, 50)
         self.add_row_widget = AddMonitorRow(self.table)
@@ -905,6 +923,7 @@ class MainWindow(QMainWindow):
         sound_check.setChecked(True)
         sound_check.setStyleSheet("margin-left: 10px;")
         self.table.setCellWidget(row, 8, sound_check)
+        sound_check.stateChanged.connect(lambda state, r=row: self._on_sound_changed(r, state))
         
         self.table.setItem(row, 1, QTableWidgetItem(data['name']))
         self.table.setItem(row, 2, QTableWidgetItem("--"))
@@ -921,6 +940,8 @@ class MainWindow(QMainWindow):
                 self.table.removeRow(row)
                 if row in self.row_enabled:
                     del self.row_enabled[row]
+                if row in self.row_alarm:
+                    del self.row_alarm[row]
                 break
         self.add_row_widget = None
         self.btn_add.setEnabled(True)
@@ -940,6 +961,8 @@ class MainWindow(QMainWindow):
             self.table.removeRow(row)
             if row in self.row_enabled:
                 del self.row_enabled[row]
+            if row in self.row_alarm:
+                del self.row_alarm[row]
             self.status_label.setText("状态: 已删除")
     
     def set_ocr_status(self, status, is_ready=False):
@@ -956,10 +979,8 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "提示", "请先添加监控点")
             return
         
-        # 检查是否有启用的监控点 (1=启用, 0=不启用)
         has_enabled = False
         for row in range(self.table.rowCount()):
-            # 检查名称列是否有数据，判断是否为有效行
             if self.table.item(row, 1) is None:
                 continue
             if self._get_row_enabled(row):
@@ -970,10 +991,8 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "提示", "没有启用的监控点，请勾选「启用」复选框")
             return
         
-        # 收集所有监控点数据
         monitors = []
         for row in range(self.table.rowCount()):
-            # 检查名称列是否有数据，判断是否为有效行
             if self.table.item(row, 1) is None:
                 continue
             name = self.table.item(row, 1).text()
@@ -1030,11 +1049,31 @@ class MainWindow(QMainWindow):
             item = self.table.item(row, 6)
             if item and "报警" not in item.text():
                 self.table.setItem(row, 6, QTableWidgetItem("已停止"))
+            # 清除报警状态
+            self.row_alarm[row] = False
+            # 恢复行颜色
+            self._set_row_color(row, False)
+    
+    def _set_row_color(self, row, alarm):
+        """设置行颜色"""
+        for col in range(1, 8):  # 不包含启用和声音列
+            item = self.table.item(row, col)
+            if item:
+                if alarm:
+                    item.setBackground(QBrush(QColor(200, 50, 50)))
+                    item.setForeground(QBrush(QColor(255, 255, 255)))
+                else:
+                    item.setBackground(QBrush(QColor(0, 0, 0, 0)))
+                    item.setForeground(QBrush(QColor(255, 255, 255)))
     
     def on_value_updated(self, row, value):
         self.table.setItem(row, 2, QTableWidgetItem(f"{value:.2f}"))
     
     def on_alarm_triggered(self, row, name, value, lower, upper):
+        # 记录报警状态
+        self.row_alarm[row] = True
+        
+        # 更新状态列
         status_item = QTableWidgetItem("报警")
         status_item.setBackground(QBrush(QColor(200, 50, 50)))
         status_item.setForeground(QBrush(QColor(255, 255, 255)))
@@ -1042,6 +1081,9 @@ class MainWindow(QMainWindow):
         
         now = datetime.now().strftime("%H:%M:%S")
         self.table.setItem(row, 7, QTableWidgetItem(now))
+        
+        # 整行变红色
+        self._set_row_color(row, True)
         
         self._update_alarm_count()
         self.status_label.setText(f"报警: {name} = {value:.2f} [范围: {lower}-{upper}]")
@@ -1056,17 +1098,24 @@ class MainWindow(QMainWindow):
             status_item = QTableWidgetItem("正常")
             status_item.setBackground(QBrush(QColor(50, 150, 50)))
             status_item.setForeground(QBrush(QColor(255, 255, 255)))
+            self.table.setItem(row, 6, status_item)
+            # 如果之前是报警状态，清除红色
+            if self.row_alarm.get(row, False):
+                self.row_alarm[row] = False
+                self._set_row_color(row, False)
         elif status == 'error':
             status_item = QTableWidgetItem("识别失败")
             status_item.setBackground(QBrush(QColor(100, 100, 100)))
             status_item.setForeground(QBrush(QColor(255, 255, 255)))
+            self.table.setItem(row, 6, status_item)
         elif status == 'disabled':
             status_item = QTableWidgetItem("已禁用")
             status_item.setBackground(QBrush(QColor(80, 80, 80)))
             status_item.setForeground(QBrush(QColor(200, 200, 200)))
+            self.table.setItem(row, 6, status_item)
         else:
             status_item = QTableWidgetItem(status)
-        self.table.setItem(row, 6, status_item)
+            self.table.setItem(row, 6, status_item)
     
     def clear_all_alarms(self):
         count = 0
@@ -1075,12 +1124,18 @@ class MainWindow(QMainWindow):
                 continue
             item = self.table.item(row, 6)
             if item and item.text() == "报警":
+                # 恢复状态为正常
                 status_item = QTableWidgetItem("正常")
                 status_item.setBackground(QBrush(QColor(50, 150, 50)))
                 status_item.setForeground(QBrush(QColor(255, 255, 255)))
                 self.table.setItem(row, 6, status_item)
                 self.table.setItem(row, 7, QTableWidgetItem("--"))
+                # 清除红色
+                self._set_row_color(row, False)
+                # 清除报警状态
+                self.row_alarm[row] = False
                 count += 1
+        
         if count > 0:
             self.stop_alarm()
         self._update_alarm_count()
@@ -1138,6 +1193,7 @@ class MainWindow(QMainWindow):
                 config = json.load(f)
             self.table.setRowCount(0)
             self.row_enabled.clear()
+            self.row_alarm.clear()
             for item in config.get('monitors', []):
                 row = self.table.rowCount()
                 self.table.insertRow(row)
@@ -1153,6 +1209,7 @@ class MainWindow(QMainWindow):
                 sound_check.setChecked(item.get('sound_enabled', True))
                 sound_check.setStyleSheet("margin-left: 10px;")
                 self.table.setCellWidget(row, 8, sound_check)
+                sound_check.stateChanged.connect(lambda state, r=row: self._on_sound_changed(r, state))
                 
                 self.table.setItem(row, 1, QTableWidgetItem(item['name']))
                 self.table.setItem(row, 2, QTableWidgetItem("--"))
