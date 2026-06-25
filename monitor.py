@@ -31,7 +31,7 @@ class MonitorThread(QThread):
         self.reader = None
         self.ocr_ready = False
         self.interval_ms = 500
-        self.get_row_enabled = None  # 由外部设置
+        self.get_row_enabled = None
         
         self.value_cache = {}
         self.cache_count = {}
@@ -185,7 +185,7 @@ class MonitorThread(QThread):
                     break
                 row = monitor['row']
                 
-                # 检查该行是否启用 (1=启用, 0=不启用)
+                # 检查该行是否启用
                 if not self._is_enabled(row):
                     self.status_updated.emit(row, 'disabled')
                     status[row]['alarm'] = False
