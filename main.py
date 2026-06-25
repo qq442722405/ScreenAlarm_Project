@@ -719,7 +719,6 @@ class MainWindow(QMainWindow):
     def _on_rows_inserted(self, parent, first, last):
         """行插入时更新状态字典"""
         for row in range(first, last + 1):
-            # 检查是否已经有控件
             widget = self.table.cellWidget(row, 0)
             if widget and isinstance(widget, QCheckBox):
                 self.row_enabled[row] = widget.isChecked()
@@ -823,9 +822,7 @@ class MainWindow(QMainWindow):
         enable_check.setChecked(True)
         enable_check.setStyleSheet("margin-left: 10px;")
         self.table.setCellWidget(row, 0, enable_check)
-        # 存储启用状态
         self.row_enabled[row] = True
-        # 连接状态变化信号
         enable_check.stateChanged.connect(lambda state, r=row: self._on_enable_changed(r, state))
         
         # 声音复选框 - 默认勾选
@@ -873,11 +870,9 @@ class MainWindow(QMainWindow):
         if self.add_row_widget:
             return
         self.btn_add.setEnabled(False)
-        # 删除旧行
         self.table.removeRow(row)
         if row in self.row_enabled:
             del self.row_enabled[row]
-        # 插入新行
         self.table.insertRow(row)
         self.table.setRowHeight(row, 50)
         self.add_row_widget = AddMonitorRow(self.table)
@@ -964,7 +959,8 @@ class MainWindow(QMainWindow):
         # 检查是否有启用的监控点 (1=启用, 0=不启用)
         has_enabled = False
         for row in range(self.table.rowCount()):
-            if self.table.cellWidget(row, 0) is not None:
+            # 检查名称列是否有数据，判断是否为有效行
+            if self.table.item(row, 1) is None:
                 continue
             if self._get_row_enabled(row):
                 has_enabled = True
@@ -977,7 +973,8 @@ class MainWindow(QMainWindow):
         # 收集所有监控点数据
         monitors = []
         for row in range(self.table.rowCount()):
-            if self.table.cellWidget(row, 0) is not None:
+            # 检查名称列是否有数据，判断是否为有效行
+            if self.table.item(row, 1) is None:
                 continue
             name = self.table.item(row, 1).text()
             lower = float(self.table.item(row, 3).text())
@@ -994,7 +991,7 @@ class MainWindow(QMainWindow):
                 'width': w, 'height': h,
                 'lower': lower, 'upper': upper,
                 'row': row,
-                'enabled': self._get_row_enabled(row)  # 传递启用状态
+                'enabled': self._get_row_enabled(row)
             })
         
         if not monitors:
@@ -1009,7 +1006,6 @@ class MainWindow(QMainWindow):
         self.monitor_thread.ocr_status.connect(self.set_ocr_status)
         self.monitor_thread.download_progress.connect(self.on_download_progress)
         
-        # 传入检查方法
         self.monitor_thread.get_row_enabled = self._get_row_enabled
         
         self.monitor_thread.start()
