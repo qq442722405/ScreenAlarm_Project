@@ -10,12 +10,11 @@ from PySide6.QtWidgets import (
     QPushButton, QTableWidget, QTableWidgetItem, QLabel, QMessageBox,
     QAbstractItemView, QHeaderView, QFileDialog, QDialog,
     QDialogButtonBox, QFormLayout, QSpinBox, QDoubleSpinBox, QLineEdit,
-    QGroupBox, QGridLayout, QFrame, QSlider, QFileDialog, QComboBox,
+    QGroupBox, QGridLayout, QFrame, QSlider, QComboBox,
     QProgressBar, QCheckBox
 )
-from PySide6.QtCore import Qt, QTimer, QThread, Signal, QPoint
+from PySide6.QtCore import Qt, QTimer, QThread, Signal, QPoint, QRect
 from PySide6.QtGui import QColor, QBrush, QFont, QPainter, QPen, QPixmap, QImage
-
 from monitor import MonitorThread
 
 try:
@@ -161,7 +160,7 @@ class AlarmSoundPlayer:
 
 
 class CoordinatePicker(QWidget):
-    """屏幕区域选择器 - 点击模式：先点左上角，再点右下角"""
+    """屏幕区域选择器 - 按住左键拖拽选区域，松开自动完成"""
     coord_selected = Signal(int, int, int, int)  # x, y, width, height
     
     def __init__(self, parent=None):
@@ -172,31 +171,41 @@ class CoordinatePicker(QWidget):
             Qt.FramelessWindowHint | 
             Qt.Tool
         )
-        self.setAttribute(Qt.WA_TranslucentBackground)
-        self.setAttribute(Qt.WA_NoSystemBackground)
         self.setMouseTracking(True)
         
-        from PySide6.QtWidgets import QApplication
+        # 计算多屏总尺寸
         screens = QApplication.screens()
-        total_rect = self.geometry()
-        for s in screens:
+        total_rect = screens[0].geometry()
+        for s in screens[1:]:
             total_rect = total_rect.united(s.geometry())
+        self.total_rect = total_rect
         self.setGeometry(total_rect)
+        
+        # 抓取全屏截图作为背景（解决透明窗口黑屏问题）
+        self.screen_pixmap = QPixmap(total_rect.size())
+        self.screen_pixmap.fill(Qt.black)
+        painter = QPainter(self.screen_pixmap)
+        for screen in screens:
+            screen_pix = screen.grabWindow(0)
+            painter.drawPixmap(screen.geometry().topLeft(), screen_pix)
+        painter.end()
         
         self.showFullScreen()
         self.raise_()
         self.activateWindow()
         
-        self.pick_stage = 0
-        self.p1 = QPoint()
-        self.p2 = QPoint()
+        # 拖拽状态
+        self.is_selecting = False
+        self.start_pos = QPoint()
+        self.end_pos = QPoint()
         
-        self.label = QLabel("🖱 第1步：点击左上角位置", self)
+        # 底部提示标签
+        self.label = QLabel("🖱 按住左键拖拽选择监控区域，松开鼠标自动完成", self)
         self.label.setAlignment(Qt.AlignCenter)
         self.label.setStyleSheet("""
             QLabel {
                 color: white;
-                background: rgba(0,0,0,200);
+                background: rgba(0,0,0,210);
                 padding: 12px 24px;
                 border-radius: 12px;
                 font-size: 18px;
@@ -210,12 +219,13 @@ class CoordinatePicker(QWidget):
             self.height() - self.label.height() - 80
         )
         
-        self.coord_label = QLabel("", self)
+        # 顶部坐标显示
+        self.coord_label = QLabel("等待选择...", self)
         self.coord_label.setAlignment(Qt.AlignCenter)
         self.coord_label.setStyleSheet("""
             QLabel {
                 color: #4a9eff;
-                background: rgba(0,0,0,200);
+                background: rgba(0,0,0,210);
                 padding: 8px 20px;
                 border-radius: 8px;
                 font-size: 18px;
@@ -235,107 +245,76 @@ class CoordinatePicker(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
         
-        painter.fillRect(self.rect(), QColor(0, 0, 0, 100))
+        # 绘制全屏背景
+        painter.drawPixmap(self.rect(), self.screen_pixmap)
         
-        if self.pick_stage == 1 and not self.p2.isNull():
+        # 绘制半透明遮罩
+        painter.fillRect(self.rect(), QColor(0, 0, 0, 110))
+        
+        # 绘制选中区域（挖空显示原始画面）
+        if self.is_selecting and not self.end_pos.isNull():
             rect = self._get_current_rect()
-            if not rect.isNull() and rect.width() > 5 and rect.height() > 5:
-                painter.setCompositionMode(QPainter.CompositionMode_Clear)
-                painter.fillRect(rect, Qt.transparent)
-                painter.setCompositionMode(QPainter.CompositionMode_SourceOver)
+            if rect.width() > 5 and rect.height() > 5:
+                # 还原选中区域的原始屏幕画面
+                painter.drawPixmap(rect, self.screen_pixmap.copy(rect))
                 
+                # 虚线边框
                 pen = QPen(QColor(0, 255, 136), 2)
                 pen.setStyle(Qt.DashLine)
                 painter.setPen(pen)
                 painter.drawRect(rect)
                 
+                # 四角标记
                 painter.setPen(QPen(QColor(0, 255, 136), 2))
-                size = 10
+                size = 12
+                # 左上角
                 painter.drawLine(rect.topLeft(), rect.topLeft() + QPoint(size, 0))
                 painter.drawLine(rect.topLeft(), rect.topLeft() + QPoint(0, size))
+                # 右上角
                 painter.drawLine(rect.topRight(), rect.topRight() + QPoint(-size, 0))
                 painter.drawLine(rect.topRight(), rect.topRight() + QPoint(0, size))
+                # 左下角
                 painter.drawLine(rect.bottomLeft(), rect.bottomLeft() + QPoint(size, 0))
                 painter.drawLine(rect.bottomLeft(), rect.bottomLeft() + QPoint(0, -size))
+                # 右下角
                 painter.drawLine(rect.bottomRight(), rect.bottomRight() + QPoint(-size, 0))
                 painter.drawLine(rect.bottomRight(), rect.bottomRight() + QPoint(0, -size))
                 
+                # 尺寸文字
                 painter.setPen(Qt.white)
-                painter.setFont(QFont("Arial", 12))
-                painter.drawText(
-                    rect.x() + 10,
-                    rect.y() - 10 if rect.y() > 30 else rect.y() + rect.height() + 25,
-                    f"{rect.width()} × {rect.height()}"
-                )
-        
-        painter.setPen(QPen(QColor(255, 50, 50), 2))
-        painter.setBrush(QBrush(QColor(255, 0, 0, 80)))
-        if self.pick_stage >= 1 and not self.p1.isNull():
-            painter.drawEllipse(self.p1, 6, 6)
-            painter.drawText(self.p1.x() + 10, self.p1.y() - 5, "左上角")
-        
-        if self.pick_stage == 1 and not self.p2.isNull():
-            painter.setPen(QPen(QColor(255, 50, 50), 2))
-            painter.setBrush(QBrush(QColor(255, 0, 0, 80)))
-            painter.drawEllipse(self.p2, 6, 6)
-            painter.drawText(self.p2.x() + 10, self.p2.y() - 5, "右下角")
+                painter.setFont(QFont("Arial", 12, QFont.Bold))
+                text_y = rect.y() - 12 if rect.y() > 30 else rect.y() + rect.height() + 25
+                painter.drawText(rect.x() + 10, text_y, f"{rect.width()} × {rect.height()}")
     
     def _get_current_rect(self):
-        if self.p1.isNull():
+        if self.start_pos.isNull():
             return QRect()
-        x = min(self.p1.x(), self.p2.x())
-        y = min(self.p1.y(), self.p2.y())
-        w = abs(self.p2.x() - self.p1.x())
-        h = abs(self.p2.y() - self.p1.y())
+        x = min(self.start_pos.x(), self.end_pos.x())
+        y = min(self.start_pos.y(), self.end_pos.y())
+        w = abs(self.end_pos.x() - self.start_pos.x())
+        h = abs(self.end_pos.y() - self.start_pos.y())
         return QRect(x, y, w, h)
     
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
-            pos = event.position().toPoint()
-            
-            if self.pick_stage == 0:
-                self.p1 = pos
-                self.pick_stage = 1
-                self.p2 = pos
-                self.label.setText("🖱 第2步：点击右下角位置")
-                self.label.adjustSize()
-                self.label.move(
-                    (self.width() - self.label.width()) // 2,
-                    self.height() - self.label.height() - 80
-                )
-                self.coord_label.setText(f"左上角: ({pos.x()}, {pos.y()})")
-                self.coord_label.adjustSize()
-                self.coord_label.move(
-                    (self.width() - self.coord_label.width()) // 2,
-                    60
-                )
-                self.update()
-            else:
-                self.p2 = pos
-                rect = self._get_current_rect()
-                if rect.width() > 20 and rect.height() > 20:
-                    self.coord_selected.emit(
-                        rect.x(), rect.y(),
-                        rect.width(), rect.height()
-                    )
-                    self.close()
-                else:
-                    self.label.setText("⚠️ 区域太小，请重新选择右下角")
-                    self.label.adjustSize()
-                    self.label.move(
-                        (self.width() - self.label.width()) // 2,
-                        self.height() - self.label.height() - 80
-                    )
-                    self.p2 = self.p1
-                    self.update()
+            self.is_selecting = True
+            self.start_pos = event.position().toPoint()
+            self.end_pos = self.start_pos
+            self.label.setText("🖱 拖动鼠标调整区域大小")
+            self.label.adjustSize()
+            self.label.move(
+                (self.width() - self.label.width()) // 2,
+                self.height() - self.label.height() - 80
+            )
+            self.update()
     
     def mouseMoveEvent(self, event):
-        if self.pick_stage == 1:
-            self.p2 = event.position().toPoint()
+        if self.is_selecting:
+            self.end_pos = event.position().toPoint()
+            rect = self._get_current_rect()
             self.coord_label.setText(
-                f"左上角: ({self.p1.x()}, {self.p1.y()})  "
-                f"当前: ({self.p2.x()}, {self.p2.y()})  "
-                f"大小: {abs(self.p2.x() - self.p1.x())} × {abs(self.p2.y() - self.p1.y())}"
+                f"起点: ({self.start_pos.x()}, {self.start_pos.y()})  "
+                f"大小: {rect.width()} × {rect.height()}"
             )
             self.coord_label.adjustSize()
             self.coord_label.move(
@@ -343,6 +322,26 @@ class CoordinatePicker(QWidget):
                 60
             )
             self.update()
+    
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.LeftButton and self.is_selecting:
+            self.is_selecting = False
+            self.end_pos = event.position().toPoint()
+            rect = self._get_current_rect()
+            
+            if rect.width() > 20 and rect.height() > 20:
+                self.coord_selected.emit(rect.x(), rect.y(), rect.width(), rect.height())
+                self.close()
+            else:
+                self.label.setText("⚠️ 区域太小，请重新拖拽选择")
+                self.label.adjustSize()
+                self.label.move(
+                    (self.width() - self.label.width()) // 2,
+                    self.height() - self.label.height() - 80
+                )
+                self.start_pos = QPoint()
+                self.end_pos = QPoint()
+                self.update()
     
     def keyPressEvent(self, event):
         if event.key() == Qt.Key_Escape:
@@ -506,7 +505,7 @@ class MainWindow(QMainWindow):
         title.setFont(title_font)
         title_layout.addWidget(title)
         title_layout.addStretch()
-        subtitle = QLabel("-- 陈诚 (EasyOCR)")
+        subtitle = QLabel("-- 基于EasyOCR")
         subtitle.setStyleSheet("color: #6a6a7a; font-size: 13px;")
         title_layout.addWidget(subtitle)
         main_layout.addLayout(title_layout)
@@ -515,7 +514,7 @@ class MainWindow(QMainWindow):
         hint_frame.setObjectName("hint_frame")
         hint_layout = QHBoxLayout(hint_frame)
         hint_layout.setContentsMargins(8, 4, 8, 4)
-        hint_label = QLabel("💡 点击「添加监控点」依次点击左上角和右下角选择区域 | 修改上下限立即生效")
+        hint_label = QLabel("💡 点击「添加监控点」按住左键拖拽选择区域 | 修改上下限立即生效")
         hint_label.setStyleSheet("color: #ddaa44;")
         hint_layout.addWidget(hint_label)
         main_layout.addWidget(hint_frame)
@@ -558,7 +557,7 @@ class MainWindow(QMainWindow):
         self.btn_add.clicked.connect(self.add_monitor_row)
         btn_layout.addWidget(self.btn_add)
         
-        self.btn_edit = QPushButton("编辑")
+        self.btn_edit = QPushButton("编辑区域")
         self.btn_edit.clicked.connect(self.edit_monitor_point)
         btn_layout.addWidget(self.btn_edit)
         
@@ -691,14 +690,23 @@ class MainWindow(QMainWindow):
     def _on_mute_changed(self, row, state):
         self.row_muted[row] = (state == 2)
         
-        if state == 2 and self.row_alarm.get(row, False):
-            has_active_alarm = False
-            for r, alarm in self.row_alarm.items():
-                if r != row and alarm and not self._is_row_muted(r):
-                    has_active_alarm = True
-                    break
-            if not has_active_alarm:
-                self.stop_alarm()
+        # 监控运行中：勾选静音立即终止该点报警
+        if self.monitoring and self.monitor_thread and self.monitor_thread.isRunning():
+            if state == 2:
+                self.monitor_thread.reset_row_alarm(row)
+                self.row_alarm[row] = False
+                self._set_name_color(row, False)
+        
+        # 无活跃未静音报警则停止全局声音
+        has_active_alarm = False
+        for r, alarm in self.row_alarm.items():
+            if alarm and not self._is_row_muted(r):
+                has_active_alarm = True
+                break
+        if not has_active_alarm:
+            self.stop_alarm()
+        
+        self._update_alarm_count()
     
     def on_interval_changed(self, text):
         self.detect_interval = int(text.replace("ms", ""))
@@ -803,8 +811,7 @@ class MainWindow(QMainWindow):
         if row < 0:
             QMessageBox.warning(self, "提示", "请先选择一行")
             return
-        if self.table.cellWidget(row, 0) is not None:
-            return
+        
         name = self.table.item(row, 1).text()
         reply = QMessageBox.question(self, "确认删除", f"确定要删除 [{name}] 吗？")
         if reply == QMessageBox.Yes:
@@ -898,8 +905,6 @@ class MainWindow(QMainWindow):
         self.status_label.setText("状态: 已停止")
         self.stop_alarm()
         for row in range(self.table.rowCount()):
-            if self.table.cellWidget(row, 0) is not None:
-                continue
             item = self.table.item(row, 6)
             if item and "报警" not in item.text():
                 self.table.setItem(row, 6, QTableWidgetItem("已停止"))
@@ -935,6 +940,10 @@ class MainWindow(QMainWindow):
         self.table.setItem(row, 2, QTableWidgetItem(f"{value:.2f}"))
     
     def on_alarm_triggered(self, row, name, value, lower, upper):
+        # 静音状态下不触发报警（双重保险）
+        if self._is_row_muted(row):
+            return
+        
         self.row_alarm[row] = True
         
         status_item = QTableWidgetItem("报警")
@@ -950,11 +959,7 @@ class MainWindow(QMainWindow):
         self._update_alarm_count()
         self.status_label.setText(f"报警: {name} = {value:.2f} [范围: {lower}-{upper}]")
         
-        if not self._is_row_muted(row):
-            self.play_alarm(row)
-        else:
-            self.alarm_status_label.setText("🔇 报警(静音)")
-            self.alarm_status_label.setStyleSheet("padding: 6px; background-color: #8a5a2a; border-radius: 4px; color: white;")
+        self.play_alarm(row)
         
         with open("alarm_log.txt", "a", encoding="utf-8") as f:
             f.write(f"[{now}] 报警: {name} = {value:.2f} 超出范围 [{lower}, {upper}]\n")
@@ -970,6 +975,11 @@ class MainWindow(QMainWindow):
                 self._set_name_color(row, False)
                 if not any(self.row_alarm.values()):
                     self.stop_alarm()
+        elif status == '静音中':
+            status_item = QTableWidgetItem("静音中")
+            status_item.setBackground(QBrush(QColor(130, 100, 50)))
+            status_item.setForeground(QBrush(QColor(255, 255, 255)))
+            self.table.setItem(row, 6, status_item)
         elif status == 'error':
             status_item = QTableWidgetItem("识别失败")
             status_item.setBackground(QBrush(QColor(100, 100, 100)))
@@ -986,12 +996,12 @@ class MainWindow(QMainWindow):
         else:
             status_item = QTableWidgetItem(status)
             self.table.setItem(row, 6, status_item)
+        
+        self._update_alarm_count()
     
     def _update_alarm_count(self):
         count = 0
         for row in range(self.table.rowCount()):
-            if self.table.cellWidget(row, 0) is not None:
-                continue
             item = self.table.item(row, 6)
             if item and item.text() == "报警":
                 count += 1
@@ -1009,7 +1019,7 @@ class MainWindow(QMainWindow):
             'loop_enabled': self.loop_enabled
         }
         for row in range(self.table.rowCount()):
-            if self.table.cellWidget(row, 0) is not None:
+            if self.table.item(row, 1) is None:
                 continue
             enable_check = self.table.cellWidget(row, 0)
             mute_check = self.table.cellWidget(row, 8)
