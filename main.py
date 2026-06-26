@@ -1311,4 +1311,8 @@ class MainWindow(QMainWindow):
                 enable_check = QCheckBox()
                 enable_check.setChecked(item.get('enabled', True))
                 enable_check.setStyleSheet("margin-left: 12px;")
-                self.table
+                self.table.setCellWidget(row, 0, enable_check)
+                self.row_enabled[row] = item.get('enabled', True)
+                enable_check.stateChanged.connect(lambda state, r=row: self._on_enable_changed(r, state))
+                
+                mute
