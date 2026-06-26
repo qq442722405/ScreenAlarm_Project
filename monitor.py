@@ -228,7 +228,6 @@ class MonitorThread(QThread):
                     
                     if self._is_muted(row):
                         self.alarm_status[row]['alarm'] = False
-                        self.status_updated.emit(row, '静音中')
                         continue
                     
                     if value < lower or value > upper:
@@ -251,14 +250,14 @@ class MonitorThread(QThread):
                     else:
                         if not self.manual_clear:
                             self.alarm_status[row]['alarm'] = False
-                            self.status_updated.emit(row, '正常')
+                            self.status_updated.emit(row, 'normal')
                         else:
                             self.alarm_status[row]['alarm'] = False
                     self.alarm_status[row]['count'] = 0
                 else:
                     self.alarm_status[row]['count'] += 1
                     if self.alarm_status[row]['count'] >= 3:
-                        self.status_updated.emit(row, '识别失败')
+                        self.status_updated.emit(row, 'error')
                 
                 time.sleep(0.05)
             
