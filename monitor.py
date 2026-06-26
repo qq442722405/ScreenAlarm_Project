@@ -249,7 +249,6 @@ class MonitorThread(QThread):
                     self.value_updated.emit(row, float(smooth_value))
                     lower, upper = monitor['lower'], monitor['upper']
                     
-                    # 静音状态：不触发报警，显示静音中
                     if self._is_muted(row):
                         self.alarm_status[row]['alarm'] = False
                         self.status_updated.emit(row, '静音中')
@@ -260,14 +259,12 @@ class MonitorThread(QThread):
                         last_time = self.alarm_status[row]['last_alarm_time']
                         
                         if not self.alarm_status[row]['alarm']:
-                            # 首次报警
                             self.alarm_status[row]['alarm'] = True
                             self.alarm_status[row]['last_alarm_time'] = now
                             self.alarm_triggered.emit(
                                 row, monitor['name'], float(smooth_value), lower, upper
                             )
                         elif self.alarm_loop_enabled:
-                            # 循环报警：每10秒重新触发
                             if now - last_time > 10:
                                 self.alarm_status[row]['last_alarm_time'] = now
                                 self.alarm_triggered.emit(
