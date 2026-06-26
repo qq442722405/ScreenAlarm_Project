@@ -38,9 +38,6 @@ class MonitorThread(QThread):
         self.alarm_status = {}
         self.manual_clear = False
         
-        self.value_history = {}
-        self.smooth_count = 5
-        
     def set_interval(self, ms):
         self.interval_ms = max(100, ms)
     
@@ -51,7 +48,6 @@ class MonitorThread(QThread):
         self.running = False
     
     def reset_row_alarm(self, row):
-        """立即重置指定行的报警状态"""
         if row in self.alarm_status:
             self.alarm_status[row]['alarm'] = False
             self.alarm_status[row]['count'] = 0
@@ -80,25 +76,6 @@ class MonitorThread(QThread):
             except:
                 return False
         return False
-    
-    def _smooth_value(self, row, raw_value):
-        if row not in self.value_history:
-            self.value_history[row] = []
-        
-        self.value_history[row].append(raw_value)
-        
-        if len(self.value_history[row]) > self.smooth_count:
-            self.value_history[row].pop(0)
-        
-        if len(self.value_history[row]) >= 2:
-            sorted_vals = sorted(self.value_history[row])
-            if len(sorted_vals) >= 3:
-                trimmed = sorted_vals[1:-1]
-                if trimmed:
-                    return sum(trimmed) / len(trimmed)
-            return sum(self.value_history[row]) / len(self.value_history[row])
-        else:
-            return raw_value
     
     def _init_ocr(self):
         if not OCR_AVAILABLE:
@@ -245,8 +222,8 @@ class MonitorThread(QThread):
                 )
                 
                 if raw_value is not None:
-                    smooth_value = self._smooth_value(row, raw_value)
-                    self.value_updated.emit(row, float(smooth_value))
+                    value = float(raw_value)
+                    self.value_updated.emit(row, value)
                     lower, upper = monitor['lower'], monitor['upper']
                     
                     if self._is_muted(row):
@@ -254,7 +231,7 @@ class MonitorThread(QThread):
                         self.status_updated.emit(row, '静音中')
                         continue
                     
-                    if smooth_value < lower or smooth_value > upper:
+                    if value < lower or value > upper:
                         now = time.time()
                         last_time = self.alarm_status[row]['last_alarm_time']
                         
@@ -262,13 +239,13 @@ class MonitorThread(QThread):
                             self.alarm_status[row]['alarm'] = True
                             self.alarm_status[row]['last_alarm_time'] = now
                             self.alarm_triggered.emit(
-                                row, monitor['name'], float(smooth_value), lower, upper
+                                row, monitor['name'], value, lower, upper
                             )
                         elif self.alarm_loop_enabled:
                             if now - last_time > 10:
                                 self.alarm_status[row]['last_alarm_time'] = now
                                 self.alarm_triggered.emit(
-                                    row, monitor['name'], float(smooth_value), lower, upper
+                                    row, monitor['name'], value, lower, upper
                                 )
                         self.status_updated.emit(row, '报警')
                     else:
