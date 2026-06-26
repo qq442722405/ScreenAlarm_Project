@@ -32,7 +32,6 @@ class MonitorThread(QThread):
         self.ocr_ready = False
         self.interval_ms = 500
         self.get_row_enabled = None
-        self.is_row_muted = None
         self.alarm_loop_enabled = True
         
         self.alarm_status = {}
@@ -68,14 +67,6 @@ class MonitorThread(QThread):
             except:
                 return True
         return True
-    
-    def _is_muted(self, row):
-        if self.is_row_muted:
-            try:
-                return self.is_row_muted(row)
-            except:
-                return False
-        return False
     
     def _init_ocr(self):
         if not OCR_AVAILABLE:
@@ -226,10 +217,6 @@ class MonitorThread(QThread):
                     self.value_updated.emit(row, value)
                     lower, upper = monitor['lower'], monitor['upper']
                     
-                    if self._is_muted(row):
-                        self.alarm_status[row]['alarm'] = False
-                        continue
-                    
                     if value < lower or value > upper:
                         now = time.time()
                         last_time = self.alarm_status[row]['last_alarm_time']
@@ -250,14 +237,14 @@ class MonitorThread(QThread):
                     else:
                         if not self.manual_clear:
                             self.alarm_status[row]['alarm'] = False
-                            self.status_updated.emit(row, 'normal')
+                            self.status_updated.emit(row, '正常')
                         else:
                             self.alarm_status[row]['alarm'] = False
                     self.alarm_status[row]['count'] = 0
                 else:
                     self.alarm_status[row]['count'] += 1
                     if self.alarm_status[row]['count'] >= 3:
-                        self.status_updated.emit(row, 'error')
+                        self.status_updated.emit(row, '识别失败')
                 
                 time.sleep(0.05)
             
