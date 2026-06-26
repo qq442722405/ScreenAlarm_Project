@@ -708,7 +708,8 @@ class MainWindow(QMainWindow):
         self.status_timer.start(500)
         
         self.table.itemChanged.connect(self._on_table_item_changed)
-        self.table.currentRowChanged.connect(self._on_current_row_changed)
+        # 修复：使用 itemSelectionChanged 替代不存在的 currentRowChanged
+        self.table.itemSelectionChanged.connect(self._on_current_row_changed)
     
     def _setup_ui(self):
         central = QWidget()
@@ -871,7 +872,9 @@ class MainWindow(QMainWindow):
         self.table.model().rowsInserted.connect(self._on_rows_inserted)
         self.table.model().rowsRemoved.connect(self._on_rows_removed)
     
-    def _on_current_row_changed(self, current_row):
+    # 修复：无参函数，内部获取当前行
+    def _on_current_row_changed(self):
+        current_row = self.table.currentRow()
         if current_row < 0 or current_row not in self.value_history:
             self.trend_chart.set_data([], "数值趋势")
             return
@@ -1185,6 +1188,7 @@ class MainWindow(QMainWindow):
         if len(self.value_history[row]) > 200:
             self.value_history[row].pop(0)
         
+        # 选中当前行时实时更新曲线
         if self.table.currentRow() == row:
             name_item = self.table.item(row, 1)
             name = name_item.text() if name_item else f"区域{row+1}"
@@ -1307,57 +1311,4 @@ class MainWindow(QMainWindow):
                 enable_check = QCheckBox()
                 enable_check.setChecked(item.get('enabled', True))
                 enable_check.setStyleSheet("margin-left: 12px;")
-                self.table.setCellWidget(row, 0, enable_check)
-                self.row_enabled[row] = item.get('enabled', True)
-                enable_check.stateChanged.connect(lambda state, r=row: self._on_enable_changed(r, state))
-                
-                mute_check = QCheckBox()
-                mute_check.setChecked(item.get('muted', False))
-                mute_check.setStyleSheet("margin-left: 12px;")
-                self.table.setCellWidget(row, 8, mute_check)
-                self.row_muted[row] = item.get('muted', False)
-                mute_check.stateChanged.connect(lambda state, r=row: self._on_mute_changed(r, state))
-                
-                self.table.setItem(row, 1, QTableWidgetItem(item['name']))
-                self.table.setItem(row, 2, QTableWidgetItem("--"))
-                self.table.setItem(row, 3, QTableWidgetItem(str(item['lower'])))
-                self.table.setItem(row, 4, QTableWidgetItem(str(item['upper'])))
-                self.table.setItem(row, 5, QTableWidgetItem(item['coords']))
-                self.table.setItem(row, 6, QTableWidgetItem("待监控"))
-                self.table.setItem(row, 7, QTableWidgetItem("--"))
-            
-            volume = config.get('volume', 80)
-            self.volume_slider.setValue(volume)
-            self.on_volume_changed(volume)
-            
-            interval = config.get('interval', '500ms')
-            idx = self.interval_combo.findText(interval)
-            if idx >= 0:
-                self.interval_combo.setCurrentIndex(idx)
-                self.detect_interval = int(interval.replace("ms", ""))
-            
-            self.status_label.setText("状态: 配置已加载")
-        except Exception as e:
-            print(f"加载失败: {e}")
-    
-    def load_config_dialog(self):
-        file_path, _ = QFileDialog.getOpenFileName(
-            self, "选择配置文件", "", "JSON文件 (*.json)"
-        )
-        if file_path:
-            self.config_file = file_path
-            self.load_config()
-    
-    def closeEvent(self, event):
-        self.stop_monitor()
-        self.stop_alarm()
-        event.accept()
-
-
-if __name__ == "__main__":
-    app = QApplication(sys.argv)
-    app.setApplicationName("屏幕数字监控报警")
-    app.setStyle("Fusion")
-    win = MainWindow()
-    win.show()
-    sys.exit(app.exec())
+                self.table
