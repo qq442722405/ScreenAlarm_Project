@@ -385,7 +385,7 @@ class TrendChartWidget(QWidget):
         if len(self.data) < 2:
             painter.setPen(QColor("#7a7a9a"))
             painter.setFont(QFont("Microsoft YaHei", 10))
-            painter.drawText(chart_rect, Qt.AlignCenter, "选中监控行后显示数值趋势")
+            painter.drawText(chart_rect, Qt.AlignCenter, "选中监控行后显示数值变化趋势")
             return
         
         min_val = min(self.data)
@@ -453,8 +453,8 @@ class TrendChartWidget(QWidget):
         # X轴标签（次数）
         painter.setPen(QColor("#7a7a9a"))
         painter.setFont(QFont("Arial", 8))
-        painter.drawText(chart_rect.left(), chart_rect.bottom() + 18, "第1次")
-        painter.drawText(chart_rect.right() - 40, chart_rect.bottom() + 18, f"第{len(self.data)}次")
+        painter.drawText(chart_rect.left(), chart_rect.bottom() + 18, "首变")
+        painter.drawText(chart_rect.right() - 40, chart_rect.bottom() + 18, f"第{len(self.data)}变")
 
 
 class MainWindow(QMainWindow):
@@ -836,10 +836,24 @@ class MainWindow(QMainWindow):
         return self.row_muted.get(row, False)
     
     def _on_mute_changed(self, row, state):
-        """静音状态变化 - 只控制声音，不影响报警逻辑"""
+        """静音状态变化 - 控制声音，并立即生效"""
         self.row_muted[row] = (state == 2)
         
-        # 如果该行正在报警且取消静音，不自动播放声音（等待下次报警触发）
+        # 如果该行当前正在报警
+        if self.row_alarm.get(row, False):
+            if state == 2:  # 勾选了静音
+                # 检查是否还有其他【未静音且正在报警】的监控点
+                any_unmuted_alarm = False
+                for r, is_alarming in self.row_alarm.items():
+                    if is_alarming and not self._is_row_muted(r):
+                        any_unmuted_alarm = True
+                        break
+                # 如果所有正在报警的行都被静音了，立刻停止播放
+                if not any_unmuted_alarm:
+                    self.stop_alarm()
+            else:  # 取消了静音
+                # 立刻恢复播放报警声
+                self.play_alarm(row)
     
     def on_interval_changed(self, text):
         self.detect_interval = int(text.replace("ms", ""))
@@ -1085,16 +1099,19 @@ class MainWindow(QMainWindow):
         # 更新历史数据
         if row not in self.value_history:
             self.value_history[row] = []
-        self.value_history[row].append(value)
-        if len(self.value_history[row]) > 200:
-            self.value_history[row].pop(0)
-        
-        # 如果当前选中的行是这一行，更新趋势图
-        selected = self.table.selectedItems()
-        if selected and selected[0].row() == row:
-            name_item = self.table.item(row, 1)
-            name = name_item.text() if name_item else f"区域{row+1}"
-            self.trend_chart.set_data(self.value_history[row], f"{name} 数值趋势")
+            
+        # 【核心修改】：只有历史数据为空，或者当前值与上一次的值不同，才推进趋势图
+        if not self.value_history[row] or self.value_history[row][-1] != value:
+            self.value_history[row].append(value)
+            if len(self.value_history[row]) > 200:
+                self.value_history[row].pop(0)
+            
+            # 如果当前选中的行是这一行，更新趋势图
+            selected = self.table.selectedItems()
+            if selected and selected[0].row() == row:
+                name_item = self.table.item(row, 1)
+                name = name_item.text() if name_item else f"区域{row+1}"
+                self.trend_chart.set_data(self.value_history[row], f"{name} 数值趋势")
     
     def on_alarm_triggered(self, row, name, value, lower, upper):
         # 报警状态由main管理，静音只控制声音
@@ -1136,9 +1153,16 @@ class MainWindow(QMainWindow):
             if self.row_alarm.get(row, False):
                 self.row_alarm[row] = False
                 self._set_name_color(row, False)
-                # 检查是否还有报警
-                if not any(self.row_alarm.values()):
+                
+                # 检查是否还有未静音的报警
+                any_unmuted_alarm = False
+                for r, is_alarming in self.row_alarm.items():
+                    if is_alarming and not self._is_row_muted(r):
+                        any_unmuted_alarm = True
+                        break
+                if not any_unmuted_alarm:
                     self.stop_alarm()
+                    
         elif status == 'error':
             status_item = QTableWidgetItem("识别失败")
             status_item.setBackground(QBrush(QColor(100, 100, 115)))
