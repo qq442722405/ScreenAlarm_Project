@@ -9,12 +9,14 @@ from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QTableWidget, QTableWidgetItem, QLabel, QMessageBox,
     QAbstractItemView, QHeaderView, QFileDialog, QDialog,
-    QDialogButtonBox, QFormLayout, QSpinBox, QDoubleSpinBox, QLineEdit,
-    QGroupBox, QGridLayout, QFrame, QSlider, QComboBox,
-    QProgressBar, QCheckBox
+    QLineEdit, QGroupBox, QFrame, QSlider, QComboBox,
+    QProgressBar, QCheckBox, QTextEdit
 )
 from PySide6.QtCore import Qt, QTimer, QThread, Signal, QPoint, QRect
-from PySide6.QtGui import QColor, QBrush, QFont, QPainter, QPen, QPixmap, QImage
+from PySide6.QtGui import (
+    QColor, QBrush, QFont, QPainter, QPen, QPixmap, QImage,
+    QPainterPath, QLinearGradient
+)
 from monitor import MonitorThread
 
 try:
@@ -161,7 +163,7 @@ class AlarmSoundPlayer:
 
 class CoordinatePicker(QWidget):
     """屏幕区域选择器 - 按住左键拖拽选区域，松开自动完成"""
-    coord_selected = Signal(int, int, int, int)  # x, y, width, height
+    coord_selected = Signal(int, int, int, int)
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -173,7 +175,6 @@ class CoordinatePicker(QWidget):
         )
         self.setMouseTracking(True)
         
-        # 计算多屏总尺寸
         screens = QApplication.screens()
         total_rect = screens[0].geometry()
         for s in screens[1:]:
@@ -194,23 +195,21 @@ class CoordinatePicker(QWidget):
         self.raise_()
         self.activateWindow()
         
-        # 拖拽状态
         self.is_selecting = False
         self.start_pos = QPoint()
         self.end_pos = QPoint()
         
-        # 底部提示标签
         self.label = QLabel("🖱 按住左键拖拽选择监控区域，松开鼠标自动完成", self)
         self.label.setAlignment(Qt.AlignCenter)
         self.label.setStyleSheet("""
             QLabel {
                 color: white;
-                background: rgba(0,0,0,210);
-                padding: 12px 24px;
-                border-radius: 12px;
+                background: rgba(0,0,0,220);
+                padding: 14px 28px;
+                border-radius: 14px;
                 font-size: 18px;
                 font-weight: bold;
-                border: 2px solid rgba(255,255,255,0.3);
+                border: 1px solid rgba(255,255,255,0.2);
             }
         """)
         self.label.adjustSize()
@@ -219,18 +218,17 @@ class CoordinatePicker(QWidget):
             self.height() - self.label.height() - 80
         )
         
-        # 顶部坐标显示
         self.coord_label = QLabel("等待选择...", self)
         self.coord_label.setAlignment(Qt.AlignCenter)
         self.coord_label.setStyleSheet("""
             QLabel {
-                color: #4a9eff;
-                background: rgba(0,0,0,210);
-                padding: 8px 20px;
-                border-radius: 8px;
-                font-size: 18px;
+                color: #5aa9ff;
+                background: rgba(0,0,0,220);
+                padding: 10px 22px;
+                border-radius: 10px;
+                font-size: 17px;
                 font-weight: bold;
-                border: 2px solid #4a9eff;
+                border: 1px solid #5aa9ff;
             }
         """)
         self.coord_label.adjustSize()
@@ -245,42 +243,30 @@ class CoordinatePicker(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
         
-        # 绘制全屏背景
         painter.drawPixmap(self.rect(), self.screen_pixmap)
+        painter.fillRect(self.rect(), QColor(0, 0, 0, 120))
         
-        # 绘制半透明遮罩
-        painter.fillRect(self.rect(), QColor(0, 0, 0, 110))
-        
-        # 绘制选中区域（挖空显示原始画面）
         if self.is_selecting and not self.end_pos.isNull():
             rect = self._get_current_rect()
             if rect.width() > 5 and rect.height() > 5:
-                # 还原选中区域的原始屏幕画面
                 painter.drawPixmap(rect, self.screen_pixmap.copy(rect))
                 
-                # 虚线边框
-                pen = QPen(QColor(0, 255, 136), 2)
+                pen = QPen(QColor(0, 255, 140), 2)
                 pen.setStyle(Qt.DashLine)
                 painter.setPen(pen)
                 painter.drawRect(rect)
                 
-                # 四角标记
-                painter.setPen(QPen(QColor(0, 255, 136), 2))
-                size = 12
-                # 左上角
+                painter.setPen(QPen(QColor(0, 255, 140), 2))
+                size = 14
                 painter.drawLine(rect.topLeft(), rect.topLeft() + QPoint(size, 0))
                 painter.drawLine(rect.topLeft(), rect.topLeft() + QPoint(0, size))
-                # 右上角
                 painter.drawLine(rect.topRight(), rect.topRight() + QPoint(-size, 0))
                 painter.drawLine(rect.topRight(), rect.topRight() + QPoint(0, size))
-                # 左下角
                 painter.drawLine(rect.bottomLeft(), rect.bottomLeft() + QPoint(size, 0))
                 painter.drawLine(rect.bottomLeft(), rect.bottomLeft() + QPoint(0, -size))
-                # 右下角
                 painter.drawLine(rect.bottomRight(), rect.bottomRight() + QPoint(-size, 0))
                 painter.drawLine(rect.bottomRight(), rect.bottomRight() + QPoint(0, -size))
                 
-                # 尺寸文字
                 painter.setPen(Qt.white)
                 painter.setFont(QFont("Arial", 12, QFont.Bold))
                 text_y = rect.y() - 12 if rect.y() > 30 else rect.y() + rect.height() + 25
@@ -353,115 +339,348 @@ class CoordinatePicker(QWidget):
         event.accept()
 
 
+class TrendChartWidget(QWidget):
+    """实时数值趋势曲线控件"""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setMinimumHeight(190)
+        self.data = []
+        self.max_points = 150
+        self.title = "数值趋势"
+    
+    def set_data(self, data_list, title="数值趋势"):
+        self.data = data_list[-self.max_points:]
+        self.title = title
+        self.update()
+    
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        
+        rect = self.rect()
+        padding_left = 55
+        padding_right = 20
+        padding_top = 32
+        padding_bottom = 28
+        
+        # 背景
+        painter.setBrush(QColor("#252538"))
+        painter.setPen(Qt.NoPen)
+        painter.drawRoundedRect(rect, 8, 8)
+        
+        # 标题
+        painter.setPen(QColor("#e8e8f0"))
+        painter.setFont(QFont("Microsoft YaHei", 10, QFont.Bold))
+        painter.drawText(padding_left, 22, self.title)
+        
+        chart_rect = QRect(
+            padding_left, padding_top,
+            rect.width() - padding_left - padding_right,
+            rect.height() - padding_top - padding_bottom
+        )
+        
+        # 网格线
+        painter.setPen(QColor("#36364a"))
+        grid_rows = 5
+        for i in range(grid_rows + 1):
+            y = chart_rect.top() + chart_rect.height() * i / grid_rows
+            painter.drawLine(chart_rect.left(), y, chart_rect.right(), y)
+        
+        grid_cols = 10
+        for i in range(grid_cols + 1):
+            x = chart_rect.left() + chart_rect.width() * i / grid_cols
+            painter.drawLine(x, chart_rect.top(), x, chart_rect.bottom())
+        
+        if len(self.data) < 2:
+            painter.setPen(QColor("#7a7a9a"))
+            painter.setFont(QFont("Microsoft YaHei", 10))
+            painter.drawText(chart_rect, Qt.AlignCenter, "选中监控行后显示数值趋势")
+            return
+        
+        # 计算Y轴范围
+        min_val = min(self.data)
+        max_val = max(self.data)
+        if min_val == max_val:
+            min_val -= 1
+            max_val += 1
+        val_range = max_val - min_val
+        margin = val_range * 0.1
+        min_val -= margin
+        max_val += margin
+        val_range = max_val - min_val
+        
+        # Y轴刻度
+        painter.setPen(QColor("#9a9ab0"))
+        painter.setFont(QFont("Arial", 9))
+        for i in range(grid_rows + 1):
+            y = chart_rect.top() + chart_rect.height() * i / grid_rows
+            val = max_val - val_range * i / grid_rows
+            painter.drawText(8, y + 3, f"{val:.1f}")
+        
+        # 计算曲线点
+        points = []
+        step_x = chart_rect.width() / (len(self.data) - 1)
+        
+        for i, val in enumerate(self.data):
+            x = chart_rect.left() + i * step_x
+            y = chart_rect.bottom() - (val - min_val) / val_range * chart_rect.height()
+            points.append(QPoint(x, y))
+        
+        # 渐变填充区域
+        if len(points) > 2:
+            gradient = QLinearGradient(0, chart_rect.top(), 0, chart_rect.bottom())
+            gradient.setColorAt(0, QColor(74, 158, 255, 90))
+            gradient.setColorAt(1, QColor(74, 158, 255, 10))
+            painter.setBrush(gradient)
+            painter.setPen(Qt.NoPen)
+            
+            path = QPainterPath()
+            path.moveTo(points[0].x(), chart_rect.bottom())
+            for p in points:
+                path.lineTo(p)
+            path.lineTo(points[-1].x(), chart_rect.bottom())
+            path.closeSubpath()
+            painter.drawPath(path)
+        
+        # 绘制曲线
+        pen = QPen(QColor("#4a9eff"), 2)
+        painter.setPen(pen)
+        painter.setBrush(Qt.NoBrush)
+        for i in range(len(points) - 1):
+            painter.drawLine(points[i], points[i+1])
+        
+        # 最新值标记
+        if points:
+            last_p = points[-1]
+            painter.setPen(QPen(QColor("#ff6b6b"), 3))
+            painter.setBrush(QColor("#ff6b6b"))
+            painter.drawEllipse(last_p, 4, 4)
+            
+            painter.setPen(QColor("#ff8080"))
+            painter.setFont(QFont("Arial", 9, QFont.Bold))
+            text = f"{self.data[-1]:.2f}"
+            text_w = painter.fontMetrics().horizontalAdvance(text)
+            tx = last_p.x() - text_w - 8
+            if tx < chart_rect.left():
+                tx = last_p.x() + 8
+            painter.drawText(tx, last_p.y() - 6, text)
+
+
+class LogViewerDialog(QDialog):
+    """报警日志查看弹窗"""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("📋 报警日志记录")
+        self.resize(650, 420)
+        self.setStyleSheet("""
+            QDialog { background-color: #1e1e2e; }
+            QTextEdit {
+                background-color: #252538;
+                color: #e0e0e0;
+                border: 1px solid #3a3a50;
+                border-radius: 8px;
+                padding: 10px;
+                font-family: Consolas, "Microsoft YaHei", monospace;
+                font-size: 13px;
+            }
+            QPushButton {
+                background-color: #3a3a50;
+                color: #e0e0e0;
+                border: none;
+                border-radius: 6px;
+                padding: 7px 18px;
+                font-weight: bold;
+                min-width: 80px;
+            }
+            QPushButton:hover { background-color: #4a4a65; }
+            QPushButton#btn_clear { background-color: #aa3a3a; }
+            QPushButton#btn_clear:hover { background-color: #bb4a4a; }
+        """)
+        
+        layout = QVBoxLayout(self)
+        layout.setSpacing(12)
+        layout.setContentsMargins(16, 16, 16, 16)
+        
+        self.log_text = QTextEdit()
+        self.log_text.setReadOnly(True)
+        layout.addWidget(self.log_text)
+        
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+        
+        btn_refresh = QPushButton("刷新")
+        btn_refresh.clicked.connect(self.load_log)
+        btn_layout.addWidget(btn_refresh)
+        
+        btn_clear = QPushButton("清空日志")
+        btn_clear.setObjectName("btn_clear")
+        btn_clear.clicked.connect(self.clear_log)
+        btn_layout.addWidget(btn_clear)
+        
+        btn_close = QPushButton("关闭")
+        btn_close.clicked.connect(self.accept)
+        btn_layout.addWidget(btn_close)
+        
+        layout.addLayout(btn_layout)
+        
+        self.load_log()
+    
+    def load_log(self):
+        log_file = "alarm_log.txt"
+        if os.path.exists(log_file):
+            try:
+                with open(log_file, "r", encoding="utf-8") as f:
+                    content = f.read()
+                self.log_text.setPlainText(content if content.strip() else "暂无报警记录")
+                self.log_text.verticalScrollBar().setValue(self.log_text.verticalScrollBar().maximum())
+            except Exception as e:
+                self.log_text.setPlainText(f"读取失败: {e}")
+        else:
+            self.log_text.setPlainText("暂无报警日志文件")
+    
+    def clear_log(self):
+        reply = QMessageBox.question(self, "确认操作", "确定要清空所有报警日志吗？此操作不可撤销。")
+        if reply == QMessageBox.Yes:
+            try:
+                with open("alarm_log.txt", "w", encoding="utf-8") as f:
+                    f.write("")
+                self.load_log()
+            except Exception as e:
+                QMessageBox.warning(self, "错误", f"清空失败: {e}")
+
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("屏幕数字监控报警系统")
-        self.resize(1200, 750)
+        self.resize(1200, 820)
         
         self.setStyleSheet("""
-            QMainWindow { background-color: #1a1a2a; }
-            QLabel { color: #e0e0e0; }
+            QMainWindow { background-color: #1e1e2e; }
+            QLabel { color: #e0e0f0; font-family: "Microsoft YaHei"; }
             QTableWidget {
-                background-color: #1a1a2a;
-                alternate-background-color: #2a2a3a;
-                color: #e0e0e0;
-                gridline-color: #3a3a4a;
+                background-color: #1e1e2e;
+                alternate-background-color: #27273d;
+                color: #e0e0f0;
+                gridline-color: #33334a;
                 selection-background-color: #4a9eff;
-                selection-color: #1a1a2a;
+                selection-color: #ffffff;
+                border: 1px solid #33334a;
+                border-radius: 8px;
             }
-            QTableWidget::item { padding: 4px; }
+            QTableWidget::item { padding: 6px; }
             QHeaderView::section {
-                background-color: #2a2a3a;
-                color: #e0e0e0;
-                padding: 6px;
-                border: 1px solid #3a3a4a;
-            }
-            QPushButton {
-                background-color: #3a3a4a;
-                color: #e0e0e0;
+                background-color: #2a2a42;
+                color: #e0e0f0;
+                padding: 8px;
                 border: none;
-                border-radius: 6px;
-                padding: 8px 18px;
+                border-right: 1px solid #33334a;
+                border-bottom: 1px solid #33334a;
                 font-weight: bold;
             }
-            QPushButton:hover { background-color: #4a4a5a; }
+            QPushButton {
+                background-color: #363650;
+                color: #e0e0f0;
+                border: none;
+                border-radius: 8px;
+                padding: 9px 20px;
+                font-weight: bold;
+                font-family: "Microsoft YaHei";
+                min-height: 22px;
+            }
+            QPushButton:hover { background-color: #464668; }
             QPushButton#btn_start {
-                background-color: #2a8a4a;
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #2e9a58, stop:1 #258048);
                 color: white;
             }
-            QPushButton#btn_start:hover { background-color: #3a9a5a; }
+            QPushButton#btn_start:hover { background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #38ad64, stop:1 #2d9052); }
             QPushButton#btn_start:disabled {
-                background-color: #3a3a4a;
-                color: #6a6a7a;
+                background-color: #3a3a50;
+                color: #7a7a9a;
             }
             QPushButton#btn_stop {
-                background-color: #aa3a3a;
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #c04040, stop:1 #a03030);
                 color: white;
             }
-            QPushButton#btn_stop:hover { background-color: #bb4a4a; }
+            QPushButton#btn_stop:hover { background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #d05050, stop:1 #b03a3a); }
             QPushButton#btn_stop:disabled {
-                background-color: #3a3a4a;
-                color: #6a6a7a;
+                background-color: #3a3a50;
+                color: #7a7a9a;
             }
-            QPushButton#btn_delete { background-color: #aa3a3a; }
-            QPushButton#btn_delete:hover { background-color: #bb4a4a; }
-            QPushButton#btn_save { background-color: #2a4a7a; }
-            QPushButton#btn_save:hover { background-color: #3a5a8a; }
+            QPushButton#btn_delete { background-color: #b03a3a; }
+            QPushButton#btn_delete:hover { background-color: #c44a4a; }
+            QPushButton#btn_save { background-color: #2a5a9a; }
+            QPushButton#btn_save:hover { background-color: #356ab0; }
             QFrame#hint_frame {
-                background-color: #2a2a3a;
-                border-radius: 4px;
-                padding: 4px 8px;
+                background-color: #2a2a42;
+                border-radius: 8px;
+                padding: 6px 12px;
+                border: 1px solid #3a3a55;
             }
             QSlider::groove:horizontal {
                 height: 6px;
-                background: #3a3a4a;
+                background: #363650;
                 border-radius: 3px;
             }
             QSlider::handle:horizontal {
                 background: #4a9eff;
-                width: 14px;
-                height: 14px;
-                margin: -4px 0;
-                border-radius: 7px;
+                width: 16px;
+                height: 16px;
+                margin: -5px 0;
+                border-radius: 8px;
             }
             QSlider::sub-page:horizontal {
                 background: #4a9eff;
                 border-radius: 3px;
             }
             QComboBox {
-                background-color: #3d3d4d;
-                color: #e0e0e0;
-                border: 1px solid #555;
-                border-radius: 4px;
-                padding: 4px 8px;
+                background-color: #363650;
+                color: #e0e0f0;
+                border: 1px solid #4a4a6a;
+                border-radius: 6px;
+                padding: 5px 10px;
+                min-height: 20px;
             }
             QComboBox:hover { border-color: #4a9eff; }
+            QComboBox::drop-down { border: none; width: 20px; }
             QProgressBar {
-                background-color: #2a2a3a;
-                border: 1px solid #3a3a4a;
-                border-radius: 4px;
+                background-color: #27273d;
+                border: 1px solid #33334a;
+                border-radius: 6px;
                 text-align: center;
-                color: #e0e0e0;
-                height: 16px;
+                color: #e0e0f0;
+                height: 18px;
             }
             QProgressBar::chunk {
-                background-color: #4a9eff;
-                border-radius: 4px;
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #4a9eff, stop:1 #6ab4ff);
+                border-radius: 6px;
             }
-            QCheckBox {
-                color: #e0e0e0;
-            }
+            QCheckBox { color: #e0e0f0; font-family: "Microsoft YaHei"; }
             QCheckBox::indicator {
-                width: 16px;
-                height: 16px;
-                border-radius: 3px;
-                background-color: #3a3a4a;
-                border: 1px solid #5a5a6a;
+                width: 17px;
+                height: 17px;
+                border-radius: 4px;
+                background-color: #363650;
+                border: 1px solid #505070;
             }
             QCheckBox::indicator:checked {
                 background-color: #4a9eff;
                 border-color: #4a9eff;
+            }
+            QGroupBox {
+                color: #e0e0f0;
+                font-weight: bold;
+                font-family: "Microsoft YaHei";
+                border: 1px solid #33334a;
+                border-radius: 10px;
+                margin-top: 12px;
+                padding-top: 12px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 12px;
+                padding: 0 6px;
+                color: #c0c0e0;
             }
         """)
         
@@ -470,8 +689,8 @@ class MainWindow(QMainWindow):
         self.config_file = "monitor_config.json"
         self.alarm_logs = []
         self.loop_enabled = True
-        self.add_row_widget = None
         self.detect_interval = 500
+        self.value_history = {}
         
         self.alarm_player = AlarmSoundPlayer()
         self.alarm_file = self.alarm_player.sound_file or ""
@@ -489,46 +708,52 @@ class MainWindow(QMainWindow):
         self.status_timer.start(500)
         
         self.table.itemChanged.connect(self._on_table_item_changed)
+        self.table.currentRowChanged.connect(self._on_current_row_changed)
     
     def _setup_ui(self):
         central = QWidget()
         self.setCentralWidget(central)
         main_layout = QVBoxLayout(central)
-        main_layout.setSpacing(10)
-        main_layout.setContentsMargins(12, 12, 12, 12)
+        main_layout.setSpacing(12)
+        main_layout.setContentsMargins(16, 16, 16, 16)
         
+        # 标题栏
         title_layout = QHBoxLayout()
         title = QLabel("📊 屏幕数字监控报警系统")
-        title_font = QFont()
-        title_font.setPointSize(18)
+        title_font = QFont("Microsoft YaHei")
+        title_font.setPointSize(19)
         title_font.setBold(True)
         title.setFont(title_font)
         title_layout.addWidget(title)
         title_layout.addStretch()
-        subtitle = QLabel("-- 基于EasyOCR")
-        subtitle.setStyleSheet("color: #6a6a7a; font-size: 13px;")
+        subtitle = QLabel("基于 EasyOCR 视觉识别")
+        subtitle.setStyleSheet("color: #7a7a9a; font-size: 13px;")
         title_layout.addWidget(subtitle)
         main_layout.addLayout(title_layout)
         
+        # 提示栏
         hint_frame = QFrame()
         hint_frame.setObjectName("hint_frame")
         hint_layout = QHBoxLayout(hint_frame)
-        hint_layout.setContentsMargins(8, 4, 8, 4)
-        hint_label = QLabel("💡 点击「添加监控点」按住左键拖拽选择区域 | 修改上下限立即生效")
-        hint_label.setStyleSheet("color: #ddaa44;")
+        hint_layout.setContentsMargins(10, 5, 10, 5)
+        hint_label = QLabel("💡 点击「添加监控点」按住左键拖拽选择区域 | 修改上下限立即生效 | 选中行查看数值趋势")
+        hint_label.setStyleSheet("color: #e6b84d;")
         hint_layout.addWidget(hint_label)
         main_layout.addWidget(hint_frame)
         
+        # OCR状态
         self.ocr_status_label = QLabel("OCR引擎: 初始化中...")
-        self.ocr_status_label.setStyleSheet("padding: 4px 12px; background-color: #2a2a3a; border-radius: 4px; color: #ddaa44;")
+        self.ocr_status_label.setStyleSheet("padding: 6px 14px; background-color: #2a2a42; border-radius: 6px; color: #e6b84d; border: 1px solid #3a3a55;")
         main_layout.addWidget(self.ocr_status_label)
         
+        # 下载进度
         self.download_progress = QProgressBar()
         self.download_progress.setVisible(False)
         self.download_progress.setRange(0, 100)
         self.download_progress.setValue(0)
         main_layout.addWidget(self.download_progress)
         
+        # 监控表格
         self.table = QTableWidget()
         self.table.setColumnCount(9)
         self.table.setHorizontalHeaderLabels([
@@ -538,42 +763,56 @@ class MainWindow(QMainWindow):
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.setAlternatingRowColors(True)
         self.table.setRowCount(0)
-        self.table.setColumnWidth(0, 50)
-        self.table.setColumnWidth(1, 70)
-        self.table.setColumnWidth(2, 80)
-        self.table.setColumnWidth(3, 60)
-        self.table.setColumnWidth(4, 60)
-        self.table.setColumnWidth(5, 120)
-        self.table.setColumnWidth(6, 80)
-        self.table.setColumnWidth(7, 100)
-        self.table.setColumnWidth(8, 55)
+        self.table.setColumnWidth(0, 55)
+        self.table.setColumnWidth(1, 80)
+        self.table.setColumnWidth(2, 90)
+        self.table.setColumnWidth(3, 65)
+        self.table.setColumnWidth(4, 65)
+        self.table.setColumnWidth(5, 130)
+        self.table.setColumnWidth(6, 85)
+        self.table.setColumnWidth(7, 110)
+        self.table.setColumnWidth(8, 60)
         self.table.horizontalHeader().setStretchLastSection(True)
-        main_layout.addWidget(self.table)
+        self.table.verticalHeader().setVisible(False)
+        main_layout.addWidget(self.table, 3)
         
+        # 趋势曲线
+        chart_group = QGroupBox("📈 数值趋势曲线")
+        chart_layout = QVBoxLayout(chart_group)
+        chart_layout.setContentsMargins(12, 18, 12, 12)
+        self.trend_chart = TrendChartWidget()
+        chart_layout.addWidget(self.trend_chart)
+        main_layout.addWidget(chart_group, 2)
+        
+        # 按钮栏
         btn_layout = QHBoxLayout()
-        btn_layout.setSpacing(8)
+        btn_layout.setSpacing(10)
         
-        self.btn_add = QPushButton("添加监控点")
+        self.btn_add = QPushButton("➕ 添加监控点")
         self.btn_add.clicked.connect(self.add_monitor_row)
         btn_layout.addWidget(self.btn_add)
         
-        self.btn_edit = QPushButton("编辑区域")
+        self.btn_edit = QPushButton("✏️ 编辑区域")
         self.btn_edit.clicked.connect(self.edit_monitor_point)
         btn_layout.addWidget(self.btn_edit)
         
-        self.btn_delete = QPushButton("删除")
+        self.btn_delete = QPushButton("🗑 删除")
         self.btn_delete.setObjectName("btn_delete")
         self.btn_delete.clicked.connect(self.delete_monitor_point)
         btn_layout.addWidget(self.btn_delete)
         
         btn_layout.addStretch()
         
-        self.btn_start = QPushButton("开始监控")
+        self.btn_log = QPushButton("📋 报警日志")
+        self.btn_log.clicked.connect(self.show_log_viewer)
+        btn_layout.addWidget(self.btn_log)
+        
+        self.btn_start = QPushButton("▶ 开始监控")
         self.btn_start.setObjectName("btn_start")
         self.btn_start.clicked.connect(self.start_monitor)
         btn_layout.addWidget(self.btn_start)
         
-        self.btn_stop = QPushButton("停止监控")
+        self.btn_stop = QPushButton("⏹ 停止监控")
         self.btn_stop.setObjectName("btn_stop")
         self.btn_stop.clicked.connect(self.stop_monitor)
         self.btn_stop.setEnabled(False)
@@ -581,54 +820,50 @@ class MainWindow(QMainWindow):
         
         btn_layout.addStretch()
         
-        self.loop_check = QCheckBox("循环报警")
-        self.loop_check.setChecked(True)
-        self.loop_check.setStyleSheet("color: #e0e0e0;")
-        self.loop_check.stateChanged.connect(self._on_loop_changed)
-        btn_layout.addWidget(self.loop_check)
-        
         btn_layout.addWidget(QLabel("音量:"))
         self.volume_slider = QSlider(Qt.Horizontal)
         self.volume_slider.setRange(0, 100)
         self.volume_slider.setValue(80)
-        self.volume_slider.setFixedWidth(80)
+        self.volume_slider.setFixedWidth(90)
         self.volume_slider.valueChanged.connect(self.on_volume_changed)
         btn_layout.addWidget(self.volume_slider)
         
         self.volume_label = QLabel("80%")
-        self.volume_label.setFixedWidth(35)
+        self.volume_label.setFixedWidth(40)
         btn_layout.addWidget(self.volume_label)
         
         btn_layout.addWidget(QLabel("间隔:"))
         self.interval_combo = QComboBox()
         self.interval_combo.addItems(["100ms", "200ms", "300ms", "500ms", "1000ms", "2000ms"])
         self.interval_combo.setCurrentIndex(3)
-        self.interval_combo.setFixedWidth(80)
+        self.interval_combo.setFixedWidth(90)
         self.interval_combo.currentTextChanged.connect(self.on_interval_changed)
         btn_layout.addWidget(self.interval_combo)
         
-        self.btn_save = QPushButton("保存配置")
+        self.btn_save = QPushButton("💾 保存配置")
         self.btn_save.setObjectName("btn_save")
         self.btn_save.clicked.connect(self.save_config)
         btn_layout.addWidget(self.btn_save)
         
-        self.btn_load = QPushButton("加载配置")
+        self.btn_load = QPushButton("📂 加载配置")
         self.btn_load.clicked.connect(self.load_config_dialog)
         btn_layout.addWidget(self.btn_load)
         
         main_layout.addLayout(btn_layout)
         
+        # 状态栏
         status_layout = QHBoxLayout()
+        status_layout.setSpacing(10)
         self.status_label = QLabel("状态: 就绪")
-        self.status_label.setStyleSheet("padding: 6px; background-color: #2a2a3a; border-radius: 4px;")
-        status_layout.addWidget(self.status_label, 2)
+        self.status_label.setStyleSheet("padding: 8px 12px; background-color: #27273d; border-radius: 6px; border: 1px solid #33334a;")
+        status_layout.addWidget(self.status_label, 3)
         
         self.alarm_count_label = QLabel("报警数: 0")
-        self.alarm_count_label.setStyleSheet("padding: 6px; background-color: #2a2a3a; border-radius: 4px;")
+        self.alarm_count_label.setStyleSheet("padding: 8px 12px; background-color: #27273d; border-radius: 6px; border: 1px solid #33334a;")
         status_layout.addWidget(self.alarm_count_label, 1)
         
         self.alarm_status_label = QLabel("🔇 无报警")
-        self.alarm_status_label.setStyleSheet("padding: 6px; background-color: #2a2a3a; border-radius: 4px; color: #6a6a7a;")
+        self.alarm_status_label.setStyleSheet("padding: 8px 12px; background-color: #27273d; border-radius: 6px; color: #7a7a9a; border: 1px solid #33334a;")
         status_layout.addWidget(self.alarm_status_label, 1)
         
         main_layout.addLayout(status_layout)
@@ -636,11 +871,13 @@ class MainWindow(QMainWindow):
         self.table.model().rowsInserted.connect(self._on_rows_inserted)
         self.table.model().rowsRemoved.connect(self._on_rows_removed)
     
-    def _on_loop_changed(self, state):
-        self.loop_enabled = (state == 2)
-        self.alarm_player.set_loop(self.loop_enabled)
-        if self.monitor_thread and self.monitor_thread.isRunning():
-            self.monitor_thread.set_alarm_loop(self.loop_enabled)
+    def _on_current_row_changed(self, current_row):
+        if current_row < 0 or current_row not in self.value_history:
+            self.trend_chart.set_data([], "数值趋势")
+            return
+        name_item = self.table.item(current_row, 1)
+        name = name_item.text() if name_item else f"区域{current_row+1}"
+        self.trend_chart.set_data(self.value_history[current_row], f"{name} 数值趋势")
     
     def _on_table_item_changed(self, item):
         if not self.monitoring or self.monitor_thread is None:
@@ -680,6 +917,8 @@ class MainWindow(QMainWindow):
                 del self.row_alarm[row]
             if row in self.row_muted:
                 del self.row_muted[row]
+            if row in self.value_history:
+                del self.value_history[row]
     
     def _get_row_enabled(self, row):
         return self.row_enabled.get(row, True)
@@ -690,14 +929,12 @@ class MainWindow(QMainWindow):
     def _on_mute_changed(self, row, state):
         self.row_muted[row] = (state == 2)
         
-        # 监控运行中：勾选静音立即终止该点报警
         if self.monitoring and self.monitor_thread and self.monitor_thread.isRunning():
             if state == 2:
                 self.monitor_thread.reset_row_alarm(row)
                 self.row_alarm[row] = False
                 self._set_name_color(row, False)
         
-        # 无活跃未静音报警则停止全局声音
         has_active_alarm = False
         for r, alarm in self.row_alarm.items():
             if alarm and not self._is_row_muted(r):
@@ -730,13 +967,13 @@ class MainWindow(QMainWindow):
         self.alarm_player.play()
         self.alarm_playing = True
         self.alarm_status_label.setText("🔊 报警中...")
-        self.alarm_status_label.setStyleSheet("padding: 6px; background-color: #aa3a3a; border-radius: 4px; color: white;")
+        self.alarm_status_label.setStyleSheet("padding: 8px 12px; background-color: #b03a3a; border-radius: 6px; color: white; border: 1px solid #c04a4a;")
     
     def stop_alarm(self):
         self.alarm_player.stop()
         self.alarm_playing = False
         self.alarm_status_label.setText("🔇 无报警")
-        self.alarm_status_label.setStyleSheet("padding: 6px; background-color: #2a2a3a; border-radius: 4px; color: #6a6a7a;")
+        self.alarm_status_label.setStyleSheet("padding: 8px 12px; background-color: #27273d; border-radius: 6px; color: #7a7a9a; border: 1px solid #33334a;")
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowStaysOnTopHint)
         self.show()
     
@@ -745,6 +982,10 @@ class MainWindow(QMainWindow):
         self.download_progress.setValue(value)
         if value >= 100:
             QTimer.singleShot(1000, lambda: self.download_progress.setVisible(False))
+    
+    def show_log_viewer(self):
+        dialog = LogViewerDialog(self)
+        dialog.exec()
     
     def add_monitor_row(self):
         self.picker = CoordinatePicker(self)
@@ -759,17 +1000,18 @@ class MainWindow(QMainWindow):
         
         row = self.table.rowCount()
         self.table.insertRow(row)
+        self.value_history[row] = []
         
         enable_check = QCheckBox()
         enable_check.setChecked(True)
-        enable_check.setStyleSheet("margin-left: 10px;")
+        enable_check.setStyleSheet("margin-left: 12px;")
         self.table.setCellWidget(row, 0, enable_check)
         self.row_enabled[row] = True
         enable_check.stateChanged.connect(lambda state, r=row: self._on_enable_changed(r, state))
         
         mute_check = QCheckBox()
         mute_check.setChecked(False)
-        mute_check.setStyleSheet("margin-left: 10px;")
+        mute_check.setStyleSheet("margin-left: 12px;")
         self.table.setCellWidget(row, 8, mute_check)
         self.row_muted[row] = False
         mute_check.stateChanged.connect(lambda state, r=row: self._on_mute_changed(r, state))
@@ -804,7 +1046,7 @@ class MainWindow(QMainWindow):
             return
         
         self.table.setItem(row, 5, QTableWidgetItem(f"{x},{y},{width},{height}"))
-        self.status_label.setText(f"状态: 已更新坐标")
+        self.status_label.setText("状态: 已更新坐标")
     
     def delete_monitor_point(self):
         row = self.table.currentRow()
@@ -816,18 +1058,12 @@ class MainWindow(QMainWindow):
         reply = QMessageBox.question(self, "确认删除", f"确定要删除 [{name}] 吗？")
         if reply == QMessageBox.Yes:
             self.table.removeRow(row)
-            if row in self.row_enabled:
-                del self.row_enabled[row]
-            if row in self.row_alarm:
-                del self.row_alarm[row]
-            if row in self.row_muted:
-                del self.row_muted[row]
             self.status_label.setText("状态: 已删除")
     
     def set_ocr_status(self, status, is_ready=False):
-        color = "#44ddaa" if is_ready else "#ddaa44"
+        color = "#44ddaa" if is_ready else "#e6b84d"
         self.ocr_status_label.setStyleSheet(
-            f"padding: 4px 12px; background-color: #2a2a3a; border-radius: 4px; color: {color};"
+            f"padding: 6px 14px; background-color: #2a2a42; border-radius: 6px; color: {color}; border: 1px solid #3a3a55;"
         )
         self.ocr_status_label.setText(f"OCR引擎: {status}")
     
@@ -876,6 +1112,10 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "提示", "没有有效的监控点数据")
             return
         
+        # 清空历史数据
+        for row in self.value_history:
+            self.value_history[row].clear()
+        
         self.monitor_thread = MonitorThread(monitors)
         self.monitor_thread.set_interval(self.detect_interval)
         self.monitor_thread.set_alarm_loop(self.loop_enabled)
@@ -923,7 +1163,7 @@ class MainWindow(QMainWindow):
             status_item.setForeground(QBrush(QColor(255, 255, 255)))
             if status_item.text() == "报警":
                 status_item.setText("正常")
-                status_item.setBackground(QBrush(QColor(50, 150, 50)))
+                status_item.setBackground(QBrush(QColor(50, 150, 70)))
                 status_item.setForeground(QBrush(QColor(255, 255, 255)))
     
     def _set_name_color(self, row, alarm):
@@ -938,9 +1178,19 @@ class MainWindow(QMainWindow):
     
     def on_value_updated(self, row, value):
         self.table.setItem(row, 2, QTableWidgetItem(f"{value:.2f}"))
+        
+        if row not in self.value_history:
+            self.value_history[row] = []
+        self.value_history[row].append(value)
+        if len(self.value_history[row]) > 200:
+            self.value_history[row].pop(0)
+        
+        if self.table.currentRow() == row:
+            name_item = self.table.item(row, 1)
+            name = name_item.text() if name_item else f"区域{row+1}"
+            self.trend_chart.set_data(self.value_history[row], f"{name} 数值趋势")
     
     def on_alarm_triggered(self, row, name, value, lower, upper):
-        # 静音状态下不触发报警（双重保险）
         if self._is_row_muted(row):
             return
         
@@ -955,7 +1205,6 @@ class MainWindow(QMainWindow):
         self.table.setItem(row, 7, QTableWidgetItem(now))
         
         self._set_name_color(row, True)
-        
         self._update_alarm_count()
         self.status_label.setText(f"报警: {name} = {value:.2f} [范围: {lower}-{upper}]")
         
@@ -967,7 +1216,7 @@ class MainWindow(QMainWindow):
     def on_status_updated(self, row, status):
         if status == 'normal':
             status_item = QTableWidgetItem("正常")
-            status_item.setBackground(QBrush(QColor(50, 150, 50)))
+            status_item.setBackground(QBrush(QColor(45, 145, 70)))
             status_item.setForeground(QBrush(QColor(255, 255, 255)))
             self.table.setItem(row, 6, status_item)
             if self.row_alarm.get(row, False):
@@ -977,18 +1226,18 @@ class MainWindow(QMainWindow):
                     self.stop_alarm()
         elif status == '静音中':
             status_item = QTableWidgetItem("静音中")
-            status_item.setBackground(QBrush(QColor(130, 100, 50)))
+            status_item.setBackground(QBrush(QColor(140, 105, 50)))
             status_item.setForeground(QBrush(QColor(255, 255, 255)))
             self.table.setItem(row, 6, status_item)
         elif status == 'error':
             status_item = QTableWidgetItem("识别失败")
-            status_item.setBackground(QBrush(QColor(100, 100, 100)))
+            status_item.setBackground(QBrush(QColor(100, 100, 115)))
             status_item.setForeground(QBrush(QColor(255, 255, 255)))
             self.table.setItem(row, 6, status_item)
         elif status == 'disabled':
             status_item = QTableWidgetItem("已禁用")
-            status_item.setBackground(QBrush(QColor(80, 80, 80)))
-            status_item.setForeground(QBrush(QColor(200, 200, 200)))
+            status_item.setBackground(QBrush(QColor(80, 80, 95)))
+            status_item.setForeground(QBrush(QColor(200, 200, 210)))
             self.table.setItem(row, 6, status_item)
             if self.row_alarm.get(row, False):
                 self.row_alarm[row] = False
@@ -1048,20 +1297,23 @@ class MainWindow(QMainWindow):
             self.row_enabled.clear()
             self.row_alarm.clear()
             self.row_muted.clear()
+            self.value_history.clear()
+            
             for item in config.get('monitors', []):
                 row = self.table.rowCount()
                 self.table.insertRow(row)
+                self.value_history[row] = []
                 
                 enable_check = QCheckBox()
                 enable_check.setChecked(item.get('enabled', True))
-                enable_check.setStyleSheet("margin-left: 10px;")
+                enable_check.setStyleSheet("margin-left: 12px;")
                 self.table.setCellWidget(row, 0, enable_check)
                 self.row_enabled[row] = item.get('enabled', True)
                 enable_check.stateChanged.connect(lambda state, r=row: self._on_enable_changed(r, state))
                 
                 mute_check = QCheckBox()
                 mute_check.setChecked(item.get('muted', False))
-                mute_check.setStyleSheet("margin-left: 10px;")
+                mute_check.setStyleSheet("margin-left: 12px;")
                 self.table.setCellWidget(row, 8, mute_check)
                 self.row_muted[row] = item.get('muted', False)
                 mute_check.stateChanged.connect(lambda state, r=row: self._on_mute_changed(r, state))
@@ -1083,10 +1335,6 @@ class MainWindow(QMainWindow):
             if idx >= 0:
                 self.interval_combo.setCurrentIndex(idx)
                 self.detect_interval = int(interval.replace("ms", ""))
-            
-            loop_enabled = config.get('loop_enabled', True)
-            self.loop_enabled = loop_enabled
-            self.loop_check.setChecked(loop_enabled)
             
             self.status_label.setText("状态: 配置已加载")
         except Exception as e:
