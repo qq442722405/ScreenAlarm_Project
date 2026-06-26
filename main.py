@@ -8,8 +8,9 @@ from datetime import datetime
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QTableWidget, QTableWidgetItem, QLabel, QMessageBox,
-    QAbstractItemView, QHeaderView, QFileDialog, QFrame, QSlider,
-    QComboBox, QProgressBar, QCheckBox
+    QAbstractItemView, QHeaderView, QFileDialog, QDialog,
+    QLineEdit, QGroupBox, QFrame, QSlider, QComboBox,
+    QProgressBar, QCheckBox
 )
 from PySide6.QtCore import Qt, QTimer, QThread, Signal, QPoint, QRect
 from PySide6.QtGui import (
@@ -181,7 +182,6 @@ class CoordinatePicker(QWidget):
         self.total_rect = total_rect
         self.setGeometry(total_rect)
         
-        # 抓取全屏截图作为背景
         self.screen_pixmap = QPixmap(total_rect.size())
         self.screen_pixmap.fill(Qt.black)
         painter = QPainter(self.screen_pixmap)
@@ -339,12 +339,12 @@ class CoordinatePicker(QWidget):
 
 
 class TrendChartWidget(QWidget):
-    """数值趋势曲线控件"""
+    """实时数值趋势曲线控件 - 按次数显示"""
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setMinimumHeight(190)
         self.data = []
-        self.max_points = 200
+        self.max_points = 150
         self.title = "数值趋势"
     
     def set_data(self, data_list, title="数值趋势"):
@@ -362,12 +362,10 @@ class TrendChartWidget(QWidget):
         padding_top = 32
         padding_bottom = 28
         
-        # 背景
         painter.setBrush(QColor("#252538"))
         painter.setPen(Qt.NoPen)
         painter.drawRoundedRect(rect, 8, 8)
         
-        # 标题
         painter.setPen(QColor("#e8e8f0"))
         painter.setFont(QFont("Microsoft YaHei", 10, QFont.Bold))
         painter.drawText(padding_left, 22, self.title)
@@ -378,17 +376,11 @@ class TrendChartWidget(QWidget):
             rect.height() - padding_top - padding_bottom
         )
         
-        # 网格线
         painter.setPen(QColor("#36364a"))
         grid_rows = 5
         for i in range(grid_rows + 1):
             y = chart_rect.top() + chart_rect.height() * i / grid_rows
             painter.drawLine(chart_rect.left(), y, chart_rect.right(), y)
-        
-        grid_cols = 10
-        for i in range(grid_cols + 1):
-            x = chart_rect.left() + chart_rect.width() * i / grid_cols
-            painter.drawLine(x, chart_rect.top(), x, chart_rect.bottom())
         
         if len(self.data) < 2:
             painter.setPen(QColor("#7a7a9a"))
@@ -396,7 +388,6 @@ class TrendChartWidget(QWidget):
             painter.drawText(chart_rect, Qt.AlignCenter, "选中监控行后显示数值趋势")
             return
         
-        # 计算Y轴范围
         min_val = min(self.data)
         max_val = max(self.data)
         if min_val == max_val:
@@ -408,7 +399,6 @@ class TrendChartWidget(QWidget):
         max_val += margin
         val_range = max_val - min_val
         
-        # Y轴刻度
         painter.setPen(QColor("#9a9ab0"))
         painter.setFont(QFont("Arial", 9))
         for i in range(grid_rows + 1):
@@ -416,7 +406,6 @@ class TrendChartWidget(QWidget):
             val = max_val - val_range * i / grid_rows
             painter.drawText(8, y + 3, f"{val:.1f}")
         
-        # 计算曲线点
         points = []
         step_x = chart_rect.width() / (len(self.data) - 1)
         
@@ -425,7 +414,6 @@ class TrendChartWidget(QWidget):
             y = chart_rect.bottom() - (val - min_val) / val_range * chart_rect.height()
             points.append(QPoint(x, y))
         
-        # 渐变填充区域
         if len(points) > 2:
             gradient = QLinearGradient(0, chart_rect.top(), 0, chart_rect.bottom())
             gradient.setColorAt(0, QColor(74, 158, 255, 90))
@@ -441,14 +429,12 @@ class TrendChartWidget(QWidget):
             path.closeSubpath()
             painter.drawPath(path)
         
-        # 绘制曲线
         pen = QPen(QColor("#4a9eff"), 2)
         painter.setPen(pen)
         painter.setBrush(Qt.NoBrush)
         for i in range(len(points) - 1):
             painter.drawLine(points[i], points[i+1])
         
-        # 最新值标记
         if points:
             last_p = points[-1]
             painter.setPen(QPen(QColor("#ff6b6b"), 3))
@@ -463,13 +449,19 @@ class TrendChartWidget(QWidget):
             if tx < chart_rect.left():
                 tx = last_p.x() + 8
             painter.drawText(tx, last_p.y() - 6, text)
+        
+        # X轴标签（次数）
+        painter.setPen(QColor("#7a7a9a"))
+        painter.setFont(QFont("Arial", 8))
+        painter.drawText(chart_rect.left(), chart_rect.bottom() + 18, "第1次")
+        painter.drawText(chart_rect.right() - 40, chart_rect.bottom() + 18, f"第{len(self.data)}次")
 
 
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("屏幕数字监控报警系统")
-        self.resize(1200, 820)
+        self.resize(1200, 750)
         
         self.setStyleSheet("""
             QMainWindow { background-color: #1e1e2e; }
@@ -606,7 +598,7 @@ class MainWindow(QMainWindow):
         self.loop_enabled = True
         self.detect_interval = 500
         self.value_history = {}
-        self.last_value = {}  # 记录上一次数值，用于数值变化驱动
+        self.current_row_data = []  # 当前选中行的数据
         
         self.alarm_player = AlarmSoundPlayer()
         self.alarm_file = self.alarm_player.sound_file or ""
@@ -679,7 +671,7 @@ class MainWindow(QMainWindow):
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.setAlternatingRowColors(True)
         self.table.setRowCount(0)
-        self.table.setColumnWidth(0, 55)
+        self.table.setColumnWidth(0, 50)
         self.table.setColumnWidth(1, 80)
         self.table.setColumnWidth(2, 90)
         self.table.setColumnWidth(3, 65)
@@ -687,7 +679,7 @@ class MainWindow(QMainWindow):
         self.table.setColumnWidth(5, 130)
         self.table.setColumnWidth(6, 85)
         self.table.setColumnWidth(7, 110)
-        self.table.setColumnWidth(8, 60)
+        self.table.setColumnWidth(8, 55)
         self.table.horizontalHeader().setStretchLastSection(True)
         self.table.verticalHeader().setVisible(False)
         main_layout.addWidget(self.table, 3)
@@ -768,7 +760,7 @@ class MainWindow(QMainWindow):
         status_layout.setSpacing(10)
         self.status_label = QLabel("状态: 就绪")
         self.status_label.setStyleSheet("padding: 8px 12px; background-color: #27273d; border-radius: 6px; border: 1px solid #33334a;")
-        status_layout.addWidget(self.status_label, 3)
+        status_layout.addWidget(self.status_label, 2)
         
         self.alarm_count_label = QLabel("报警数: 0")
         self.alarm_count_label.setStyleSheet("padding: 8px 12px; background-color: #27273d; border-radius: 6px; border: 1px solid #33334a;")
@@ -836,8 +828,6 @@ class MainWindow(QMainWindow):
                 del self.row_muted[row]
             if row in self.value_history:
                 del self.value_history[row]
-            if row in self.last_value:
-                del self.last_value[row]
     
     def _get_row_enabled(self, row):
         return self.row_enabled.get(row, True)
@@ -846,41 +836,10 @@ class MainWindow(QMainWindow):
         return self.row_muted.get(row, False)
     
     def _on_mute_changed(self, row, state):
-        """静音状态变化 - 立即生效"""
-        is_muted = (state == 2)
-        self.row_muted[row] = is_muted
+        """静音状态变化 - 只控制声音，不影响报警逻辑"""
+        self.row_muted[row] = (state == 2)
         
-        # 立即更新界面状态
-        if is_muted:
-            status_item = QTableWidgetItem("静音中")
-            status_item.setBackground(QBrush(QColor(140, 105, 50)))
-            status_item.setForeground(QBrush(QColor(255, 255, 255)))
-            self.table.setItem(row, 6, status_item)
-            
-            # 重置线程内报警状态
-            if self.monitoring and self.monitor_thread and self.monitor_thread.isRunning():
-                self.monitor_thread.reset_row_alarm(row)
-            
-            self.row_alarm[row] = False
-            self._set_name_color(row, False)
-        else:
-            # 取消静音，恢复监控中状态，等待线程下次检测更新
-            if self.monitoring:
-                status_item = QTableWidgetItem("监控中")
-                status_item.setBackground(QBrush(QColor(0, 0, 0, 0)))
-                status_item.setForeground(QBrush(QColor(255, 255, 255)))
-                self.table.setItem(row, 6, status_item)
-        
-        # 检查是否还有活跃报警，没有则停止声音
-        has_active_alarm = False
-        for r, alarm in self.row_alarm.items():
-            if alarm and not self._is_row_muted(r):
-                has_active_alarm = True
-                break
-        if not has_active_alarm:
-            self.stop_alarm()
-        
-        self._update_alarm_count()
+        # 如果该行正在报警且取消静音，不自动播放声音（等待下次报警触发）
     
     def on_interval_changed(self, text):
         self.detect_interval = int(text.replace("ms", ""))
@@ -893,13 +852,12 @@ class MainWindow(QMainWindow):
         self.alarm_player.set_volume(volume)
     
     def play_alarm(self, row):
+        """播放报警声音 - 由main控制静音"""
         if self._is_row_muted(row):
             return
         
-        # 仅当未置顶时才设置，避免重复重绘闪烁
-        if not (self.windowFlags() & Qt.WindowStaysOnTopHint):
-            self.setWindowFlags(self.windowFlags() | Qt.WindowStaysOnTopHint)
-            self.show()
+        self.setWindowFlags(self.windowFlags() | Qt.WindowStaysOnTopHint)
+        self.show()
         self.raise_()
         self.activateWindow()
         
@@ -913,11 +871,8 @@ class MainWindow(QMainWindow):
         self.alarm_playing = False
         self.alarm_status_label.setText("🔇 无报警")
         self.alarm_status_label.setStyleSheet("padding: 8px 12px; background-color: #27273d; border-radius: 6px; color: #7a7a9a; border: 1px solid #33334a;")
-        
-        # 仅当已置顶时才取消，避免重复重绘闪烁
-        if self.windowFlags() & Qt.WindowStaysOnTopHint:
-            self.setWindowFlags(self.windowFlags() & ~Qt.WindowStaysOnTopHint)
-            self.show()
+        self.setWindowFlags(self.windowFlags() & ~Qt.WindowStaysOnTopHint)
+        self.show()
     
     def on_download_progress(self, value):
         self.download_progress.setVisible(True)
@@ -939,7 +894,6 @@ class MainWindow(QMainWindow):
         row = self.table.rowCount()
         self.table.insertRow(row)
         self.value_history[row] = []
-        self.last_value[row] = None
         
         enable_check = QCheckBox()
         enable_check.setChecked(True)
@@ -1051,14 +1005,9 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "提示", "没有有效的监控点数据")
             return
         
-        # 暂停表格重绘，避免闪烁
-        self.table.setUpdatesEnabled(False)
-        
         # 清空历史数据
         for row in self.value_history:
             self.value_history[row].clear()
-            self.last_value[row] = None
-        self.trend_chart.set_data([], "数值趋势")
         
         self.monitor_thread = MonitorThread(monitors)
         self.monitor_thread.set_interval(self.detect_interval)
@@ -1070,7 +1019,6 @@ class MainWindow(QMainWindow):
         self.monitor_thread.download_progress.connect(self.on_download_progress)
         
         self.monitor_thread.get_row_enabled = self._get_row_enabled
-        self.monitor_thread.is_row_muted = self._is_row_muted
         
         self.monitor_thread.start()
         
@@ -1078,33 +1026,22 @@ class MainWindow(QMainWindow):
         self.btn_start.setEnabled(False)
         self.btn_stop.setEnabled(True)
         self.status_label.setText("状态: 监控运行中")
-        
-        # 恢复表格重绘
-        self.table.setUpdatesEnabled(True)
     
     def stop_monitor(self):
         if self.monitor_thread and self.monitor_thread.isRunning():
             self.monitor_thread.stop()
             self.monitor_thread.wait()
-        
-        # 暂停表格重绘，避免闪烁
-        self.table.setUpdatesEnabled(False)
-        
         self.monitoring = False
         self.btn_start.setEnabled(True)
         self.btn_stop.setEnabled(False)
         self.status_label.setText("状态: 已停止")
         self.stop_alarm()
-        
         for row in range(self.table.rowCount()):
             item = self.table.item(row, 6)
             if item and "报警" not in item.text():
                 self.table.setItem(row, 6, QTableWidgetItem("已停止"))
             self.row_alarm[row] = False
             self._reset_row_colors(row)
-        
-        # 恢复表格重绘
-        self.table.setUpdatesEnabled(True)
     
     def _reset_row_colors(self, row):
         name_item = self.table.item(row, 1)
@@ -1127,56 +1064,70 @@ class MainWindow(QMainWindow):
             if alarm:
                 item.setBackground(QBrush(QColor(200, 50, 50)))
                 item.setForeground(QBrush(QColor(255, 255, 255)))
+                # 当前值也变红
+                val_item = self.table.item(row, 2)
+                if val_item:
+                    val_item.setForeground(QBrush(QColor(255, 80, 80)))
             else:
                 item.setBackground(QBrush(QColor(0, 0, 0, 0)))
                 item.setForeground(QBrush(QColor(255, 255, 255)))
+                # 当前值恢复
+                val_item = self.table.item(row, 2)
+                if val_item:
+                    val_item.setForeground(QBrush(QColor(255, 255, 255)))
     
     def on_value_updated(self, row, value):
-        """数值更新 - 仅数值变化时才记录到趋势曲线"""
-        self.table.setItem(row, 2, QTableWidgetItem(f"{value:.2f}"))
+        # 只更新数值，不刷新整个表格
+        item = self.table.item(row, 2)
+        if item:
+            item.setText(f"{value:.2f}")
         
-        # 数值变化驱动：仅当数值与上一次差值超过阈值时才记录
-        threshold = 0.001
-        if row not in self.last_value or self.last_value[row] is None or abs(value - self.last_value[row]) > threshold:
-            self.last_value[row] = value
-            
-            if row not in self.value_history:
-                self.value_history[row] = []
-            self.value_history[row].append(value)
-            if len(self.value_history[row]) > 200:
-                self.value_history[row].pop(0)
-            
-            # 当前选中行则实时更新曲线
-            if self.table.currentRow() == row:
-                name_item = self.table.item(row, 1)
-                name = name_item.text() if name_item else f"区域{row+1}"
-                self.trend_chart.set_data(self.value_history[row], f"{name} 数值趋势")
+        # 更新历史数据
+        if row not in self.value_history:
+            self.value_history[row] = []
+        self.value_history[row].append(value)
+        if len(self.value_history[row]) > 200:
+            self.value_history[row].pop(0)
+        
+        # 如果当前选中的行是这一行，更新趋势图
+        selected = self.table.selectedItems()
+        if selected and selected[0].row() == row:
+            name_item = self.table.item(row, 1)
+            name = name_item.text() if name_item else f"区域{row+1}"
+            self.trend_chart.set_data(self.value_history[row], f"{name} 数值趋势")
     
     def on_alarm_triggered(self, row, name, value, lower, upper):
-        if self._is_row_muted(row):
-            return
-        
+        # 报警状态由main管理，静音只控制声音
         self.row_alarm[row] = True
         
+        # 更新状态列
         status_item = QTableWidgetItem("报警")
         status_item.setBackground(QBrush(QColor(200, 50, 50)))
         status_item.setForeground(QBrush(QColor(255, 255, 255)))
         self.table.setItem(row, 6, status_item)
         
+        # 更新报警时间
         now = datetime.now().strftime("%H:%M:%S")
-        self.table.setItem(row, 7, QTableWidgetItem(now))
+        time_item = self.table.item(row, 7)
+        if time_item:
+            time_item.setText(now)
+        else:
+            self.table.setItem(row, 7, QTableWidgetItem(now))
         
+        # 名称和数值变红
         self._set_name_color(row, True)
+        
         self._update_alarm_count()
         self.status_label.setText(f"报警: {name} = {value:.2f} [范围: {lower}-{upper}]")
         
+        # 播放声音 - 由main控制静音
         self.play_alarm(row)
+        
+        # 写入日志
+        with open("alarm_log.txt", "a", encoding="utf-8") as f:
+            f.write(f"[{now}] 报警: {name} = {value:.2f} 超出范围 [{lower}, {upper}]\n")
     
     def on_status_updated(self, row, status):
-        # 静音状态由界面直接控制，线程返回的静音状态不覆盖
-        if self._is_row_muted(row):
-            return
-        
         if status == 'normal':
             status_item = QTableWidgetItem("正常")
             status_item.setBackground(QBrush(QColor(45, 145, 70)))
@@ -1185,6 +1136,7 @@ class MainWindow(QMainWindow):
             if self.row_alarm.get(row, False):
                 self.row_alarm[row] = False
                 self._set_name_color(row, False)
+                # 检查是否还有报警
                 if not any(self.row_alarm.values()):
                     self.stop_alarm()
         elif status == 'error':
@@ -1200,11 +1152,6 @@ class MainWindow(QMainWindow):
             if self.row_alarm.get(row, False):
                 self.row_alarm[row] = False
                 self._set_name_color(row, False)
-        elif status == '监控中':
-            status_item = QTableWidgetItem("监控中")
-            status_item.setBackground(QBrush(QColor(0, 0, 0, 0)))
-            status_item.setForeground(QBrush(QColor(255, 255, 255)))
-            self.table.setItem(row, 6, status_item)
         else:
             status_item = QTableWidgetItem(status)
             self.table.setItem(row, 6, status_item)
@@ -1256,22 +1203,16 @@ class MainWindow(QMainWindow):
         try:
             with open(self.config_file, 'r', encoding='utf-8') as f:
                 config = json.load(f)
-            
-            # 暂停表格重绘，避免闪烁
-            self.table.setUpdatesEnabled(False)
-            
             self.table.setRowCount(0)
             self.row_enabled.clear()
             self.row_alarm.clear()
             self.row_muted.clear()
             self.value_history.clear()
-            self.last_value.clear()
             
             for item in config.get('monitors', []):
                 row = self.table.rowCount()
                 self.table.insertRow(row)
                 self.value_history[row] = []
-                self.last_value[row] = None
                 
                 enable_check = QCheckBox()
                 enable_check.setChecked(item.get('enabled', True))
@@ -1306,11 +1247,7 @@ class MainWindow(QMainWindow):
                 self.detect_interval = int(interval.replace("ms", ""))
             
             self.status_label.setText("状态: 配置已加载")
-            
-            # 恢复表格重绘
-            self.table.setUpdatesEnabled(True)
         except Exception as e:
-            self.table.setUpdatesEnabled(True)
             print(f"加载失败: {e}")
     
     def load_config_dialog(self):
