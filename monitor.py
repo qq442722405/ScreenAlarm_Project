@@ -50,6 +50,13 @@ class MonitorThread(QThread):
     def stop(self):
         self.running = False
     
+    def reset_row_alarm(self, row):
+        """立即重置指定行的报警状态"""
+        if row in self.alarm_status:
+            self.alarm_status[row]['alarm'] = False
+            self.alarm_status[row]['count'] = 0
+            self.alarm_status[row]['last_alarm_time'] = 0
+    
     def reset_all_alarms(self):
         self.manual_clear = True
         for row in self.alarm_status:
@@ -239,9 +246,14 @@ class MonitorThread(QThread):
                 
                 if raw_value is not None:
                     smooth_value = self._smooth_value(row, raw_value)
-                    
                     self.value_updated.emit(row, float(smooth_value))
                     lower, upper = monitor['lower'], monitor['upper']
+                    
+                    # 静音状态：不触发报警，显示静音中
+                    if self._is_muted(row):
+                        self.alarm_status[row]['alarm'] = False
+                        self.status_updated.emit(row, '静音中')
+                        continue
                     
                     if smooth_value < lower or smooth_value > upper:
                         now = time.time()
@@ -260,7 +272,7 @@ class MonitorThread(QThread):
                                 self.alarm_status[row]['last_alarm_time'] = now
                                 self.alarm_triggered.emit(
                                     row, monitor['name'], float(smooth_value), lower, upper
-                            )
+                                )
                         self.status_updated.emit(row, '报警')
                     else:
                         if not self.manual_clear:
