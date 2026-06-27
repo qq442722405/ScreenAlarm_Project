@@ -1,4 +1,4 @@
-name: Build Windows EXE
+name: 屏幕数字监视报警工具
 
 on:
   push:
