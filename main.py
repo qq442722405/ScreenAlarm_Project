@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (
     QPushButton, QTableWidget, QTableWidgetItem, QLabel, QMessageBox,
     QAbstractItemView, QHeaderView, QFileDialog, QDialog,
     QLineEdit, QGroupBox, QFrame, QSlider, QComboBox,
-    QProgressBar, QCheckBox, QDoubleSpinBox, QSplashScreen
+    QProgressBar, QCheckBox, QDoubleSpinBox
 )
 from PySide6.QtCore import Qt, QTimer, QThread, Signal, QPoint, QRect, QByteArray
 from PySide6.QtGui import (
@@ -26,315 +26,142 @@ except ImportError:
     PYGAME_AVAILABLE = False
 
 
-class AlarmSoundPlayer:
-    """报警声音播放器"""
-    def __init__(self):
-        self.is_playing = False
-        self.sound_file = None
-        self.play_thread = None
-        self.stop_flag = False
-        self.volume = 1.0
-        self.current_sound = None
-        self.lock = threading.Lock()
-        self.loop_enabled = True
-        
-        self._load_sound()
-        
-        if PYGAME_AVAILABLE:
-            try:
-                pygame.mixer.init()
-                self.mixer_ready = True
-            except:
-                self.mixer_ready = False
-        else:
-            self.mixer_ready = False
-    
-    def set_loop(self, enabled):
-        self.loop_enabled = enabled
-    
-    def _load_sound(self):
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        sound_path = os.path.join(script_dir, "警报声.mp3")
-        
-        if os.path.exists(sound_path):
-            self.sound_file = sound_path
-            return
-        
-        if getattr(sys, 'frozen', False):
-            exe_dir = os.path.dirname(sys.executable)
-            sound_path = os.path.join(exe_dir, "警报声.mp3")
-            if os.path.exists(sound_path):
-                self.sound_file = sound_path
-                return
-    
-    def play(self):
-        if not self.sound_file or not os.path.exists(self.sound_file):
-            self._play_beep()
-            return
-        if self.is_playing:
-            return
-        
-        with self.lock:
-            self.stop_flag = False
-            self.is_playing = True
-        
-        if PYGAME_AVAILABLE and self.mixer_ready:
-            self._play_with_pygame()
-        else:
-            self._play_beep()
-    
-    def _play_with_pygame(self):
-        def play_loop():
-            try:
-                sound = pygame.mixer.Sound(self.sound_file)
-                self.current_sound = sound
-                sound.set_volume(self.volume)
-                
-                if self.loop_enabled:
-                    while not self.stop_flag:
-                        sound.play()
-                        while pygame.mixer.get_busy() and not self.stop_flag:
-                            pygame.time.wait(50)
-                        if self.stop_flag:
-                            break
-                        time.sleep(0.05)
-                else:
-                    sound.play()
-                    while pygame.mixer.get_busy() and not self.stop_flag:
-                        pygame.time.wait(50)
-            except Exception as e:
-                print(f"播放失败: {e}")
-            finally:
-                with self.lock:
-                    self.is_playing = False
-                    self.current_sound = None
-        
-        self.play_thread = threading.Thread(target=play_loop, daemon=True)
-        self.play_thread.start()
-    
-    def _play_beep(self):
-        def beep_loop():
-            try:
-                import winsound
-                if self.loop_enabled:
-                    while not self.stop_flag:
-                        winsound.Beep(800, 200)
-                        time.sleep(0.1)
-                        if self.stop_flag:
-                            break
-                        winsound.Beep(1000, 200)
-                        time.sleep(0.1)
-                else:
-                    winsound.Beep(800, 200)
-                    time.sleep(0.1)
-                    winsound.Beep(1000, 200)
-            except:
-                pass
-            finally:
-                with self.lock:
-                    self.is_playing = False
-        
-        self.play_thread = threading.Thread(target=beep_loop, daemon=True)
-        self.play_thread.start()
-    
-    def stop(self):
-        with self.lock:
-            self.stop_flag = True
-            self.is_playing = False
-            self.current_sound = None
-        
-        if PYGAME_AVAILABLE and self.mixer_ready:
-            try:
-                pygame.mixer.stop()
-            except:
-                pass
-    
-    def set_volume(self, volume):
-        self.volume = max(0.0, min(1.0, volume))
-        if self.current_sound is not None:
-            try:
-                self.current_sound.set_volume(self.volume)
-            except:
-                pass
-    
-    def is_loaded(self):
-        return self.sound_file is not None and os.path.exists(self.sound_file)
-
-
-class CoordinatePicker(QWidget):
-    """屏幕区域选择器 - 按住左键拖拽选区域，松开自动完成"""
-    coord_selected = Signal(int, int, int, int)
-    
+class MiniWindow(QWidget):
+    """小窗口模式 - 置顶显示报警信息"""
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("选择监控区域")
+        self.parent_window = parent
+        self.setWindowTitle("报警监控 - 小窗口")
         self.setWindowFlags(
             Qt.WindowStaysOnTopHint | 
-            Qt.FramelessWindowHint | 
+            Qt.FramelessWindowHint |
             Qt.Tool
         )
-        self.setMouseTracking(True)
-        
-        screens = QApplication.screens()
-        total_rect = screens[0].geometry()
-        for s in screens[1:]:
-            total_rect = total_rect.united(s.geometry())
-        self.total_rect = total_rect
-        self.setGeometry(total_rect)
-        
-        self.screen_pixmap = QPixmap(total_rect.size())
-        self.screen_pixmap.fill(Qt.black)
-        painter = QPainter(self.screen_pixmap)
-        for screen in screens:
-            screen_pix = screen.grabWindow(0)
-            painter.drawPixmap(screen.geometry().topLeft(), screen_pix)
-        painter.end()
-        
-        self.showFullScreen()
-        self.raise_()
-        self.activateWindow()
-        
-        self.is_selecting = False
-        self.start_pos = QPoint()
-        self.end_pos = QPoint()
-        
-        self.label = QLabel("🖱 按住左键拖拽选择监控区域，松开鼠标自动完成", self)
-        self.label.setAlignment(Qt.AlignCenter)
-        self.label.setStyleSheet("""
-            QLabel {
-                color: white;
-                background: rgba(0,0,0,220);
-                padding: 14px 28px;
-                border-radius: 14px;
-                font-size: 18px;
-                font-weight: bold;
-                border: 1px solid rgba(255,255,255,0.2);
+        self.setFixedSize(300, 120)
+        self.setStyleSheet("""
+            QWidget {
+                background-color: #1e1e2e;
+                border: 2px solid #4a9eff;
+                border-radius: 12px;
             }
-        """)
-        self.label.adjustSize()
-        self.label.move(
-            (self.width() - self.label.width()) // 2,
-            self.height() - self.label.height() - 80
-        )
-        
-        self.coord_label = QLabel("等待选择...", self)
-        self.coord_label.setAlignment(Qt.AlignCenter)
-        self.coord_label.setStyleSheet("""
             QLabel {
-                color: #5aa9ff;
-                background: rgba(0,0,0,220);
-                padding: 10px 22px;
-                border-radius: 10px;
-                font-size: 17px;
-                font-weight: bold;
-                border: 1px solid #5aa9ff;
+                color: #e0e0f0;
+                font-family: "Microsoft YaHei";
             }
+            QPushButton {
+                background-color: #363650;
+                color: #e0e0f0;
+                border: none;
+                border-radius: 6px;
+                padding: 6px 14px;
+                font-weight: bold;
+                font-family: "Microsoft YaHei";
+                font-size: 12px;
+            }
+            QPushButton:hover { background-color: #464668; }
+            QPushButton#btn_close_mini {
+                background-color: #aa3a3a;
+                padding: 4px 12px;
+                font-size: 11px;
+            }
+            QPushButton#btn_close_mini:hover { background-color: #bb4a4a; }
+            QPushButton#btn_mute_mini {
+                background-color: #b03a3a;
+            }
+            QPushButton#btn_mute_mini:hover { background-color: #c44a4a; }
+            QPushButton#btn_mute_mini.muted {
+                background-color: #2a5a3a;
+            }
+            QPushButton#btn_mute_mini.muted:hover { background-color: #3a6a4a; }
         """)
-        self.coord_label.adjustSize()
-        self.coord_label.move(
-            (self.width() - self.coord_label.width()) // 2,
-            60
-        )
         
-        self.setFocus(Qt.OtherFocusReason)
-    
-    def paintEvent(self, event):
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.Antialiasing)
+        layout = QVBoxLayout(self)
+        layout.setSpacing(6)
+        layout.setContentsMargins(12, 10, 12, 10)
         
-        painter.drawPixmap(self.rect(), self.screen_pixmap)
-        painter.fillRect(self.rect(), QColor(0, 0, 0, 120))
+        # 标题行
+        title_layout = QHBoxLayout()
+        self.title_label = QLabel("🔊 报警监控")
+        self.title_label.setStyleSheet("font-weight: bold; font-size: 14px;")
+        title_layout.addWidget(self.title_label)
+        title_layout.addStretch()
         
-        if self.is_selecting and not self.end_pos.isNull():
-            rect = self._get_current_rect()
-            if rect.width() > 5 and rect.height() > 5:
-                painter.drawPixmap(rect, self.screen_pixmap.copy(rect))
-                
-                pen = QPen(QColor(0, 255, 140), 2)
-                pen.setStyle(Qt.DashLine)
-                painter.setPen(pen)
-                painter.drawRect(rect)
-                
-                painter.setPen(QPen(QColor(0, 255, 140), 2))
-                size = 14
-                painter.drawLine(rect.topLeft(), rect.topLeft() + QPoint(size, 0))
-                painter.drawLine(rect.topLeft(), rect.topLeft() + QPoint(0, size))
-                painter.drawLine(rect.topRight(), rect.topRight() + QPoint(-size, 0))
-                painter.drawLine(rect.topRight(), rect.topRight() + QPoint(0, size))
-                painter.drawLine(rect.bottomLeft(), rect.bottomLeft() + QPoint(size, 0))
-                painter.drawLine(rect.bottomLeft(), rect.bottomLeft() + QPoint(0, -size))
-                painter.drawLine(rect.bottomRight(), rect.bottomRight() + QPoint(-size, 0))
-                painter.drawLine(rect.bottomRight(), rect.bottomRight() + QPoint(0, -size))
-                
-                painter.setPen(Qt.white)
-                painter.setFont(QFont("Arial", 12, QFont.Bold))
-                text_y = rect.y() - 12 if rect.y() > 30 else rect.y() + rect.height() + 25
-                painter.drawText(rect.x() + 10, text_y, f"{rect.width()} × {rect.height()}")
-    
-    def _get_current_rect(self):
-        if self.start_pos.isNull():
-            return QRect()
-        x = min(self.start_pos.x(), self.end_pos.x())
-        y = min(self.start_pos.y(), self.end_pos.y())
-        w = abs(self.end_pos.x() - self.start_pos.x())
-        h = abs(self.end_pos.y() - self.start_pos.y())
-        return QRect(x, y, w, h)
+        self.btn_close = QPushButton("✕")
+        self.btn_close.setObjectName("btn_close_mini")
+        self.btn_close.setFixedSize(24, 24)
+        self.btn_close.clicked.connect(self.close_mini)
+        title_layout.addWidget(self.btn_close)
+        layout.addLayout(title_layout)
+        
+        # 报警信息
+        self.alarm_label = QLabel("暂无报警")
+        self.alarm_label.setAlignment(Qt.AlignCenter)
+        self.alarm_label.setStyleSheet("font-size: 16px; font-weight: bold; color: #ff6b6b; padding: 4px;")
+        layout.addWidget(self.alarm_label)
+        
+        # 按钮行
+        btn_layout = QHBoxLayout()
+        btn_layout.setSpacing(8)
+        
+        self.btn_mute = QPushButton("🔇 静音")
+        self.btn_mute.setObjectName("btn_mute_mini")
+        self.btn_mute.clicked.connect(self.toggle_mute)
+        btn_layout.addWidget(self.btn_mute)
+        
+        self.btn_restore = QPushButton("📊 切换大窗口")
+        self.btn_restore.clicked.connect(self.restore_window)
+        btn_layout.addWidget(self.btn_restore)
+        
+        layout.addLayout(btn_layout)
+        
+        # 拖动窗口
+        self.drag_pos = None
+        self.is_muted = False
     
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
-            self.is_selecting = True
-            self.start_pos = event.position().toPoint()
-            self.end_pos = self.start_pos
-            self.label.setText("🖱 拖动鼠标调整区域大小")
-            self.label.adjustSize()
-            self.label.move(
-                (self.width() - self.label.width()) // 2,
-                self.height() - self.label.height() - 80
-            )
-            self.update()
+            self.drag_pos = event.globalPosition().toPoint()
     
     def mouseMoveEvent(self, event):
-        if self.is_selecting:
-            self.end_pos = event.position().toPoint()
-            rect = self._get_current_rect()
-            self.coord_label.setText(
-                f"起点: ({self.start_pos.x()}, {self.start_pos.y()})  "
-                f"大小: {rect.width()} × {rect.height()}"
-            )
-            self.coord_label.adjustSize()
-            self.coord_label.move(
-                (self.width() - self.coord_label.width()) // 2,
-                60
-            )
-            self.update()
+        if self.drag_pos is not None:
+            delta = event.globalPosition().toPoint() - self.drag_pos
+            self.move(self.pos() + delta)
+            self.drag_pos = event.globalPosition().toPoint()
     
     def mouseReleaseEvent(self, event):
-        if event.button() == Qt.LeftButton and self.is_selecting:
-            self.is_selecting = False
-            self.end_pos = event.position().toPoint()
-            rect = self._get_current_rect()
-            
-            if rect.width() > 20 and rect.height() > 20:
-                self.coord_selected.emit(rect.x(), rect.y(), rect.width(), rect.height())
-                self.close()
-            else:
-                self.label.setText("⚠️ 区域太小，请重新拖拽选择")
-                self.label.adjustSize()
-                self.label.move(
-                    (self.width() - self.label.width()) // 2,
-                    self.height() - self.label.height() - 80
-                )
-                self.start_pos = QPoint()
-                self.end_pos = QPoint()
-                self.update()
+        self.drag_pos = None
     
-    def keyPressEvent(self, event):
-        if event.key() == Qt.Key_Escape:
-            self.coord_selected.emit(0, 0, 0, 0)
-            self.close()
+    def set_alarm(self, name, value, lower, upper):
+        self.alarm_label.setText(f"⚠️ {name}\n{value:.2f} [下限:{lower} 上限:{upper}]")
+        self.alarm_label.setStyleSheet("font-size: 16px; font-weight: bold; color: #ff6b6b; padding: 4px;")
+        self.title_label.setText("🔴 报警中")
+    
+    def clear_alarm(self):
+        self.alarm_label.setText("✅ 无报警")
+        self.alarm_label.setStyleSheet("font-size: 16px; font-weight: bold; color: #4ade80; padding: 4px;")
+        self.title_label.setText("🔊 报警监控")
+    
+    def toggle_mute(self):
+        self.is_muted = not self.is_muted
+        if self.is_muted:
+            self.btn_mute.setText("🔊 取消静音")
+            self.btn_mute.setObjectName("btn_mute_mini muted")
+            self.btn_mute.setStyleSheet("background-color: #2a5a3a; color: white; border: none; border-radius: 6px; padding: 6px 14px;")
+        else:
+            self.btn_mute.setText("🔇 静音")
+            self.btn_mute.setObjectName("btn_mute_mini")
+            self.btn_mute.setStyleSheet("background-color: #b03a3a; color: white; border: none; border-radius: 6px; padding: 6px 14px;")
+        self.parent_window.toggle_mini_mute(self.is_muted)
+    
+    def restore_window(self):
+        self.parent_window.show_normal_mode()
+    
+    def close_mini(self):
+        self.parent_window.mini_window = None
+        self.close()
     
     def closeEvent(self, event):
-        self.setCursor(Qt.ArrowCursor)
+        self.parent_window.mini_window = None
         event.accept()
 
 
@@ -452,6 +279,8 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("屏幕数字监控报警系统")
         self.resize(1200, 750)
+        self.mini_window = None
+        self.mini_muted = False
         
         self.setStyleSheet("""
             QMainWindow { background-color: #1e1e2e; }
@@ -509,6 +338,10 @@ class MainWindow(QMainWindow):
             QPushButton#btn_delete:hover { background-color: #c44a4a; }
             QPushButton#btn_save { background-color: #2a5a9a; }
             QPushButton#btn_save:hover { background-color: #356ab0; }
+            QPushButton#btn_mini {
+                background-color: #4a6a8a;
+            }
+            QPushButton#btn_mini:hover { background-color: #5a7a9a; }
             QFrame#hint_frame {
                 background-color: #2a2a42;
                 border-radius: 8px;
@@ -609,19 +442,6 @@ class MainWindow(QMainWindow):
         self.row_alarm = {}
         self.row_muted = {}
         
-        # 先创建启动画面（在初始化UI之前）
-        splash_pixmap = QPixmap(450, 250)
-        splash_pixmap.fill(QColor("#1e1e2e"))
-        painter = QPainter(splash_pixmap)
-        painter.setPen(QColor("#4a9eff"))
-        painter.setFont(QFont("Microsoft YaHei", 18, QFont.Bold))
-        painter.drawText(splash_pixmap.rect(), Qt.AlignCenter, 
-                         "📊 屏幕数字监控报警系统\n\n正在加载中...")
-        painter.end()
-        self.splash = QSplashScreen(splash_pixmap)
-        self.splash.show()
-        QApplication.processEvents()
-        
         self._setup_ui()
         self.load_config()
         
@@ -631,9 +451,6 @@ class MainWindow(QMainWindow):
         
         self.table.itemChanged.connect(self._on_table_item_changed)
         self.table.itemSelectionChanged.connect(self._on_selection_changed)
-        
-        # 关闭启动画面
-        self.splash.finish(self)
     
     def _setup_ui(self):
         central = QWidget()
@@ -680,7 +497,6 @@ class MainWindow(QMainWindow):
         self.table.setAlternatingRowColors(True)
         self.table.setRowCount(0)
         
-        # 【修改】静音列宽度从45调整为70
         self.table.setColumnWidth(0, 40)
         self.table.setColumnWidth(1, 80)
         self.table.setColumnWidth(2, 200)
@@ -690,7 +506,7 @@ class MainWindow(QMainWindow):
         self.table.setColumnWidth(6, 130)
         self.table.setColumnWidth(7, 85)
         self.table.setColumnWidth(8, 110)
-        self.table.setColumnWidth(9, 70)  # 静音列加宽
+        self.table.setColumnWidth(9, 70)
         
         self.table.horizontalHeader().setStretchLastSection(False) 
         self.table.verticalHeader().setVisible(False)
@@ -735,6 +551,12 @@ class MainWindow(QMainWindow):
         btn_layout.addWidget(self.btn_stop)
         
         btn_layout.addStretch()
+        
+        # 小窗口切换按钮
+        self.btn_mini = QPushButton("📱 小窗口模式")
+        self.btn_mini.setObjectName("btn_mini")
+        self.btn_mini.clicked.connect(self.toggle_mini_mode)
+        btn_layout.addWidget(self.btn_mini)
         
         btn_layout.addWidget(QLabel("音量:"))
         self.volume_slider = QSlider(Qt.Horizontal)
@@ -784,6 +606,73 @@ class MainWindow(QMainWindow):
         
         self.table.model().rowsInserted.connect(self._on_rows_inserted)
         self.table.model().rowsRemoved.connect(self._on_rows_removed)
+    
+    def toggle_mini_mode(self):
+        """切换小窗口模式"""
+        if self.mini_window is None:
+            self.show_mini_mode()
+        else:
+            self.mini_window.close()
+            self.mini_window = None
+            self.btn_mini.setText("📱 小窗口模式")
+            self.showNormal()
+            self.raise_()
+    
+    def show_mini_mode(self):
+        """显示小窗口"""
+        self.mini_window = MiniWindow(self)
+        # 更新报警信息
+        self._update_mini_alarm()
+        self.mini_window.show()
+        self.mini_window.raise_()
+        self.btn_mini.setText("📱 退出小窗口")
+        # 隐藏主窗口
+        self.hide()
+    
+    def show_normal_mode(self):
+        """恢复正常模式"""
+        if self.mini_window:
+            self.mini_window.close()
+            self.mini_window = None
+        self.btn_mini.setText("📱 小窗口模式")
+        self.showNormal()
+        self.raise_()
+        self.activateWindow()
+    
+    def toggle_mini_mute(self, muted):
+        """小窗口静音切换"""
+        self.mini_muted = muted
+    
+    def _update_mini_alarm(self):
+        """更新小窗口报警信息"""
+        if self.mini_window is None:
+            return
+        
+        # 检查是否有报警
+        has_alarm = False
+        alarm_info = None
+        for row in range(self.table.rowCount()):
+            item = self.table.item(row, 7)
+            if item and item.text() == "报警":
+                has_alarm = True
+                name = self.table.item(row, 1).text() if self.table.item(row, 1) else "未知"
+                value_item = self.table.item(row, 3)
+                lower_item = self.table.item(row, 4)
+                upper_item = self.table.item(row, 5)
+                if value_item and lower_item and upper_item:
+                    try:
+                        value = float(value_item.text())
+                        lower = float(lower_item.text())
+                        upper = float(upper_item.text())
+                        alarm_info = (name, value, lower, upper)
+                    except:
+                        alarm_info = (name, 0, 0, 0)
+                break
+        
+        if has_alarm and alarm_info:
+            self.mini_window.set_alarm(*alarm_info)
+        else:
+            self.mini_window.clear_alarm()
     
     def _on_selection_changed(self):
         selected = self.table.selectedItems()
@@ -863,6 +752,9 @@ class MainWindow(QMainWindow):
                 should_play = True
                 break
         
+        # 更新小窗口
+        self._update_mini_alarm()
+        
         if should_play:
             if not self.alarm_playing:
                 self.alarm_player.play()
@@ -891,6 +783,8 @@ class MainWindow(QMainWindow):
         self.alarm_playing = False
         self.alarm_status_label.setText("🔇 无报警")
         self.alarm_status_label.setStyleSheet("padding: 8px 12px; background-color: #27273d; border-radius: 6px; color: #7a7a9a; border: 1px solid #33334a;")
+        # 更新小窗口
+        self._update_mini_alarm()
     
     def on_download_progress(self, value):
         self.download_progress.setVisible(True)
@@ -1249,6 +1143,8 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event):
         self.stop_monitor()
         self.stop_alarm()
+        if self.mini_window:
+            self.mini_window.close()
         event.accept()
 
 
