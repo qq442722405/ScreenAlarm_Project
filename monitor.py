@@ -114,21 +114,17 @@ class MonitorThread(QThread):
     
     def _preprocess_image(self, img_np):
         try:
-            # 1. 图像放大3倍，显著提升易混淆数字(如1、2、4、7)的识别率
             height, width = img_np.shape[:2]
             scaled = cv2.resize(img_np, (width * 3, height * 3), interpolation=cv2.INTER_CUBIC)
             
-            # 2. 转灰度
             if len(scaled.shape) == 3:
                 gray = cv2.cvtColor(scaled, cv2.COLOR_RGB2GRAY)
             else:
                 gray = scaled
             
-            # 3. 对比度增强
             clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
             enhanced = clahe.apply(gray)
             
-            # 反色处理（如果是黑底白字，转为白底黑字更好识别）
             if np.mean(enhanced) < 80:
                 enhanced = 255 - enhanced
                 enhanced = clahe.apply(enhanced)
