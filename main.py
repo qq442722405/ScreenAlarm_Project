@@ -3,7 +3,7 @@ import json
 import os
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QPushButton, QTableWidget, QTableWidgetItem, QLabel, QCheckBox, QHeaderView
+    QPushButton, QTableWidget, QTableWidgetItem, QLabel, QHeaderView, QCheckBox
 )
 from PySide6.QtCore import Qt, QRect
 from PySide6.QtGui import QColor, QBrush, QFont, QPainter, QPen
@@ -37,32 +37,40 @@ class TrendChartWidget(QWidget):
             y = h - 40 - ((val - min_v) / range_v * (h - 80))
             points.append((x, y))
         
+        # 绘制曲线
         for i in range(len(points)-1):
             painter.drawLine(points[i][0], points[i][1], points[i+1][0], points[i+1][1])
             
+        # 标注每一个数值
         painter.setPen(Qt.white)
-        painter.drawText(int(points[-1][0]), int(points[-1][1])-10, f"{self.data[-1]:.2f}")
+        for x, y in points:
+            painter.drawText(int(x), int(y) - 5, f"{self.data[points.index((x,y))]:.1f}")
 
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("---天长污水陈诚")
         self.resize(1300, 800)
-        self.value_history = {} 
+        self.value_history = {} # 持久存储
+        self.remarks = {}
         self._setup_ui()
+        self.load_config()
 
     def _setup_ui(self):
         central = QWidget()
         self.setCentralWidget(central)
         layout = QVBoxLayout(central)
         
+        # 标题栏修改
         layout.addWidget(QLabel("---天长污水陈诚", font=QFont("Arial", 16, QFont.Bold)))
         
+        # 表格增加备注列
         self.table = QTableWidget(0, 10)
         self.table.setHorizontalHeaderLabels(["启用", "名称", "值", "下限", "上限", "坐标", "状态", "时间", "静音", "备注"])
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         layout.addWidget(self.table)
         
+        # 按钮栏
         btn_layout = QHBoxLayout()
         self.btn_clear = QPushButton("🧹 清空数据")
         self.btn_clear.clicked.connect(self._on_clear_clicked)
@@ -81,27 +89,21 @@ class MainWindow(QMainWindow):
     def _on_clear_clicked(self):
         self.table.setRowCount(0)
         self.value_history.clear()
+        self.remarks.clear()
 
-    def add_row(self, name="新监控", lower=0, upper=100, coord="0,0,100,50", remark=""):
+    def add_row(self, name, lower, upper, coord, remark=""):
         row = self.table.rowCount()
         self.table.insertRow(row)
         
-        # 优化 CheckBox 尺寸
+        # 缩小复选框
         for col in [0, 8]:
             cb = QCheckBox()
-            cb.setStyleSheet("QCheckBox::indicator { width: 16px; height: 16px; }")
+            cb.setFixedSize(20, 20)
             container = QWidget()
-            l = QHBoxLayout(container)
-            l.addWidget(cb)
-            l.setAlignment(Qt.AlignCenter)
-            l.setContentsMargins(0,0,0,0)
+            l = QVBoxLayout(container); l.addWidget(cb); l.setAlignment(Qt.AlignCenter); l.setContentsMargins(0,0,0,0)
             self.table.setCellWidget(row, col, container)
         
         self.table.setItem(row, 1, QTableWidgetItem(name))
-        self.table.setItem(row, 2, QTableWidgetItem("--"))
-        self.table.setItem(row, 3, QTableWidgetItem(str(lower)))
-        self.table.setItem(row, 4, QTableWidgetItem(str(upper)))
-        self.table.setItem(row, 5, QTableWidgetItem(coord))
         self.table.setItem(row, 9, QTableWidgetItem(remark)) # 备注列
 
     def save_config(self):
@@ -109,9 +111,6 @@ class MainWindow(QMainWindow):
         for r in range(self.table.rowCount()):
             data.append({
                 "name": self.table.item(r, 1).text(),
-                "lower": self.table.item(r, 3).text(),
-                "upper": self.table.item(r, 4).text(),
-                "coord": self.table.item(r, 5).text(),
                 "remark": self.table.item(r, 9).text()
             })
         with open("config.json", "w", encoding="utf-8") as f:
@@ -121,7 +120,7 @@ class MainWindow(QMainWindow):
         if not os.path.exists("config.json"): return
         with open("config.json", "r", encoding="utf-8") as f:
             for item in json.load(f):
-                self.add_row(item['name'], item['lower'], item['upper'], item['coord'], item['remark'])
+                self.add_row(item['name'], 0, 100, "", item.get('remark', ''))
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
