@@ -836,24 +836,38 @@ class MainWindow(QMainWindow):
         return self.row_muted.get(row, False)
     
     def _on_mute_changed(self, row, state):
-        """静音状态变化 - 控制声音，并立即生效"""
+        """静音状态变化"""
         self.row_muted[row] = (state == 2)
-        
-        # 如果该行当前正在报警
         if self.row_alarm.get(row, False):
-            if state == 2:  # 勾选了静音
-                # 检查是否还有其他【未静音且正在报警】的监控点
-                any_unmuted_alarm = False
-                for r, is_alarming in self.row_alarm.items():
-                    if is_alarming and not self._is_row_muted(r):
-                        any_unmuted_alarm = True
-                        break
-                # 如果所有正在报警的行都被静音了，立刻停止播放
-                if not any_unmuted_alarm:
-                    self.stop_alarm()
-            else:  # 取消了静音
-                # 立刻恢复播放报警声
-                self.play_alarm(row)
+            # 改变状态列文本和颜色
+            item = self.table.item(row, 6)
+            if item:
+                if state == 2:
+                    item.setText("已静音")
+                    item.setBackground(QBrush(QColor(180, 130, 40))) # 橘黄色
+                else:
+                    item.setText("报警")
+                    item.setBackground(QBrush(QColor(200, 50, 50)))  # 红色
+        # 重新评估是否需要发声
+        self._check_alarms()
+
+    def _check_alarms(self):
+        """统一控制声音：遍历状态列，只有存在'报警'字样才播放声音"""
+        should_play = False
+        for r in range(self.table.rowCount()):
+            item = self.table.item(r, 6)
+            if item and item.text() == "报警":
+                should_play = True
+                break
+        
+        if should_play:
+            if not self.alarm_playing:
+                self.alarm_player.play()
+                self.alarm_playing = True
+                self.alarm_status_label.setText("🔊 报警中...")
+                self.alarm_status_label.setStyleSheet("padding: 8px 12px; background-color: #b03a3a; border-radius: 6px; color: white; border: 1px solid #c04a4a;")
+        else:
+            self.stop_alarm()
     
     def on_interval_changed(self, text):
         self.detect_interval = int(text.replace("ms", ""))
@@ -866,27 +880,17 @@ class MainWindow(QMainWindow):
         self.alarm_player.set_volume(volume)
     
     def play_alarm(self, row):
-        """播放报警声音 - 由main控制静音"""
-        if self._is_row_muted(row):
-            return
-        
-        self.setWindowFlags(self.windowFlags() | Qt.WindowStaysOnTopHint)
-        self.show()
+        """触发报警时的窗口激活"""
         self.raise_()
         self.activateWindow()
-        
-        self.alarm_player.play()
-        self.alarm_playing = True
-        self.alarm_status_label.setText("🔊 报警中...")
-        self.alarm_status_label.setStyleSheet("padding: 8px 12px; background-color: #b03a3a; border-radius: 6px; color: white; border: 1px solid #c04a4a;")
+        # 注意：这里删除了 setWindowFlags 和 show，彻底解决操作闪屏问题
     
     def stop_alarm(self):
+        """停止播放声音"""
         self.alarm_player.stop()
         self.alarm_playing = False
         self.alarm_status_label.setText("🔇 无报警")
         self.alarm_status_label.setStyleSheet("padding: 8px 12px; background-color: #27273d; border-radius: 6px; color: #7a7a9a; border: 1px solid #33334a;")
-        self.setWindowFlags(self.windowFlags() & ~Qt.WindowStaysOnTopHint)
-        self.show()
     
     def on_download_progress(self, value):
         self.download_progress.setVisible(True)
@@ -1052,43 +1056,20 @@ class MainWindow(QMainWindow):
         self.stop_alarm()
         for row in range(self.table.rowCount()):
             item = self.table.item(row, 6)
-            if item and "报警" not in item.text():
+            if item and item.text() not in ["报警", "已静音"]:
                 self.table.setItem(row, 6, QTableWidgetItem("已停止"))
             self.row_alarm[row] = False
             self._reset_row_colors(row)
     
     def _reset_row_colors(self, row):
-        name_item = self.table.item(row, 1)
-        if name_item:
-            name_item.setBackground(QBrush(QColor(0, 0, 0, 0)))
-            name_item.setForeground(QBrush(QColor(255, 255, 255)))
-        
         status_item = self.table.item(row, 6)
         if status_item:
             status_item.setBackground(QBrush(QColor(0, 0, 0, 0)))
             status_item.setForeground(QBrush(QColor(255, 255, 255)))
-            if status_item.text() == "报警":
+            if status_item.text() in ["报警", "已静音"]:
                 status_item.setText("正常")
-                status_item.setBackground(QBrush(QColor(50, 150, 70)))
+                status_item.setBackground(QBrush(QColor(74, 158, 255))) # 蓝色
                 status_item.setForeground(QBrush(QColor(255, 255, 255)))
-    
-    def _set_name_color(self, row, alarm):
-        item = self.table.item(row, 1)
-        if item:
-            if alarm:
-                item.setBackground(QBrush(QColor(200, 50, 50)))
-                item.setForeground(QBrush(QColor(255, 255, 255)))
-                # 当前值也变红
-                val_item = self.table.item(row, 2)
-                if val_item:
-                    val_item.setForeground(QBrush(QColor(255, 80, 80)))
-            else:
-                item.setBackground(QBrush(QColor(0, 0, 0, 0)))
-                item.setForeground(QBrush(QColor(255, 255, 255)))
-                # 当前值恢复
-                val_item = self.table.item(row, 2)
-                if val_item:
-                    val_item.setForeground(QBrush(QColor(255, 255, 255)))
     
     def on_value_updated(self, row, value):
         # 只更新数值，不刷新整个表格
@@ -1100,7 +1081,6 @@ class MainWindow(QMainWindow):
         if row not in self.value_history:
             self.value_history[row] = []
             
-        # 【核心修改】：只有历史数据为空，或者当前值与上一次的值不同，才推进趋势图
         if not self.value_history[row] or self.value_history[row][-1] != value:
             self.value_history[row].append(value)
             if len(self.value_history[row]) > 200:
@@ -1114,16 +1094,21 @@ class MainWindow(QMainWindow):
                 self.trend_chart.set_data(self.value_history[row], f"{name} 数值趋势")
     
     def on_alarm_triggered(self, row, name, value, lower, upper):
-        # 报警状态由main管理，静音只控制声音
         self.row_alarm[row] = True
         
-        # 更新状态列
-        status_item = QTableWidgetItem("报警")
-        status_item.setBackground(QBrush(QColor(200, 50, 50)))
+        # 根据是否静音，直接决定状态列表现
+        if self._is_row_muted(row):
+            status_text = "已静音"
+            color = QColor(180, 130, 40)
+        else:
+            status_text = "报警"
+            color = QColor(200, 50, 50)
+            
+        status_item = QTableWidgetItem(status_text)
+        status_item.setBackground(QBrush(color))
         status_item.setForeground(QBrush(QColor(255, 255, 255)))
         self.table.setItem(row, 6, status_item)
         
-        # 更新报警时间
         now = datetime.now().strftime("%H:%M:%S")
         time_item = self.table.item(row, 7)
         if time_item:
@@ -1131,38 +1116,32 @@ class MainWindow(QMainWindow):
         else:
             self.table.setItem(row, 7, QTableWidgetItem(now))
         
-        # 名称和数值变红
-        self._set_name_color(row, True)
+        # 提醒窗口
+        self.play_alarm(row)
         
         self._update_alarm_count()
         self.status_label.setText(f"报警: {name} = {value:.2f} [范围: {lower}-{upper}]")
         
-        # 播放声音 - 由main控制静音
-        self.play_alarm(row)
+        # 触发统一检查
+        self._check_alarms()
         
-        # 写入日志
         with open("alarm_log.txt", "a", encoding="utf-8") as f:
             f.write(f"[{now}] 报警: {name} = {value:.2f} 超出范围 [{lower}, {upper}]\n")
-    
+
     def on_status_updated(self, row, status):
         if status == 'normal':
             status_item = QTableWidgetItem("正常")
-            status_item.setBackground(QBrush(QColor(45, 145, 70)))
+            # 改为蓝色背景
+            status_item.setBackground(QBrush(QColor(74, 158, 255)))
             status_item.setForeground(QBrush(QColor(255, 255, 255)))
             self.table.setItem(row, 6, status_item)
+            
             if self.row_alarm.get(row, False):
                 self.row_alarm[row] = False
-                self._set_name_color(row, False)
-                
-                # 检查是否还有未静音的报警
-                any_unmuted_alarm = False
-                for r, is_alarming in self.row_alarm.items():
-                    if is_alarming and not self._is_row_muted(r):
-                        any_unmuted_alarm = True
-                        break
-                if not any_unmuted_alarm:
-                    self.stop_alarm()
-                    
+            
+            # 恢复正常后检查是否要停声
+            self._check_alarms()
+            
         elif status == 'error':
             status_item = QTableWidgetItem("识别失败")
             status_item.setBackground(QBrush(QColor(100, 100, 115)))
@@ -1175,7 +1154,7 @@ class MainWindow(QMainWindow):
             self.table.setItem(row, 6, status_item)
             if self.row_alarm.get(row, False):
                 self.row_alarm[row] = False
-                self._set_name_color(row, False)
+            self._check_alarms()
         else:
             status_item = QTableWidgetItem(status)
             self.table.setItem(row, 6, status_item)
