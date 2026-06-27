@@ -340,7 +340,7 @@ class CoordinatePicker(QWidget):
 
 
 class MiniWindow(QWidget):
-    """小窗口模式 - 重新设计为更像独立窗口"""
+    """小窗口模式 - 无X关闭按钮，通过切换按钮回到大窗口"""
     def __init__(self, parent=None):
         super().__init__(parent)
         self.parent_window = parent
@@ -386,16 +386,11 @@ class MiniWindow(QWidget):
                 background-color: #3a5a7a;
             }
             QPushButton#btn_restore_mini:hover { background-color: #4a6a8a; }
-            QPushButton#btn_close_mini {
-                background-color: transparent;
-                color: #a0a0b0;
-                padding: 2px 6px;
-                font-size: 14px;
-                min-height: 20px;
-            }
-            QPushButton#btn_close_mini:hover {
-                background-color: #aa3a3a;
-                color: white;
+            QFrame#btn_frame {
+                background-color: rgba(54, 54, 80, 0.3);
+                border: 1px solid #4a9eff;
+                border-radius: 8px;
+                padding: 4px;
             }
         """)
         
@@ -404,45 +399,30 @@ class MiniWindow(QWidget):
         main_layout.setSpacing(4)
         main_layout.setContentsMargins(8, 6, 8, 6)
         
-        # 标题栏
-        title_layout = QHBoxLayout()
-        title_layout.setSpacing(0)
-        self.title_label = QLabel("📊 报警监控")
-        self.title_label.setStyleSheet("font-weight: bold; font-size: 13px; color: #c0c0e0;")
-        title_layout.addWidget(self.title_label)
-        title_layout.addStretch()
-        
-        self.btn_close = QPushButton("✕")
-        self.btn_close.setObjectName("btn_close_mini")
-        self.btn_close.setFixedSize(24, 24)
-        self.btn_close.clicked.connect(self.close_mini)
-        title_layout.addWidget(self.btn_close)
-        
-        main_layout.addLayout(title_layout)
-        
-        # 报警信息
+        # 报警信息（居中）
         self.alarm_label = QLabel("✅ 正常")
         self.alarm_label.setAlignment(Qt.AlignCenter)
         self.alarm_label.setStyleSheet("font-size: 16px; font-weight: bold; color: #4ade80; padding: 6px 0;")
         main_layout.addWidget(self.alarm_label)
         
-        # 按钮行
-        btn_layout = QHBoxLayout()
+        # 按钮框（静音 + 切换）
+        btn_frame = QFrame()
+        btn_frame.setObjectName("btn_frame")
+        btn_layout = QHBoxLayout(btn_frame)
         btn_layout.setSpacing(8)
-        btn_layout.addStretch()
+        btn_layout.setContentsMargins(6, 4, 6, 4)
         
         self.btn_mute = QPushButton("🔇 静音")
         self.btn_mute.setObjectName("btn_mute_mini")
         self.btn_mute.clicked.connect(self.toggle_mute)
         btn_layout.addWidget(self.btn_mute)
         
-        self.btn_restore = QPushButton("📊 切换大窗口")
+        self.btn_restore = QPushButton("切换")  # 切换按钮
         self.btn_restore.setObjectName("btn_restore_mini")
         self.btn_restore.clicked.connect(self.restore_window)
         btn_layout.addWidget(self.btn_restore)
         
-        btn_layout.addStretch()
-        main_layout.addLayout(btn_layout)
+        main_layout.addWidget(btn_frame)
         
         # 拖动窗口
         self.drag_pos = None
@@ -466,12 +446,10 @@ class MiniWindow(QWidget):
             name = name[:10] + "..."
         self.alarm_label.setText(f"⚠️ {name}")
         self.alarm_label.setStyleSheet("font-size: 16px; font-weight: bold; color: #ff6b6b; padding: 6px 0;")
-        self.title_label.setText("🔴 报警监控")
     
     def clear_alarm(self):
         self.alarm_label.setText("✅ 正常")
         self.alarm_label.setStyleSheet("font-size: 16px; font-weight: bold; color: #4ade80; padding: 6px 0;")
-        self.title_label.setText("📊 报警监控")
     
     def toggle_mute(self):
         self.is_muted = not self.is_muted
@@ -486,10 +464,6 @@ class MiniWindow(QWidget):
         self.parent_window.toggle_mini_mute(self.is_muted)
     
     def restore_window(self):
-        self.parent_window.show_normal_mode()
-    
-    def close_mini(self):
-        """点击X关闭小窗口，回到大窗口"""
         self.parent_window.show_normal_mode()
     
     def closeEvent(self, event):
@@ -940,7 +914,6 @@ class MainWindow(QMainWindow):
         self.table.model().rowsRemoved.connect(self._on_rows_removed)
     
     def toggle_mini_mode(self):
-        """切换小窗口模式"""
         if self.mini_window is None:
             self.show_mini_mode()
         else:
@@ -951,7 +924,6 @@ class MainWindow(QMainWindow):
             self.raise_()
     
     def show_mini_mode(self):
-        """显示小窗口"""
         self.mini_window = MiniWindow(self)
         self._update_mini_alarm()
         self.mini_window.show()
@@ -960,7 +932,6 @@ class MainWindow(QMainWindow):
         self.hide()
     
     def show_normal_mode(self):
-        """恢复正常模式"""
         if self.mini_window:
             self.mini_window.close()
             self.mini_window = None
@@ -970,11 +941,9 @@ class MainWindow(QMainWindow):
         self.activateWindow()
     
     def toggle_mini_mute(self, muted):
-        """小窗口静音切换"""
         self.mini_muted = muted
     
     def _update_mini_alarm(self):
-        """更新小窗口报警信息"""
         if self.mini_window is None:
             return
         
