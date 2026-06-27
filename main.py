@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (
     QPushButton, QTableWidget, QTableWidgetItem, QLabel, QMessageBox,
     QAbstractItemView, QHeaderView, QFileDialog, QDialog,
     QLineEdit, QGroupBox, QFrame, QSlider, QComboBox,
-    QProgressBar, QCheckBox, QDoubleSpinBox
+    QProgressBar, QCheckBox, QDoubleSpinBox, QSplashScreen
 )
 from PySide6.QtCore import Qt, QTimer, QThread, Signal, QPoint, QRect, QByteArray
 from PySide6.QtGui import (
@@ -339,12 +339,12 @@ class CoordinatePicker(QWidget):
 
 
 class TrendChartWidget(QWidget):
-    """实时数值趋势曲线控件 - 最多显示50个点"""
+    """实时数值趋势曲线控件 - 最多显示15个点"""
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setMinimumHeight(190)
         self.data = []
-        self.max_points = 50  # 修改为50
+        self.max_points = 15  # 修改为15
         self.title = "数值趋势"
     
     def set_data(self, data_list, title="数值趋势"):
@@ -605,6 +605,20 @@ class MainWindow(QMainWindow):
         self.row_alarm = {}
         self.row_muted = {}
         
+        # 创建启动画面
+        splash_pixmap = QPixmap(400, 200)
+        splash_pixmap.fill(QColor("#1e1e2e"))
+        painter = QPainter(splash_pixmap)
+        painter.setPen(QColor("#4a9eff"))
+        painter.setFont(QFont("Microsoft YaHei", 16, QFont.Bold))
+        painter.drawText(splash_pixmap.rect(), Qt.AlignCenter, "📊 屏幕数字监控报警系统\n正在加载中...")
+        painter.end()
+        self.splash = QSplashScreen(splash_pixmap)
+        self.splash.show()
+        
+        # 让启动画面显示
+        QApplication.processEvents()
+        
         self._setup_ui()
         self.load_config()
         
@@ -614,6 +628,9 @@ class MainWindow(QMainWindow):
         
         self.table.itemChanged.connect(self._on_table_item_changed)
         self.table.itemSelectionChanged.connect(self._on_selection_changed)
+        
+        # 关闭启动画面
+        self.splash.finish(self)
     
     def _setup_ui(self):
         central = QWidget()
@@ -695,10 +712,6 @@ class MainWindow(QMainWindow):
         self.btn_edit.clicked.connect(self.edit_monitor_point)
         btn_layout.addWidget(self.btn_edit)
         
-        self.btn_clear_trend = QPushButton("🗑 清空曲线")
-        self.btn_clear_trend.clicked.connect(self.clear_trend_data)
-        btn_layout.addWidget(self.btn_clear_trend)
-        
         self.btn_delete = QPushButton("🗑 删除")
         self.btn_delete.setObjectName("btn_delete")
         self.btn_delete.clicked.connect(self.delete_monitor_point)
@@ -752,7 +765,7 @@ class MainWindow(QMainWindow):
         
         main_layout.addLayout(btn_layout)
         
-        # 状态栏 - 删除报警数
+        # 状态栏
         status_layout = QHBoxLayout()
         status_layout.setSpacing(10)
         self.status_label = QLabel("状态: 就绪")
@@ -767,12 +780,6 @@ class MainWindow(QMainWindow):
         
         self.table.model().rowsInserted.connect(self._on_rows_inserted)
         self.table.model().rowsRemoved.connect(self._on_rows_removed)
-
-    def clear_trend_data(self):
-        for row in self.value_history:
-            self.value_history[row].clear()
-        self.trend_chart.set_data([], "数值趋势")
-        self.status_label.setText("状态: 趋势数据已清空")
     
     def _on_selection_changed(self):
         selected = self.table.selectedItems()
@@ -882,8 +889,10 @@ class MainWindow(QMainWindow):
         self.alarm_status_label.setStyleSheet("padding: 8px 12px; background-color: #27273d; border-radius: 6px; color: #7a7a9a; border: 1px solid #33334a;")
     
     def on_download_progress(self, value):
+        # 直接更新进度条，不隐藏
         self.download_progress.setVisible(True)
         self.download_progress.setValue(value)
+        # 下载完成时隐藏
         if value >= 100:
             QTimer.singleShot(1000, lambda: self.download_progress.setVisible(False))
     
@@ -1067,10 +1076,10 @@ class MainWindow(QMainWindow):
         if row not in self.value_history:
             self.value_history[row] = []
             
-        # 只保存最新的50个值
+        # 只保存最新的15个值
         if not self.value_history[row] or self.value_history[row][-1] != value:
             self.value_history[row].append(value)
-            if len(self.value_history[row]) > 50:
+            if len(self.value_history[row]) > 15:
                 self.value_history[row].pop(0)
             
             selected = self.table.selectedItems()
@@ -1105,7 +1114,6 @@ class MainWindow(QMainWindow):
         self.status_label.setText(f"报警: {name} = {value:.2f} [范围: {lower}-{upper}]")
         
         self._check_alarms()
-        # 不生成alarm_log.txt
 
     def on_status_updated(self, row, status):
         if status == 'normal':
