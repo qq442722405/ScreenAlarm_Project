@@ -340,7 +340,7 @@ class CoordinatePicker(QWidget):
 
 
 class MiniWindow(QWidget):
-    """小窗口模式 - 无X关闭按钮，通过切换按钮回到大窗口"""
+    """小窗口模式 - 报警框和按钮框样式统一"""
     def __init__(self, parent=None):
         super().__init__(parent)
         self.parent_window = parent
@@ -350,7 +350,7 @@ class MiniWindow(QWidget):
             Qt.FramelessWindowHint |
             Qt.Tool
         )
-        self.setFixedSize(260, 110)
+        self.setFixedSize(280, 130)
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setStyleSheet("""
             QWidget {
@@ -386,26 +386,37 @@ class MiniWindow(QWidget):
                 background-color: #3a5a7a;
             }
             QPushButton#btn_restore_mini:hover { background-color: #4a6a8a; }
-            QFrame#btn_frame {
+            QFrame {
                 background-color: rgba(54, 54, 80, 0.3);
                 border: 1px solid #4a9eff;
                 border-radius: 8px;
                 padding: 4px;
             }
+            QFrame#alarm_frame {
+                background-color: rgba(54, 54, 80, 0.2);
+            }
+            QFrame#btn_frame {
+                background-color: rgba(54, 54, 80, 0.3);
+            }
         """)
         
         # 主布局
         main_layout = QVBoxLayout(self)
-        main_layout.setSpacing(4)
+        main_layout.setSpacing(6)
         main_layout.setContentsMargins(8, 6, 8, 6)
         
-        # 报警信息（居中）
+        # 报警框（带边框，与按钮框风格统一）
+        alarm_frame = QFrame()
+        alarm_frame.setObjectName("alarm_frame")
+        alarm_layout = QVBoxLayout(alarm_frame)
+        alarm_layout.setContentsMargins(4, 4, 4, 4)
         self.alarm_label = QLabel("✅ 正常")
         self.alarm_label.setAlignment(Qt.AlignCenter)
-        self.alarm_label.setStyleSheet("font-size: 16px; font-weight: bold; color: #4ade80; padding: 6px 0;")
-        main_layout.addWidget(self.alarm_label)
+        self.alarm_label.setStyleSheet("font-size: 16px; font-weight: bold; color: #4ade80; padding: 2px 0;")
+        alarm_layout.addWidget(self.alarm_label)
+        main_layout.addWidget(alarm_frame)
         
-        # 按钮框（静音 + 切换）
+        # 按钮框
         btn_frame = QFrame()
         btn_frame.setObjectName("btn_frame")
         btn_layout = QHBoxLayout(btn_frame)
@@ -417,7 +428,7 @@ class MiniWindow(QWidget):
         self.btn_mute.clicked.connect(self.toggle_mute)
         btn_layout.addWidget(self.btn_mute)
         
-        self.btn_restore = QPushButton("切换")  # 切换按钮
+        self.btn_restore = QPushButton("切换")
         self.btn_restore.setObjectName("btn_restore_mini")
         self.btn_restore.clicked.connect(self.restore_window)
         btn_layout.addWidget(self.btn_restore)
@@ -445,11 +456,11 @@ class MiniWindow(QWidget):
         if len(name) > 10:
             name = name[:10] + "..."
         self.alarm_label.setText(f"⚠️ {name}")
-        self.alarm_label.setStyleSheet("font-size: 16px; font-weight: bold; color: #ff6b6b; padding: 6px 0;")
+        self.alarm_label.setStyleSheet("font-size: 16px; font-weight: bold; color: #ff6b6b; padding: 2px 0;")
     
     def clear_alarm(self):
         self.alarm_label.setText("✅ 正常")
-        self.alarm_label.setStyleSheet("font-size: 16px; font-weight: bold; color: #4ade80; padding: 6px 0;")
+        self.alarm_label.setStyleSheet("font-size: 16px; font-weight: bold; color: #4ade80; padding: 2px 0;")
     
     def toggle_mute(self):
         self.is_muted = not self.is_muted
