@@ -3,6 +3,18 @@ import re
 import os
 import sys
 from PySide6.QtCore import QThread, Signal
+import cv2
+import numpy as np
+import mss
+from PIL import Image
+
+try:
+    import easyocr
+    OCR_AVAILABLE = True
+except ImportError as e:
+    OCR_AVAILABLE = False
+    print(f"EasyOCR未安装: {e}")
+
 
 class MonitorThread(QThread):
     value_updated = Signal(int, float)
@@ -57,8 +69,9 @@ class MonitorThread(QThread):
         return True
     
     def _init_ocr(self):
-        # 延迟加载，解决启动慢
-        import easyocr
+        if not OCR_AVAILABLE:
+            self.ocr_status.emit("EasyOCR未安装，请运行: pip install easyocr", False)
+            return False
         
         try:
             if getattr(sys, 'frozen', False):
@@ -67,81 +80,178 @@ class MonitorThread(QThread):
                 base_dir = os.path.dirname(os.path.abspath(__file__))
             
             model_dir = os.path.join(base_dir, 'ocr_models')
+            
             if not os.path.exists(model_dir):
                 os.makedirs(model_dir, exist_ok=True)
             
-            self.ocr_status.emit("正在下载/加载模型...", False)
+            self.ocr_status.emit("正在下载/加载EasyOCR模型 (首次约200MB)...", False)
+            self.download_progress.emit(0)
+            
             self.reader = easyocr.Reader(
-                ['ch_sim', 'en'],
+                ['en'],
                 gpu=False,
                 model_storage_directory=model_dir,
-                download_enabled=True, # 自动下载
+                download_enabled=True,
                 verbose=False
             )
             
             if self.reader is not None:
                 self.ocr_ready = True
+                self.download_progress.emit(100)
                 self.ocr_status.emit("就绪 ✅", True)
                 return True
-            return False
-        except Exception as e:
-            self.ocr_status.emit(f"加载失败: {str(e)[:50]}", False)
-            return False
-
-    def run(self):
-        import cv2
-        import numpy as np
-        import mss
-        from PIL import Image
-        
-        if not self._init_ocr():
-            return
+            else:
+                self.ocr_status.emit("创建OCR对象失败", False)
+                return False
             
-        self.sct = mss.mss()
+        except Exception as e:
+            error_msg = str(e)
+            if "Connection" in error_msg or "timeout" in error_msg.lower():
+                self.ocr_status.emit("网络连接失败，请检查网络后重启", False)
+            else:
+                self.ocr_status.emit(f"加载失败: {error_msg[:80]}", False)
+            return False
+    
+    def _preprocess_image(self, img_np):
+        try:
+            # 1. 图像放大3倍，显著提升易混淆数字(如1、2、4、7)的识别率
+            height, width = img_np.shape[:2]
+            scaled = cv2.resize(img_np, (width * 3, height * 3), interpolation=cv2.INTER_CUBIC)
+            
+            # 2. 转灰度
+            if len(scaled.shape) == 3:
+                gray = cv2.cvtColor(scaled, cv2.COLOR_RGB2GRAY)
+            else:
+                gray = scaled
+            
+            # 3. 对比度增强
+            clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+            enhanced = clahe.apply(gray)
+            
+            # 反色处理（如果是黑底白字，转为白底黑字更好识别）
+            if np.mean(enhanced) < 80:
+                enhanced = 255 - enhanced
+                enhanced = clahe.apply(enhanced)
+            
+            rgb = cv2.cvtColor(enhanced, cv2.COLOR_GRAY2RGB)
+            return rgb
+            
+        except Exception as e:
+            return img_np
+    
+    def _capture_and_ocr(self, x, y, width, height):
+        if not self.ocr_ready or self.reader is None:
+            return None
+        if self.sct is None:
+            self.sct = mss.mss()
+        try:
+            if width <= 0 or height <= 0:
+                return None
+            
+            monitor = {"top": y, "left": x, "width": width, "height": height}
+            screenshot = self.sct.grab(monitor)
+            img = Image.frombytes("RGB", screenshot.size, screenshot.rgb)
+            img_np = np.array(img)
+            
+            processed = self._preprocess_image(img_np)
+            
+            result = self.reader.readtext(
+                processed,
+                allowlist='0123456789.-',
+                paragraph=False,
+                width_ths=0.5,
+                height_ths=0.5
+            )
+            
+            for bbox, text, confidence in result:
+                if confidence > 0.3:
+                    numbers = re.findall(r'-?\d+\.?\d*', text)
+                    if numbers:
+                        return float(numbers[0])
+            
+            result2 = self.reader.readtext(
+                img_np,
+                allowlist='0123456789.-',
+                paragraph=False
+            )
+            for bbox, text, confidence in result2:
+                if confidence > 0.3:
+                    numbers = re.findall(r'-?\d+\.?\d*', text)
+                    if numbers:
+                        return float(numbers[0])
+            
+            return None
+            
+        except Exception as e:
+            return None
+    
+    def run(self):
+        if not self._init_ocr():
+            self.status_updated.emit(-1, 'OCR加载失败，请检查网络后重启')
+            return
+        
+        for m in self.monitors:
+            self.alarm_status[m['row']] = {
+                'alarm': False, 
+                'count': 0,
+                'last_alarm_time': 0
+            }
+            self.status_updated.emit(m['row'], '监控中')
+        
         interval_sec = self.interval_ms / 1000.0
         
         while self.running:
             for monitor in self.monitors:
-                if not self.running: break
-                if not self._is_enabled(monitor['row']): continue
+                if not self.running:
+                    break
+                row = monitor['row']
                 
-                try:
-                    # 获取屏幕区域
-                    rect = {'top': monitor['y'], 'left': monitor['x'], 
-                            'width': monitor['width'], 'height': monitor['height']}
+                if not self._is_enabled(row):
+                    self.status_updated.emit(row, 'disabled')
+                    self.alarm_status[row]['alarm'] = False
+                    continue
+                
+                raw_value = self._capture_and_ocr(
+                    monitor['x'], monitor['y'],
+                    monitor['width'], monitor['height']
+                )
+                
+                if raw_value is not None:
+                    value = float(raw_value)
+                    self.value_updated.emit(row, value)
+                    lower, upper = monitor['lower'], monitor['upper']
                     
-                    # 预处理
-                    img = np.array(self.sct.grab(rect))
-                    img = cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
-                    
-                    # OCR 识别
-                    results = self.reader.readtext(img, detail=0)
-                    text = "".join(results)
-                    # 清洗数据 (简单正则提取数字)
-                    nums = re.findall(r"\d+\.?\d*", text.replace('O', '0').replace('l', '1').replace('I', '1'))
-                    
-                    if nums:
-                        val = float(nums[0])
-                        self.value_updated.emit(monitor['row'], val)
+                    if value < lower or value > upper:
+                        now = time.time()
+                        last_time = self.alarm_status[row]['last_alarm_time']
                         
-                        # 报警逻辑
-                        lower, upper = float(monitor.get('lower', 0)), float(monitor.get('upper', 100))
-                        if val < lower or val > upper:
-                            now = time.time()
-                            last_t = self.alarm_status.get(monitor['row'], {}).get('last_alarm_time', 0)
-                            if not self.alarm_status.get(monitor['row'], {}).get('alarm', False) or (self.alarm_loop_enabled and now - last_t > 10):
-                                self.alarm_status[monitor['row']] = {'alarm': True, 'last_alarm_time': now, 'count': 0}
-                                self.alarm_triggered.emit(monitor['row'], monitor['name'], val, lower, upper)
-                        else:
-                            if not self.manual_clear:
-                                self.alarm_status[monitor['row']] = {'alarm': False, 'count': 0}
-                                self.status_updated.emit(monitor['row'], 'normal')
+                        if not self.alarm_status[row]['alarm']:
+                            self.alarm_status[row]['alarm'] = True
+                            self.alarm_status[row]['last_alarm_time'] = now
+                            self.alarm_triggered.emit(
+                                row, monitor['name'], value, lower, upper
+                            )
+                        elif self.alarm_loop_enabled:
+                            if now - last_time > 10:
+                                self.alarm_status[row]['last_alarm_time'] = now
+                                self.alarm_triggered.emit(
+                                    row, monitor['name'], value, lower, upper
+                                )
                     else:
-                        self.status_updated.emit(monitor['row'], 'error')
-                        
-                except Exception as e:
-                    print(f"Monitor error: {e}")
+                        if not self.manual_clear:
+                            self.alarm_status[row]['alarm'] = False
+                            self.status_updated.emit(row, 'normal')
+                        else:
+                            self.alarm_status[row]['alarm'] = False
+                    self.alarm_status[row]['count'] = 0
+                else:
+                    self.alarm_status[row]['count'] += 1
+                    if self.alarm_status[row]['count'] >= 3:
+                        self.status_updated.emit(row, 'error')
+                
+                time.sleep(0.05)
             
-            time.sleep(interval_sec)
+            time.sleep(max(0.05, interval_sec - 0.3))
         
-        if self.sct: self.sct.close()
+        if self.sct:
+            self.sct.close()
