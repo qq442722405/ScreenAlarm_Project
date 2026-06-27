@@ -10,9 +10,9 @@ from PySide6.QtWidgets import (
     QPushButton, QTableWidget, QTableWidgetItem, QLabel, QMessageBox,
     QAbstractItemView, QHeaderView, QFileDialog, QDialog,
     QLineEdit, QGroupBox, QFrame, QSlider, QComboBox,
-    QProgressBar, QCheckBox
+    QProgressBar, QCheckBox, QDoubleSpinBox
 )
-from PySide6.QtCore import Qt, QTimer, QThread, Signal, QPoint, QRect
+from PySide6.QtCore import Qt, QTimer, QThread, Signal, QPoint, QRect, QByteArray
 from PySide6.QtGui import (
     QColor, QBrush, QFont, QPainter, QPen, QPixmap, QImage,
     QPainterPath, QLinearGradient
@@ -357,7 +357,7 @@ class TrendChartWidget(QWidget):
         painter.setRenderHint(QPainter.Antialiasing)
         
         rect = self.rect()
-        padding_left = 55
+        padding_left = 20    # 【修改点2】去掉了数字，左侧留白调小
         padding_right = 20
         padding_top = 32
         padding_bottom = 28
@@ -399,12 +399,7 @@ class TrendChartWidget(QWidget):
         max_val += margin
         val_range = max_val - min_val
         
-        painter.setPen(QColor("#9a9ab0"))
-        painter.setFont(QFont("Arial", 9))
-        for i in range(grid_rows + 1):
-            y = chart_rect.top() + chart_rect.height() * i / grid_rows
-            val = max_val - val_range * i / grid_rows
-            painter.drawText(8, y + 3, f"{val:.1f}")
+        # 【修改点2】此处已删除画左侧 Y 轴数字的代码
         
         points = []
         step_x = chart_rect.width() / (len(self.data) - 1)
@@ -435,9 +430,9 @@ class TrendChartWidget(QWidget):
         for i in range(len(points) - 1):
             painter.drawLine(points[i], points[i+1])
         
-        # 新增：给所有点标上具体的数值
+        # 给所有点标上具体的数值
         if points:
-            painter.setPen(QColor("#aaccff"))  # 浅蓝色字体，容易看清
+            painter.setPen(QColor("#aaccff"))
             painter.setFont(QFont("Arial", 8))
             for i, p in enumerate(points):
                 text = f"{self.data[i]:.2f}"
@@ -541,7 +536,7 @@ class MainWindow(QMainWindow):
                 background: #4a9eff;
                 border-radius: 3px;
             }
-            QComboBox {
+            QDoubleSpinBox {
                 background-color: #363650;
                 color: #e0e0f0;
                 border: 1px solid #4a4a6a;
@@ -549,8 +544,7 @@ class MainWindow(QMainWindow):
                 padding: 5px 10px;
                 min-height: 20px;
             }
-            QComboBox:hover { border-color: #4a9eff; }
-            QComboBox::drop-down { border: none; width: 20px; }
+            QDoubleSpinBox:hover { border-color: #4a9eff; }
             QProgressBar {
                 background-color: #27273d;
                 border: 1px solid #33334a;
@@ -606,7 +600,7 @@ class MainWindow(QMainWindow):
         self.loop_enabled = True
         self.detect_interval = 500
         self.value_history = {}
-        self.current_row_data = []  # 当前选中行的数据
+        self.current_row_data = []
         
         self.alarm_player = AlarmSoundPlayer()
         self.alarm_file = self.alarm_player.sound_file or ""
@@ -643,21 +637,12 @@ class MainWindow(QMainWindow):
         title_layout.addWidget(title)
         title_layout.addStretch()
         
-        # 标题修改：
         subtitle = QLabel("---天长污水陈诚")
         subtitle.setStyleSheet("color: #7a7a9a; font-size: 14px; font-weight: bold;")
         title_layout.addWidget(subtitle)
         main_layout.addLayout(title_layout)
         
-        # 提示栏
-        hint_frame = QFrame()
-        hint_frame.setObjectName("hint_frame")
-        hint_layout = QHBoxLayout(hint_frame)
-        hint_layout.setContentsMargins(10, 5, 10, 5)
-        hint_label = QLabel("💡 点击「添加监控点」按住左键拖拽选择区域 | 修改上下限立即生效 | 选中行查看数值趋势")
-        hint_label.setStyleSheet("color: #e6b84d;")
-        hint_layout.addWidget(hint_label)
-        main_layout.addWidget(hint_frame)
+        # 【修改点3】此处已直接删除提示栏(💡点击添加监控点...)的代码
         
         # OCR状态
         self.ocr_status_label = QLabel("OCR引擎: 初始化中...")
@@ -671,7 +656,7 @@ class MainWindow(QMainWindow):
         self.download_progress.setValue(0)
         main_layout.addWidget(self.download_progress)
         
-        # 监控表格 (增加列数为10，添加“备注”列)
+        # 监控表格
         self.table = QTableWidget()
         self.table.setColumnCount(10)
         self.table.setHorizontalHeaderLabels([
@@ -682,19 +667,20 @@ class MainWindow(QMainWindow):
         self.table.setAlternatingRowColors(True)
         self.table.setRowCount(0)
         
-        # 调整列宽
-        self.table.setColumnWidth(0, 40)  # 启用列变窄
+        # 【修改点1】调整列宽，静音改小，备注调大
+        self.table.setColumnWidth(0, 40)
         self.table.setColumnWidth(1, 80)
-        self.table.setColumnWidth(2, 120) # 备注列
+        self.table.setColumnWidth(2, 200) # 备注列宽
         self.table.setColumnWidth(3, 90)
         self.table.setColumnWidth(4, 65)
         self.table.setColumnWidth(5, 65)
         self.table.setColumnWidth(6, 130)
         self.table.setColumnWidth(7, 85)
         self.table.setColumnWidth(8, 110)
-        self.table.setColumnWidth(9, 55)
+        self.table.setColumnWidth(9, 45)  # 静音列宽缩窄
         
-        self.table.horizontalHeader().setStretchLastSection(True)
+        # 取消最后列自动拉伸，允许手动拖拽各个列的大小并保存
+        self.table.horizontalHeader().setStretchLastSection(False) 
         self.table.verticalHeader().setVisible(False)
         main_layout.addWidget(self.table, 3)
         
@@ -718,7 +704,6 @@ class MainWindow(QMainWindow):
         self.btn_edit.clicked.connect(self.edit_monitor_point)
         btn_layout.addWidget(self.btn_edit)
         
-        # 新增清空趋势按钮
         self.btn_clear_trend = QPushButton("🗑 清空曲线")
         self.btn_clear_trend.clicked.connect(self.clear_trend_data)
         btn_layout.addWidget(self.btn_clear_trend)
@@ -755,13 +740,16 @@ class MainWindow(QMainWindow):
         self.volume_label.setFixedWidth(40)
         btn_layout.addWidget(self.volume_label)
         
-        btn_layout.addWidget(QLabel("间隔:"))
-        self.interval_combo = QComboBox()
-        self.interval_combo.addItems(["100ms", "200ms", "300ms", "500ms", "1000ms", "2000ms"])
-        self.interval_combo.setCurrentIndex(3)
-        self.interval_combo.setFixedWidth(90)
-        self.interval_combo.currentTextChanged.connect(self.on_interval_changed)
-        btn_layout.addWidget(self.interval_combo)
+        # 【修改点4】将检测间隔修改为可以手动填写数字(秒)的输入框
+        btn_layout.addWidget(QLabel("检测间隔:"))
+        self.interval_spin = QDoubleSpinBox()
+        self.interval_spin.setRange(0.1, 3600.0) # 最快0.1秒，最慢1小时
+        self.interval_spin.setSingleStep(0.5)
+        self.interval_spin.setSuffix(" 秒")
+        self.interval_spin.setValue(0.5)
+        self.interval_spin.setFixedWidth(80)
+        self.interval_spin.valueChanged.connect(self.on_interval_changed)
+        btn_layout.addWidget(self.interval_spin)
         
         self.btn_save = QPushButton("💾 保存配置")
         self.btn_save.setObjectName("btn_save")
@@ -795,14 +783,12 @@ class MainWindow(QMainWindow):
         self.table.model().rowsRemoved.connect(self._on_rows_removed)
 
     def clear_trend_data(self):
-        """清空所有行的历史趋势数据"""
         for row in self.value_history:
             self.value_history[row].clear()
         self.trend_chart.set_data([], "数值趋势")
         self.status_label.setText("状态: 趋势数据已清空")
     
     def _on_selection_changed(self):
-        """选中行变化时更新趋势图"""
         selected = self.table.selectedItems()
         if not selected:
             return
@@ -817,11 +803,8 @@ class MainWindow(QMainWindow):
     def _on_table_item_changed(self, item):
         if not self.monitoring or self.monitor_thread is None:
             return
-        
         row = item.row()
         col = item.column()
-        
-        # 索引已平移：下限为4，上限为5
         if col == 4 or col == 5:
             try:
                 new_value = float(item.text())
@@ -840,7 +823,6 @@ class MainWindow(QMainWindow):
             widget = self.table.cellWidget(row, 0)
             if widget and isinstance(widget, QCheckBox):
                 self.row_enabled[row] = widget.isChecked()
-            # 索引平移：静音复选框在第 9 列
             mute_widget = self.table.cellWidget(row, 9)
             if mute_widget and isinstance(mute_widget, QCheckBox):
                 self.row_muted[row] = mute_widget.isChecked()
@@ -864,26 +846,21 @@ class MainWindow(QMainWindow):
         return self.row_muted.get(row, False)
     
     def _on_mute_changed(self, row, state):
-        """静音状态变化"""
         self.row_muted[row] = (state == 2)
         if self.row_alarm.get(row, False):
-            # 索引平移：状态列在第 7 列
             item = self.table.item(row, 7)
             if item:
                 if state == 2:
                     item.setText("已静音")
-                    item.setBackground(QBrush(QColor(180, 130, 40))) # 橘黄色
+                    item.setBackground(QBrush(QColor(180, 130, 40)))
                 else:
                     item.setText("报警")
-                    item.setBackground(QBrush(QColor(200, 50, 50)))  # 红色
-        # 重新评估是否需要发声
+                    item.setBackground(QBrush(QColor(200, 50, 50)))
         self._check_alarms()
 
     def _check_alarms(self):
-        """统一控制声音：遍历状态列，只有存在'报警'字样才播放声音"""
         should_play = False
         for r in range(self.table.rowCount()):
-            # 索引平移：状态列在第 7 列
             item = self.table.item(r, 7)
             if item and item.text() == "报警":
                 should_play = True
@@ -898,8 +875,9 @@ class MainWindow(QMainWindow):
         else:
             self.stop_alarm()
     
-    def on_interval_changed(self, text):
-        self.detect_interval = int(text.replace("ms", ""))
+    def on_interval_changed(self, value):
+        # 【修改点4】秒转为毫秒
+        self.detect_interval = int(value * 1000)
         if self.monitoring and self.monitor_thread:
             self.monitor_thread.set_interval(self.detect_interval)
     
@@ -909,12 +887,10 @@ class MainWindow(QMainWindow):
         self.alarm_player.set_volume(volume)
     
     def play_alarm(self, row):
-        """触发报警时的窗口激活"""
         self.raise_()
         self.activateWindow()
     
     def stop_alarm(self):
-        """停止播放声音"""
         self.alarm_player.stop()
         self.alarm_playing = False
         self.alarm_status_label.setText("🔇 无报警")
@@ -948,11 +924,9 @@ class MainWindow(QMainWindow):
         self.row_enabled[row] = True
         enable_check.stateChanged.connect(lambda state, r=row: self._on_enable_changed(r, state))
         
-        # 新增：第 2 列填入备注输入框
         remark_edit = QLineEdit()
         self.table.setCellWidget(row, 2, remark_edit)
         
-        # 静音复选框移至第 9 列
         mute_check = QCheckBox()
         mute_check.setChecked(False)
         mute_check.setStyleSheet("margin-left: 12px;")
@@ -961,12 +935,12 @@ class MainWindow(QMainWindow):
         mute_check.stateChanged.connect(lambda state, r=row: self._on_mute_changed(r, state))
         
         self.table.setItem(row, 1, QTableWidgetItem(f"区域{row+1}"))
-        self.table.setItem(row, 3, QTableWidgetItem("--")) # 当前值
-        self.table.setItem(row, 4, QTableWidgetItem("0"))   # 下限
-        self.table.setItem(row, 5, QTableWidgetItem("100")) # 上限
-        self.table.setItem(row, 6, QTableWidgetItem(f"{x},{y},{width},{height}")) # 坐标
-        self.table.setItem(row, 7, QTableWidgetItem("待监控")) # 状态
-        self.table.setItem(row, 8, QTableWidgetItem("--")) # 时间
+        self.table.setItem(row, 3, QTableWidgetItem("--"))
+        self.table.setItem(row, 4, QTableWidgetItem("0"))
+        self.table.setItem(row, 5, QTableWidgetItem("100"))
+        self.table.setItem(row, 6, QTableWidgetItem(f"{x},{y},{width},{height}"))
+        self.table.setItem(row, 7, QTableWidgetItem("待监控"))
+        self.table.setItem(row, 8, QTableWidgetItem("--"))
         
         self.status_label.setText(f"状态: 已添加 区域{row+1}")
     
@@ -1035,7 +1009,6 @@ class MainWindow(QMainWindow):
             if self.table.item(row, 1) is None:
                 continue
             name = self.table.item(row, 1).text()
-            # 索引平移
             lower = float(self.table.item(row, 4).text())
             upper = float(self.table.item(row, 5).text())
             coords = self.table.item(row, 6).text()
@@ -1056,10 +1029,6 @@ class MainWindow(QMainWindow):
         if not monitors:
             QMessageBox.warning(self, "提示", "没有有效的监控点数据")
             return
-        
-        # 【修改点】：取消这里自动清空 value_history 的逻辑，以便重启监控能保留数据
-        # for row in self.value_history:
-        #     self.value_history[row].clear()
         
         self.monitor_thread = MonitorThread(monitors)
         self.monitor_thread.set_interval(self.detect_interval)
@@ -1089,7 +1058,6 @@ class MainWindow(QMainWindow):
         self.status_label.setText("状态: 已停止")
         self.stop_alarm()
         for row in range(self.table.rowCount()):
-            # 索引平移
             item = self.table.item(row, 7)
             if item and item.text() not in ["报警", "已静音"]:
                 self.table.setItem(row, 7, QTableWidgetItem("已停止"))
@@ -1097,23 +1065,20 @@ class MainWindow(QMainWindow):
             self._reset_row_colors(row)
     
     def _reset_row_colors(self, row):
-        # 索引平移
         status_item = self.table.item(row, 7)
         if status_item:
             status_item.setBackground(QBrush(QColor(0, 0, 0, 0)))
             status_item.setForeground(QBrush(QColor(255, 255, 255)))
             if status_item.text() in ["报警", "已静音"]:
                 status_item.setText("正常")
-                status_item.setBackground(QBrush(QColor(74, 158, 255))) # 蓝色
+                status_item.setBackground(QBrush(QColor(74, 158, 255)))
                 status_item.setForeground(QBrush(QColor(255, 255, 255)))
     
     def on_value_updated(self, row, value):
-        # 索引平移：当前值在第 3 列
         item = self.table.item(row, 3)
         if item:
             item.setText(f"{value:.2f}")
         
-        # 更新历史数据
         if row not in self.value_history:
             self.value_history[row] = []
             
@@ -1122,7 +1087,6 @@ class MainWindow(QMainWindow):
             if len(self.value_history[row]) > 200:
                 self.value_history[row].pop(0)
             
-            # 如果当前选中的行是这一行，更新趋势图
             selected = self.table.selectedItems()
             if selected and selected[0].row() == row:
                 name_item = self.table.item(row, 1)
@@ -1142,11 +1106,9 @@ class MainWindow(QMainWindow):
         status_item = QTableWidgetItem(status_text)
         status_item.setBackground(QBrush(color))
         status_item.setForeground(QBrush(QColor(255, 255, 255)))
-        # 索引平移：状态在第 7 列
         self.table.setItem(row, 7, status_item)
         
         now = datetime.now().strftime("%H:%M:%S")
-        # 索引平移：时间在第 8 列
         time_item = self.table.item(row, 8)
         if time_item:
             time_item.setText(now)
@@ -1209,9 +1171,13 @@ class MainWindow(QMainWindow):
         config = {
             'monitors': [],
             'volume': self.volume_slider.value(),
-            'interval': self.interval_combo.currentText(),
+            'interval': self.interval_spin.value(), # 保存时记录秒数
             'loop_enabled': self.loop_enabled
         }
+        
+        # 【修改点1】保存当前的列宽调整状态，下次打开时可以恢复
+        config['header_state'] = self.table.horizontalHeader().saveState().toBase64().data().decode('utf-8')
+        
         for row in range(self.table.rowCount()):
             if self.table.item(row, 1) is None:
                 continue
@@ -1258,7 +1224,6 @@ class MainWindow(QMainWindow):
                 self.row_enabled[row] = item.get('enabled', True)
                 enable_check.stateChanged.connect(lambda state, r=row: self._on_enable_changed(r, state))
                 
-                # 新增读取备注并填充 QLineEdit
                 remark_edit = QLineEdit(item.get('remark', ''))
                 self.table.setCellWidget(row, 2, remark_edit)
                 
@@ -1281,11 +1246,15 @@ class MainWindow(QMainWindow):
             self.volume_slider.setValue(volume)
             self.on_volume_changed(volume)
             
-            interval = config.get('interval', '500ms')
-            idx = self.interval_combo.findText(interval)
-            if idx >= 0:
-                self.interval_combo.setCurrentIndex(idx)
-                self.detect_interval = int(interval.replace("ms", ""))
+            # 【修改点1】恢复用户调整的列宽状态
+            header_state = config.get('header_state')
+            if header_state:
+                self.table.horizontalHeader().restoreState(QByteArray.fromBase64(header_state.encode('utf-8')))
+            
+            # 【修改点4】读取间隔秒数
+            interval = config.get('interval', 0.5) 
+            self.interval_spin.setValue(interval)
+            self.detect_interval = int(interval * 1000)
             
             self.status_label.setText("状态: 配置已加载")
         except Exception as e:
