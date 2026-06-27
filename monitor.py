@@ -114,22 +114,26 @@ class MonitorThread(QThread):
     
     def _preprocess_image(self, img_np):
         try:
-            if len(img_np.shape) == 3:
-                gray = cv2.cvtColor(img_np, cv2.COLOR_RGB2GRAY)
-            else:
-                gray = img_np
+            # 1. 图像放大3倍，显著提升易混淆数字(如1、2、4、7)的识别率
+            height, width = img_np.shape[:2]
+            scaled = cv2.resize(img_np, (width * 3, height * 3), interpolation=cv2.INTER_CUBIC)
             
+            # 2. 转灰度
+            if len(scaled.shape) == 3:
+                gray = cv2.cvtColor(scaled, cv2.COLOR_RGB2GRAY)
+            else:
+                gray = scaled
+            
+            # 3. 对比度增强
             clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
             enhanced = clahe.apply(gray)
             
+            # 反色处理（如果是黑底白字，转为白底黑字更好识别）
             if np.mean(enhanced) < 80:
                 enhanced = 255 - enhanced
                 enhanced = clahe.apply(enhanced)
             
-            blurred = cv2.GaussianBlur(enhanced, (3, 3), 0)
-            _, binary = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-            
-            rgb = cv2.cvtColor(binary, cv2.COLOR_GRAY2RGB)
+            rgb = cv2.cvtColor(enhanced, cv2.COLOR_GRAY2RGB)
             return rgb
             
         except Exception as e:
@@ -233,18 +237,18 @@ class MonitorThread(QThread):
                                 self.alarm_triggered.emit(
                                     row, monitor['name'], value, lower, upper
                                 )
-                        self.status_updated.emit(row, '报警')
+                        # 触发报警信号后，等待main那边更新状态，不在这里直接发射状态了，防止重复发声
                     else:
                         if not self.manual_clear:
                             self.alarm_status[row]['alarm'] = False
-                            self.status_updated.emit(row, '正常')
+                            self.status_updated.emit(row, 'normal')
                         else:
                             self.alarm_status[row]['alarm'] = False
                     self.alarm_status[row]['count'] = 0
                 else:
                     self.alarm_status[row]['count'] += 1
                     if self.alarm_status[row]['count'] >= 3:
-                        self.status_updated.emit(row, '识别失败')
+                        self.status_updated.emit(row, 'error')
                 
                 time.sleep(0.05)
             
