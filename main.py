@@ -175,7 +175,6 @@ class CoordinatePicker(QWidget):
         )
         self.setMouseTracking(True)
         
-        # 修正：在方法内部导入 QApplication
         from PySide6.QtWidgets import QApplication
         screens = QApplication.screens()
         total_rect = screens[0].geometry()
@@ -345,18 +344,19 @@ class MiniWindow(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.parent_window = parent
-        self.setWindowTitle("报警监控 - 小窗口")
+        self.setWindowTitle("报警监控")
         self.setWindowFlags(
             Qt.WindowStaysOnTopHint | 
             Qt.FramelessWindowHint |
             Qt.Tool
         )
-        self.setFixedSize(300, 120)
+        self.setFixedSize(220, 80)
+        self.setAttribute(Qt.WA_TranslucentBackground)
         self.setStyleSheet("""
             QWidget {
-                background-color: #1e1e2e;
+                background-color: rgba(30, 30, 46, 0.92);
                 border: 2px solid #4a9eff;
-                border-radius: 12px;
+                border-radius: 16px;
             }
             QLabel {
                 color: #e0e0f0;
@@ -367,18 +367,12 @@ class MiniWindow(QWidget):
                 color: #e0e0f0;
                 border: none;
                 border-radius: 6px;
-                padding: 6px 14px;
+                padding: 4px 12px;
                 font-weight: bold;
                 font-family: "Microsoft YaHei";
-                font-size: 12px;
-            }
-            QPushButton:hover { background-color: #464668; }
-            QPushButton#btn_close_mini {
-                background-color: #aa3a3a;
-                padding: 4px 12px;
                 font-size: 11px;
             }
-            QPushButton#btn_close_mini:hover { background-color: #bb4a4a; }
+            QPushButton:hover { background-color: #464668; }
             QPushButton#btn_mute_mini {
                 background-color: #b03a3a;
             }
@@ -387,42 +381,35 @@ class MiniWindow(QWidget):
                 background-color: #2a5a3a;
             }
             QPushButton#btn_mute_mini.muted:hover { background-color: #3a6a4a; }
+            QPushButton#btn_restore_mini {
+                background-color: #3a5a7a;
+            }
+            QPushButton#btn_restore_mini:hover { background-color: #4a6a8a; }
         """)
         
         layout = QVBoxLayout(self)
-        layout.setSpacing(6)
-        layout.setContentsMargins(12, 10, 12, 10)
-        
-        # 标题行
-        title_layout = QHBoxLayout()
-        self.title_label = QLabel("🔊 报警监控")
-        self.title_label.setStyleSheet("font-weight: bold; font-size: 14px;")
-        title_layout.addWidget(self.title_label)
-        title_layout.addStretch()
-        
-        self.btn_close = QPushButton("✕")
-        self.btn_close.setObjectName("btn_close_mini")
-        self.btn_close.setFixedSize(24, 24)
-        self.btn_close.clicked.connect(self.close_mini)
-        title_layout.addWidget(self.btn_close)
-        layout.addLayout(title_layout)
+        layout.setSpacing(4)
+        layout.setContentsMargins(12, 8, 12, 8)
         
         # 报警信息
-        self.alarm_label = QLabel("暂无报警")
+        self.alarm_label = QLabel("✅ 无报警")
         self.alarm_label.setAlignment(Qt.AlignCenter)
-        self.alarm_label.setStyleSheet("font-size: 16px; font-weight: bold; color: #ff6b6b; padding: 4px;")
+        self.alarm_label.setStyleSheet("font-size: 15px; font-weight: bold; color: #4ade80; padding: 2px;")
         layout.addWidget(self.alarm_label)
         
         # 按钮行
         btn_layout = QHBoxLayout()
-        btn_layout.setSpacing(8)
+        btn_layout.setSpacing(6)
         
-        self.btn_mute = QPushButton("🔇 静音")
+        self.btn_mute = QPushButton("🔇")
         self.btn_mute.setObjectName("btn_mute_mini")
+        self.btn_mute.setFixedSize(32, 26)
         self.btn_mute.clicked.connect(self.toggle_mute)
         btn_layout.addWidget(self.btn_mute)
         
-        self.btn_restore = QPushButton("📊 切换大窗口")
+        self.btn_restore = QPushButton("📊")
+        self.btn_restore.setObjectName("btn_restore_mini")
+        self.btn_restore.setFixedSize(32, 26)
         self.btn_restore.clicked.connect(self.restore_window)
         btn_layout.addWidget(self.btn_restore)
         
@@ -446,33 +433,27 @@ class MiniWindow(QWidget):
         self.drag_pos = None
     
     def set_alarm(self, name, value, lower, upper):
-        self.alarm_label.setText(f"⚠️ {name}\n{value:.2f} [下限:{lower} 上限:{upper}]")
-        self.alarm_label.setStyleSheet("font-size: 16px; font-weight: bold; color: #ff6b6b; padding: 4px;")
-        self.title_label.setText("🔴 报警中")
+        self.alarm_label.setText(f"⚠️ {name}\n{value:.2f}")
+        self.alarm_label.setStyleSheet("font-size: 15px; font-weight: bold; color: #ff6b6b; padding: 2px;")
     
     def clear_alarm(self):
         self.alarm_label.setText("✅ 无报警")
-        self.alarm_label.setStyleSheet("font-size: 16px; font-weight: bold; color: #4ade80; padding: 4px;")
-        self.title_label.setText("🔊 报警监控")
+        self.alarm_label.setStyleSheet("font-size: 15px; font-weight: bold; color: #4ade80; padding: 2px;")
     
     def toggle_mute(self):
         self.is_muted = not self.is_muted
         if self.is_muted:
-            self.btn_mute.setText("🔊 取消静音")
+            self.btn_mute.setText("🔊")
             self.btn_mute.setObjectName("btn_mute_mini muted")
-            self.btn_mute.setStyleSheet("background-color: #2a5a3a; color: white; border: none; border-radius: 6px; padding: 6px 14px;")
+            self.btn_mute.setStyleSheet("background-color: #2a5a3a; color: white; border: none; border-radius: 6px; padding: 4px 8px;")
         else:
-            self.btn_mute.setText("🔇 静音")
+            self.btn_mute.setText("🔇")
             self.btn_mute.setObjectName("btn_mute_mini")
-            self.btn_mute.setStyleSheet("background-color: #b03a3a; color: white; border: none; border-radius: 6px; padding: 6px 14px;")
+            self.btn_mute.setStyleSheet("background-color: #b03a3a; color: white; border: none; border-radius: 6px; padding: 4px 8px;")
         self.parent_window.toggle_mini_mute(self.is_muted)
     
     def restore_window(self):
         self.parent_window.show_normal_mode()
-    
-    def close_mini(self):
-        self.parent_window.mini_window = None
-        self.close()
     
     def closeEvent(self, event):
         self.parent_window.mini_window = None
@@ -935,12 +916,10 @@ class MainWindow(QMainWindow):
     def show_mini_mode(self):
         """显示小窗口"""
         self.mini_window = MiniWindow(self)
-        # 更新报警信息
         self._update_mini_alarm()
         self.mini_window.show()
         self.mini_window.raise_()
         self.btn_mini.setText("📱 退出小窗口")
-        # 隐藏主窗口
         self.hide()
     
     def show_normal_mode(self):
@@ -962,7 +941,6 @@ class MainWindow(QMainWindow):
         if self.mini_window is None:
             return
         
-        # 检查是否有报警
         has_alarm = False
         alarm_info = None
         for row in range(self.table.rowCount()):
@@ -971,14 +949,10 @@ class MainWindow(QMainWindow):
                 has_alarm = True
                 name = self.table.item(row, 1).text() if self.table.item(row, 1) else "未知"
                 value_item = self.table.item(row, 3)
-                lower_item = self.table.item(row, 4)
-                upper_item = self.table.item(row, 5)
-                if value_item and lower_item and upper_item:
+                if value_item:
                     try:
                         value = float(value_item.text())
-                        lower = float(lower_item.text())
-                        upper = float(upper_item.text())
-                        alarm_info = (name, value, lower, upper)
+                        alarm_info = (name, value, 0, 0)
                     except:
                         alarm_info = (name, 0, 0, 0)
                 break
@@ -1066,7 +1040,6 @@ class MainWindow(QMainWindow):
                 should_play = True
                 break
         
-        # 更新小窗口
         self._update_mini_alarm()
         
         if should_play:
@@ -1097,7 +1070,6 @@ class MainWindow(QMainWindow):
         self.alarm_playing = False
         self.alarm_status_label.setText("🔇 无报警")
         self.alarm_status_label.setStyleSheet("padding: 8px 12px; background-color: #27273d; border-radius: 6px; color: #7a7a9a; border: 1px solid #33334a;")
-        # 更新小窗口
         self._update_mini_alarm()
     
     def on_download_progress(self, value):
