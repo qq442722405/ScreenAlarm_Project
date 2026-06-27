@@ -3,11 +3,10 @@ import json
 import os
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QPushButton, QTableWidget, QTableWidgetItem, QLabel, QMessageBox,
-    QHeaderView, QTableWidgetSelectionRange, QCheckBox
+    QPushButton, QTableWidget, QTableWidgetItem, QLabel, QCheckBox, QHeaderView
 )
-from PySide6.QtCore import Qt, QTimer, Signal, QRect
-from PySide6.QtGui import QColor, QBrush, QFont, QPainter, QPen, QPainterPath
+from PySide6.QtCore import Qt, QRect
+from PySide6.QtGui import QColor, QBrush, QFont, QPainter, QPen
 from monitor import MonitorThread
 
 class TrendChartWidget(QWidget):
@@ -15,11 +14,9 @@ class TrendChartWidget(QWidget):
         super().__init__(parent)
         self.setMinimumHeight(200)
         self.data = []
-        self.title = "数值趋势"
     
-    def set_data(self, data_list, title):
-        self.data = data_list[-100:]
-        self.title = title
+    def set_data(self, data_list):
+        self.data = data_list[-50:] # 显示最近50个点
         self.update()
     
     def paintEvent(self, event):
@@ -27,10 +24,8 @@ class TrendChartWidget(QWidget):
         painter.setRenderHint(QPainter.Antialiasing)
         painter.setBrush(QColor("#252538"))
         painter.drawRoundedRect(self.rect(), 8, 8)
-        
         if not self.data: return
         
-        # 绘图逻辑简化：绘制曲线并标记最后一个点的数值
         painter.setPen(QPen(QColor("#4a9eff"), 2))
         h, w = self.height(), self.width()
         max_v, min_v = max(self.data), min(self.data)
@@ -38,14 +33,13 @@ class TrendChartWidget(QWidget):
         
         points = []
         for i, val in enumerate(self.data):
-            x = i * (w / len(self.data))
-            y = h - ((val - min_v) / range_v * (h * 0.7)) - 30
+            x = 40 + i * ((w - 80) / len(self.data))
+            y = h - 40 - ((val - min_v) / range_v * (h - 80))
             points.append((x, y))
         
         for i in range(len(points)-1):
             painter.drawLine(points[i][0], points[i][1], points[i+1][0], points[i+1][1])
             
-        # 标记最新数值
         painter.setPen(Qt.white)
         painter.drawText(int(points[-1][0]), int(points[-1][1])-10, f"{self.data[-1]:.2f}")
 
@@ -54,36 +48,31 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("---天长污水陈诚")
         self.resize(1300, 800)
-        self.value_history = {} # 持久存储，不再随停止清空
-        self.remarks = {}
+        self.value_history = {} 
         self._setup_ui()
-        self.load_config()
 
     def _setup_ui(self):
         central = QWidget()
         self.setCentralWidget(central)
         layout = QVBoxLayout(central)
         
-        # 顶部标题
         layout.addWidget(QLabel("---天长污水陈诚", font=QFont("Arial", 16, QFont.Bold)))
         
-        # 表格：增加备注列
         self.table = QTableWidget(0, 10)
         self.table.setHorizontalHeaderLabels(["启用", "名称", "值", "下限", "上限", "坐标", "状态", "时间", "静音", "备注"])
+        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         layout.addWidget(self.table)
         
-        # 按钮栏
         btn_layout = QHBoxLayout()
         self.btn_clear = QPushButton("🧹 清空数据")
         self.btn_clear.clicked.connect(self._on_clear_clicked)
         self.btn_add = QPushButton("➕ 添加监控")
-        self.btn_start = QPushButton("▶ 开始")
-        self.btn_stop = QPushButton("⏹ 停止")
-        btn_layout.addWidget(self.btn_clear)
-        btn_layout.addWidget(self.btn_add)
-        btn_layout.addStretch()
-        btn_layout.addWidget(self.btn_start)
-        btn_layout.addWidget(self.btn_stop)
+        self.btn_save = QPushButton("💾 保存配置")
+        self.btn_start = QPushButton("▶ 开始监控")
+        self.btn_stop = QPushButton("⏹ 停止监控")
+        
+        for btn in [self.btn_clear, self.btn_add, self.btn_save, self.btn_start, self.btn_stop]:
+            btn_layout.addWidget(btn)
         layout.addLayout(btn_layout)
         
         self.trend = TrendChartWidget()
@@ -92,24 +81,47 @@ class MainWindow(QMainWindow):
     def _on_clear_clicked(self):
         self.table.setRowCount(0)
         self.value_history.clear()
-        self.remarks.clear()
 
-    # 此处省略逻辑：在 add_monitor_row 时创建 CheckBox
-    def create_small_checkbox(self):
-        cb = QCheckBox()
-        cb.setFixedSize(30, 30) # 缩小尺寸
-        return cb
+    def add_row(self, name="新监控", lower=0, upper=100, coord="0,0,100,50", remark=""):
+        row = self.table.rowCount()
+        self.table.insertRow(row)
+        
+        # 优化 CheckBox 尺寸
+        for col in [0, 8]:
+            cb = QCheckBox()
+            cb.setStyleSheet("QCheckBox::indicator { width: 16px; height: 16px; }")
+            container = QWidget()
+            l = QHBoxLayout(container)
+            l.addWidget(cb)
+            l.setAlignment(Qt.AlignCenter)
+            l.setContentsMargins(0,0,0,0)
+            self.table.setCellWidget(row, col, container)
+        
+        self.table.setItem(row, 1, QTableWidgetItem(name))
+        self.table.setItem(row, 2, QTableWidgetItem("--"))
+        self.table.setItem(row, 3, QTableWidgetItem(str(lower)))
+        self.table.setItem(row, 4, QTableWidgetItem(str(upper)))
+        self.table.setItem(row, 5, QTableWidgetItem(coord))
+        self.table.setItem(row, 9, QTableWidgetItem(remark)) # 备注列
 
     def save_config(self):
-        # 遍历 table 获取数据，包含备注列
-        config = []
+        data = []
         for r in range(self.table.rowCount()):
-            config.append({
+            data.append({
                 "name": self.table.item(r, 1).text(),
-                "remark": self.table.item(r, 9).text() if self.table.item(r, 9) else ""
+                "lower": self.table.item(r, 3).text(),
+                "upper": self.table.item(r, 4).text(),
+                "coord": self.table.item(r, 5).text(),
+                "remark": self.table.item(r, 9).text()
             })
-        with open("config.json", "w") as f:
-            json.dump(config, f)
+        with open("config.json", "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False)
+
+    def load_config(self):
+        if not os.path.exists("config.json"): return
+        with open("config.json", "r", encoding="utf-8") as f:
+            for item in json.load(f):
+                self.add_row(item['name'], item['lower'], item['upper'], item['coord'], item['remark'])
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
