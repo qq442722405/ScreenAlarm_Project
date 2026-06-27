@@ -26,6 +26,320 @@ except ImportError:
     PYGAME_AVAILABLE = False
 
 
+class AlarmSoundPlayer:
+    """报警声音播放器"""
+    def __init__(self):
+        self.is_playing = False
+        self.sound_file = None
+        self.play_thread = None
+        self.stop_flag = False
+        self.volume = 1.0
+        self.current_sound = None
+        self.lock = threading.Lock()
+        self.loop_enabled = True
+        
+        self._load_sound()
+        
+        if PYGAME_AVAILABLE:
+            try:
+                pygame.mixer.init()
+                self.mixer_ready = True
+            except:
+                self.mixer_ready = False
+        else:
+            self.mixer_ready = False
+    
+    def set_loop(self, enabled):
+        self.loop_enabled = enabled
+    
+    def _load_sound(self):
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        sound_path = os.path.join(script_dir, "警报声.mp3")
+        
+        if os.path.exists(sound_path):
+            self.sound_file = sound_path
+            return
+        
+        if getattr(sys, 'frozen', False):
+            exe_dir = os.path.dirname(sys.executable)
+            sound_path = os.path.join(exe_dir, "警报声.mp3")
+            if os.path.exists(sound_path):
+                self.sound_file = sound_path
+                return
+    
+    def play(self):
+        if not self.sound_file or not os.path.exists(self.sound_file):
+            self._play_beep()
+            return
+        if self.is_playing:
+            return
+        
+        with self.lock:
+            self.stop_flag = False
+            self.is_playing = True
+        
+        if PYGAME_AVAILABLE and self.mixer_ready:
+            self._play_with_pygame()
+        else:
+            self._play_beep()
+    
+    def _play_with_pygame(self):
+        def play_loop():
+            try:
+                sound = pygame.mixer.Sound(self.sound_file)
+                self.current_sound = sound
+                sound.set_volume(self.volume)
+                
+                if self.loop_enabled:
+                    while not self.stop_flag:
+                        sound.play()
+                        while pygame.mixer.get_busy() and not self.stop_flag:
+                            pygame.time.wait(50)
+                        if self.stop_flag:
+                            break
+                        time.sleep(0.05)
+                else:
+                    sound.play()
+                    while pygame.mixer.get_busy() and not self.stop_flag:
+                        pygame.time.wait(50)
+            except Exception as e:
+                print(f"播放失败: {e}")
+            finally:
+                with self.lock:
+                    self.is_playing = False
+                    self.current_sound = None
+        
+        self.play_thread = threading.Thread(target=play_loop, daemon=True)
+        self.play_thread.start()
+    
+    def _play_beep(self):
+        def beep_loop():
+            try:
+                import winsound
+                if self.loop_enabled:
+                    while not self.stop_flag:
+                        winsound.Beep(800, 200)
+                        time.sleep(0.1)
+                        if self.stop_flag:
+                            break
+                        winsound.Beep(1000, 200)
+                        time.sleep(0.1)
+                else:
+                    winsound.Beep(800, 200)
+                    time.sleep(0.1)
+                    winsound.Beep(1000, 200)
+            except:
+                pass
+            finally:
+                with self.lock:
+                    self.is_playing = False
+        
+        self.play_thread = threading.Thread(target=beep_loop, daemon=True)
+        self.play_thread.start()
+    
+    def stop(self):
+        with self.lock:
+            self.stop_flag = True
+            self.is_playing = False
+            self.current_sound = None
+        
+        if PYGAME_AVAILABLE and self.mixer_ready:
+            try:
+                pygame.mixer.stop()
+            except:
+                pass
+    
+    def set_volume(self, volume):
+        self.volume = max(0.0, min(1.0, volume))
+        if self.current_sound is not None:
+            try:
+                self.current_sound.set_volume(self.volume)
+            except:
+                pass
+    
+    def is_loaded(self):
+        return self.sound_file is not None and os.path.exists(self.sound_file)
+
+
+class CoordinatePicker(QWidget):
+    """屏幕区域选择器 - 按住左键拖拽选区域，松开自动完成"""
+    coord_selected = Signal(int, int, int, int)
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("选择监控区域")
+        self.setWindowFlags(
+            Qt.WindowStaysOnTopHint | 
+            Qt.FramelessWindowHint | 
+            Qt.Tool
+        )
+        self.setMouseTracking(True)
+        
+        # 修正：在方法内部导入 QApplication
+        from PySide6.QtWidgets import QApplication
+        screens = QApplication.screens()
+        total_rect = screens[0].geometry()
+        for s in screens[1:]:
+            total_rect = total_rect.united(s.geometry())
+        self.total_rect = total_rect
+        self.setGeometry(total_rect)
+        
+        self.screen_pixmap = QPixmap(total_rect.size())
+        self.screen_pixmap.fill(Qt.black)
+        painter = QPainter(self.screen_pixmap)
+        for screen in screens:
+            screen_pix = screen.grabWindow(0)
+            painter.drawPixmap(screen.geometry().topLeft(), screen_pix)
+        painter.end()
+        
+        self.showFullScreen()
+        self.raise_()
+        self.activateWindow()
+        
+        self.is_selecting = False
+        self.start_pos = QPoint()
+        self.end_pos = QPoint()
+        
+        self.label = QLabel("🖱 按住左键拖拽选择监控区域，松开鼠标自动完成", self)
+        self.label.setAlignment(Qt.AlignCenter)
+        self.label.setStyleSheet("""
+            QLabel {
+                color: white;
+                background: rgba(0,0,0,220);
+                padding: 14px 28px;
+                border-radius: 14px;
+                font-size: 18px;
+                font-weight: bold;
+                border: 1px solid rgba(255,255,255,0.2);
+            }
+        """)
+        self.label.adjustSize()
+        self.label.move(
+            (self.width() - self.label.width()) // 2,
+            self.height() - self.label.height() - 80
+        )
+        
+        self.coord_label = QLabel("等待选择...", self)
+        self.coord_label.setAlignment(Qt.AlignCenter)
+        self.coord_label.setStyleSheet("""
+            QLabel {
+                color: #5aa9ff;
+                background: rgba(0,0,0,220);
+                padding: 10px 22px;
+                border-radius: 10px;
+                font-size: 17px;
+                font-weight: bold;
+                border: 1px solid #5aa9ff;
+            }
+        """)
+        self.coord_label.adjustSize()
+        self.coord_label.move(
+            (self.width() - self.coord_label.width()) // 2,
+            60
+        )
+        
+        self.setFocus(Qt.OtherFocusReason)
+    
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        
+        painter.drawPixmap(self.rect(), self.screen_pixmap)
+        painter.fillRect(self.rect(), QColor(0, 0, 0, 120))
+        
+        if self.is_selecting and not self.end_pos.isNull():
+            rect = self._get_current_rect()
+            if rect.width() > 5 and rect.height() > 5:
+                painter.drawPixmap(rect, self.screen_pixmap.copy(rect))
+                
+                pen = QPen(QColor(0, 255, 140), 2)
+                pen.setStyle(Qt.DashLine)
+                painter.setPen(pen)
+                painter.drawRect(rect)
+                
+                painter.setPen(QPen(QColor(0, 255, 140), 2))
+                size = 14
+                painter.drawLine(rect.topLeft(), rect.topLeft() + QPoint(size, 0))
+                painter.drawLine(rect.topLeft(), rect.topLeft() + QPoint(0, size))
+                painter.drawLine(rect.topRight(), rect.topRight() + QPoint(-size, 0))
+                painter.drawLine(rect.topRight(), rect.topRight() + QPoint(0, size))
+                painter.drawLine(rect.bottomLeft(), rect.bottomLeft() + QPoint(size, 0))
+                painter.drawLine(rect.bottomLeft(), rect.bottomLeft() + QPoint(0, -size))
+                painter.drawLine(rect.bottomRight(), rect.bottomRight() + QPoint(-size, 0))
+                painter.drawLine(rect.bottomRight(), rect.bottomRight() + QPoint(0, -size))
+                
+                painter.setPen(Qt.white)
+                painter.setFont(QFont("Arial", 12, QFont.Bold))
+                text_y = rect.y() - 12 if rect.y() > 30 else rect.y() + rect.height() + 25
+                painter.drawText(rect.x() + 10, text_y, f"{rect.width()} × {rect.height()}")
+    
+    def _get_current_rect(self):
+        if self.start_pos.isNull():
+            return QRect()
+        x = min(self.start_pos.x(), self.end_pos.x())
+        y = min(self.start_pos.y(), self.end_pos.y())
+        w = abs(self.end_pos.x() - self.start_pos.x())
+        h = abs(self.end_pos.y() - self.start_pos.y())
+        return QRect(x, y, w, h)
+    
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self.is_selecting = True
+            self.start_pos = event.position().toPoint()
+            self.end_pos = self.start_pos
+            self.label.setText("🖱 拖动鼠标调整区域大小")
+            self.label.adjustSize()
+            self.label.move(
+                (self.width() - self.label.width()) // 2,
+                self.height() - self.label.height() - 80
+            )
+            self.update()
+    
+    def mouseMoveEvent(self, event):
+        if self.is_selecting:
+            self.end_pos = event.position().toPoint()
+            rect = self._get_current_rect()
+            self.coord_label.setText(
+                f"起点: ({self.start_pos.x()}, {self.start_pos.y()})  "
+                f"大小: {rect.width()} × {rect.height()}"
+            )
+            self.coord_label.adjustSize()
+            self.coord_label.move(
+                (self.width() - self.coord_label.width()) // 2,
+                60
+            )
+            self.update()
+    
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.LeftButton and self.is_selecting:
+            self.is_selecting = False
+            self.end_pos = event.position().toPoint()
+            rect = self._get_current_rect()
+            
+            if rect.width() > 20 and rect.height() > 20:
+                self.coord_selected.emit(rect.x(), rect.y(), rect.width(), rect.height())
+                self.close()
+            else:
+                self.label.setText("⚠️ 区域太小，请重新拖拽选择")
+                self.label.adjustSize()
+                self.label.move(
+                    (self.width() - self.label.width()) // 2,
+                    self.height() - self.label.height() - 80
+                )
+                self.start_pos = QPoint()
+                self.end_pos = QPoint()
+                self.update()
+    
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key_Escape:
+            self.coord_selected.emit(0, 0, 0, 0)
+            self.close()
+    
+    def closeEvent(self, event):
+        self.setCursor(Qt.ArrowCursor)
+        event.accept()
+
+
 class MiniWindow(QWidget):
     """小窗口模式 - 置顶显示报警信息"""
     def __init__(self, parent=None):
