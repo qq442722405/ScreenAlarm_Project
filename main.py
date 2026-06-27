@@ -344,7 +344,7 @@ class TrendChartWidget(QWidget):
         super().__init__(parent)
         self.setMinimumHeight(190)
         self.data = []
-        self.max_points = 15  # 修改为15
+        self.max_points = 15
         self.title = "数值趋势"
     
     def set_data(self, data_list, title="数值趋势"):
@@ -552,10 +552,14 @@ class MainWindow(QMainWindow):
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #4a9eff, stop:1 #6ab4ff);
                 border-radius: 6px;
             }
-            QCheckBox { color: #e0e0f0; font-family: "Microsoft YaHei"; }
+            QCheckBox { 
+                color: #e0e0f0; 
+                font-family: "Microsoft YaHei";
+                font-size: 13px;
+            }
             QCheckBox::indicator {
-                width: 17px;
-                height: 17px;
+                width: 20px;
+                height: 20px;
                 border-radius: 4px;
                 background-color: #363650;
                 border: 1px solid #505070;
@@ -605,18 +609,17 @@ class MainWindow(QMainWindow):
         self.row_alarm = {}
         self.row_muted = {}
         
-        # 创建启动画面
-        splash_pixmap = QPixmap(400, 200)
+        # 先创建启动画面（在初始化UI之前）
+        splash_pixmap = QPixmap(450, 250)
         splash_pixmap.fill(QColor("#1e1e2e"))
         painter = QPainter(splash_pixmap)
         painter.setPen(QColor("#4a9eff"))
-        painter.setFont(QFont("Microsoft YaHei", 16, QFont.Bold))
-        painter.drawText(splash_pixmap.rect(), Qt.AlignCenter, "📊 屏幕数字监控报警系统\n正在加载中...")
+        painter.setFont(QFont("Microsoft YaHei", 18, QFont.Bold))
+        painter.drawText(splash_pixmap.rect(), Qt.AlignCenter, 
+                         "📊 屏幕数字监控报警系统\n\n正在加载中...")
         painter.end()
         self.splash = QSplashScreen(splash_pixmap)
         self.splash.show()
-        
-        # 让启动画面显示
         QApplication.processEvents()
         
         self._setup_ui()
@@ -677,6 +680,7 @@ class MainWindow(QMainWindow):
         self.table.setAlternatingRowColors(True)
         self.table.setRowCount(0)
         
+        # 【修改】静音列宽度从45调整为70
         self.table.setColumnWidth(0, 40)
         self.table.setColumnWidth(1, 80)
         self.table.setColumnWidth(2, 200)
@@ -686,7 +690,7 @@ class MainWindow(QMainWindow):
         self.table.setColumnWidth(6, 130)
         self.table.setColumnWidth(7, 85)
         self.table.setColumnWidth(8, 110)
-        self.table.setColumnWidth(9, 45)
+        self.table.setColumnWidth(9, 70)  # 静音列加宽
         
         self.table.horizontalHeader().setStretchLastSection(False) 
         self.table.verticalHeader().setVisible(False)
@@ -889,10 +893,8 @@ class MainWindow(QMainWindow):
         self.alarm_status_label.setStyleSheet("padding: 8px 12px; background-color: #27273d; border-radius: 6px; color: #7a7a9a; border: 1px solid #33334a;")
     
     def on_download_progress(self, value):
-        # 直接更新进度条，不隐藏
         self.download_progress.setVisible(True)
         self.download_progress.setValue(value)
-        # 下载完成时隐藏
         if value >= 100:
             QTimer.singleShot(1000, lambda: self.download_progress.setVisible(False))
     
@@ -1076,7 +1078,6 @@ class MainWindow(QMainWindow):
         if row not in self.value_history:
             self.value_history[row] = []
             
-        # 只保存最新的15个值
         if not self.value_history[row] or self.value_history[row][-1] != value:
             self.value_history[row].append(value)
             if len(self.value_history[row]) > 15:
