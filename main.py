@@ -429,6 +429,9 @@ class MainWindow(QMainWindow):
         self.test_reader = None
         self.reader_loading = False
 
+        # 识别灵敏度 (1~10)
+        self.sensitivity = 5
+
         self.setStyleSheet("""
             QMainWindow { background-color: #1e1e2e; }
             QLabel { color: #e0e0f0; font-family: "Microsoft YaHei"; }
@@ -751,7 +754,23 @@ class MainWindow(QMainWindow):
         self.btn_chart_toggle.setObjectName("btn_chart_toggle")
         self.btn_chart_toggle.clicked.connect(self.toggle_chart)
         btn_layout_bottom.addWidget(self.btn_chart_toggle)
+
+        # ---------- 识别灵敏度滑块 ----------
+        btn_layout_bottom.addWidget(QLabel("灵敏度:"))
+        self.sensitivity_slider = QSlider(Qt.Horizontal)
+        self.sensitivity_slider.setRange(1, 10)
+        self.sensitivity_slider.setValue(5)
+        self.sensitivity_slider.setFixedWidth(100)
+        self.sensitivity_slider.setTickPosition(QSlider.TicksBelow)
+        self.sensitivity_slider.setTickInterval(1)
+        self.sensitivity_slider.valueChanged.connect(self.on_sensitivity_changed)
+        btn_layout_bottom.addWidget(self.sensitivity_slider)
+        self.sensitivity_label = QLabel("5")
+        self.sensitivity_label.setFixedWidth(20)
+        btn_layout_bottom.addWidget(self.sensitivity_label)
+
         btn_layout_bottom.addStretch()
+
         btn_layout_bottom.addWidget(QLabel("音量:"))
         self.volume_slider = QSlider(Qt.Horizontal)
         self.volume_slider.setRange(0, 100)
@@ -762,7 +781,9 @@ class MainWindow(QMainWindow):
         self.volume_label = QLabel("80%")
         self.volume_label.setFixedWidth(40)
         btn_layout_bottom.addWidget(self.volume_label)
+
         btn_layout_bottom.addStretch()
+
         self.btn_save = QPushButton("💾 保存配置")
         self.btn_save.setObjectName("btn_save")
         self.btn_save.clicked.connect(self.save_config)
@@ -785,7 +806,15 @@ class MainWindow(QMainWindow):
         self.table.model().rowsInserted.connect(self._on_rows_inserted)
         self.table.model().rowsRemoved.connect(self._on_rows_removed)
 
-    # ---------- 以下为所有功能方法（保持与之前一致） ----------
+    # ---------- 灵敏度更新 ----------
+    def on_sensitivity_changed(self, value):
+        self.sensitivity = value
+        self.sensitivity_label.setText(str(value))
+        # 如果监控正在运行，更新监控线程的参数
+        if self.monitoring and self.monitor_thread is not None:
+            self.monitor_thread.set_sensitivity(value)
+
+    # ---------- 以下为所有功能方法 ----------
     def clear_alarm_time(self):
         for row in range(self.table.rowCount()):
             if self.table.item(row, 1) is None:
@@ -1089,6 +1118,16 @@ class MainWindow(QMainWindow):
                 screenshot = sct.grab(monitor)
                 img = Image.frombytes("RGB", screenshot.size, screenshot.rgb)
                 img_np = np.array(img)
+
+            # 使用当前的灵敏度参数进行预处理
+            sensitivity = self.sensitivity
+            # 映射参数
+            clip_limit = 1.0 + (sensitivity / 10.0) * 2.0  # 1.0 ~ 3.0
+            block_size = max(3, int(5 + (10 - sensitivity) * 1.5))  # 5~17 奇数
+            if block_size % 2 == 0:
+                block_size += 1
+            c_value = max(1, int(2 + (10 - sensitivity) * 0.5))
+
             def preprocess(img_np):
                 height, width = img_np.shape[:2]
                 scaled = cv2.resize(img_np, (width * 3, height * 3), interpolation=cv2.INTER_LINEAR)
@@ -1096,23 +1135,25 @@ class MainWindow(QMainWindow):
                     gray = cv2.cvtColor(scaled, cv2.COLOR_RGB2GRAY)
                 else:
                     gray = scaled
-                clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+                clahe = cv2.createCLAHE(clipLimit=clip_limit, tileGridSize=(8, 8))
                 enhanced = clahe.apply(gray)
                 if np.mean(enhanced) < 80:
                     enhanced = 255 - enhanced
                     enhanced = clahe.apply(enhanced)
                 kernel_sharpen = np.array([[-1,-1,-1],[-1,9,-1],[-1,-1,-1]])
                 sharpened = cv2.filter2D(enhanced, -1, kernel_sharpen)
-                binary = cv2.adaptiveThreshold(sharpened, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2)
+                binary = cv2.adaptiveThreshold(sharpened, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                                                cv2.THRESH_BINARY, block_size, c_value)
                 kernel = np.ones((2,2), np.uint8)
                 cleaned = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel, iterations=1)
                 cleaned = cv2.morphologyEx(cleaned, cv2.MORPH_OPEN, kernel, iterations=1)
                 return cv2.cvtColor(cleaned, cv2.COLOR_GRAY2RGB)
+
             processed = preprocess(img_np)
             result = self.test_reader.readtext(processed, allowlist='0123456789.-', paragraph=False)
             all_numbers = []
             for bbox, text, confidence in result:
-                if confidence > 0.25:
+                if confidence > 0.2 + (10 - sensitivity) * 0.03:  # 灵敏度高则阈值低
                     numbers = re.findall(r'-?\d+\.?\d*', text)
                     for num_str in numbers:
                         try:
@@ -1170,6 +1211,8 @@ class MainWindow(QMainWindow):
         self.monitor_thread = MonitorThread(monitors)
         self.monitor_thread.set_interval(self.detect_interval)
         self.monitor_thread.set_alarm_loop(self.loop_enabled)
+        # 传递灵敏度
+        self.monitor_thread.set_sensitivity(self.sensitivity)
         self.monitor_thread.value_updated.connect(self.on_value_updated)
         self.monitor_thread.alarm_triggered.connect(self.on_alarm_triggered)
         self.monitor_thread.status_updated.connect(self.on_status_updated)
@@ -1287,6 +1330,7 @@ class MainWindow(QMainWindow):
             'interval': self.interval_spin.value(),
             'loop_enabled': self.loop_enabled,
             'record_interval': self.record_interval_spin.value(),
+            'sensitivity': self.sensitivity,
             'window_geometry': self.saveGeometry().toBase64().data().decode('utf-8'),
             'window_state': self.saveState().toBase64().data().decode('utf-8')
         }
@@ -1356,6 +1400,13 @@ class MainWindow(QMainWindow):
             volume = config.get('volume', 80)
             self.volume_slider.setValue(volume)
             self.on_volume_changed(volume)
+
+            # 加载灵敏度
+            sensitivity = config.get('sensitivity', 5)
+            self.sensitivity = sensitivity
+            self.sensitivity_slider.setValue(sensitivity)
+            self.sensitivity_label.setText(str(sensitivity))
+
             header_state = config.get('header_state')
             if header_state:
                 self.table.horizontalHeader().restoreState(QByteArray.fromBase64(header_state.encode('utf-8')))
