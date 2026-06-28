@@ -699,7 +699,7 @@ class MainWindow(QMainWindow):
                 padding: 2px 6px;
             }
             QLineEdit:focus { border-color: #4a9eff; }
-            /* 移除测试按钮的特殊样式，使其与普通按钮大小一致 */
+            /* 测试按钮使用普通按钮样式，无特殊尺寸限制 */
         """)
 
         self.monitoring = False
@@ -796,30 +796,32 @@ class MainWindow(QMainWindow):
         chart_layout.addWidget(self.trend_chart)
         main_layout.addWidget(self.chart_group, 2)
 
-        # 按钮栏 - 第一排 (主要控制)
+        # ---------- 按钮栏 - 第一排 (主要控制) ----------
         btn_layout_top = QHBoxLayout()
         btn_layout_top.setSpacing(10)
 
+        # 添加、删除、编辑、测试 (删除移到添加旁边)
         self.btn_add = QPushButton("➕ 添加")
         self.btn_add.clicked.connect(self.add_monitor_row)
         btn_layout_top.addWidget(self.btn_add)
-
-        self.btn_edit = QPushButton("✏️ 编辑")
-        self.btn_edit.clicked.connect(self.edit_monitor_point)
-        btn_layout_top.addWidget(self.btn_edit)
-
-        self.btn_test = QPushButton("🎯 测试")
-        # 不再设置特殊对象名，使用默认样式，与编辑按钮一致
-        self.btn_test.clicked.connect(self.test_selected_point)
-        btn_layout_top.addWidget(self.btn_test)
 
         self.btn_delete = QPushButton("🗑 删除")
         self.btn_delete.setObjectName("btn_delete")
         self.btn_delete.clicked.connect(self.delete_monitor_point)
         btn_layout_top.addWidget(self.btn_delete)
 
+        self.btn_edit = QPushButton("✏️ 编辑")
+        self.btn_edit.clicked.connect(self.edit_monitor_point)
+        btn_layout_top.addWidget(self.btn_edit)
+
+        self.btn_test = QPushButton("🎯 测试")
+        # 测试按钮始终可用，无特殊禁用逻辑
+        self.btn_test.clicked.connect(self.test_selected_point)
+        btn_layout_top.addWidget(self.btn_test)
+
         btn_layout_top.addStretch()
 
+        # 开始、停止
         self.btn_start = QPushButton("▶ 开始")
         self.btn_start.setObjectName("btn_start")
         self.btn_start.clicked.connect(self.start_monitor)
@@ -833,27 +835,31 @@ class MainWindow(QMainWindow):
 
         btn_layout_top.addStretch()
 
+        # 清空报警时间
         self.btn_clear_time = QPushButton("🗑 清空报警时间")
         self.btn_clear_time.setObjectName("btn_clear_time")
         self.btn_clear_time.clicked.connect(self.clear_alarm_time)
         btn_layout_top.addWidget(self.btn_clear_time)
 
+        # 小窗口和收起曲线已移到第二排
+        main_layout.addLayout(btn_layout_top)
+
+        # ---------- 按钮栏 - 第二排 (设置与存取) ----------
+        btn_layout_bottom = QHBoxLayout()
+        btn_layout_bottom.setSpacing(10)
+
+        # 小窗口和收起曲线放在最左边
         self.btn_mini = QPushButton("📱 小窗口")
         self.btn_mini.setObjectName("btn_mini")
         self.btn_mini.clicked.connect(self.toggle_mini_mode)
-        btn_layout_top.addWidget(self.btn_mini)
+        btn_layout_bottom.addWidget(self.btn_mini)
 
         self.btn_chart_toggle = QPushButton("📉 收起曲线")
         self.btn_chart_toggle.setObjectName("btn_chart_toggle")
         self.btn_chart_toggle.clicked.connect(self.toggle_chart)
-        btn_layout_top.addWidget(self.btn_chart_toggle)
+        btn_layout_bottom.addWidget(self.btn_chart_toggle)
 
-        main_layout.addLayout(btn_layout_top)
-
-        # 按钮栏 - 第二排 (设置与存取)
-        btn_layout_bottom = QHBoxLayout()
-        btn_layout_bottom.setSpacing(10)
-
+        # 记录间隔
         btn_layout_bottom.addWidget(QLabel("记录间隔:"))
         self.record_interval_spin = QDoubleSpinBox()
         self.record_interval_spin.setRange(1, 1440)  # 最大可以设置24小时(1440分钟)
@@ -867,6 +873,7 @@ class MainWindow(QMainWindow):
 
         btn_layout_bottom.addStretch()
 
+        # 音量
         btn_layout_bottom.addWidget(QLabel("音量:"))
         self.volume_slider = QSlider(Qt.Horizontal)
         self.volume_slider.setRange(0, 100)
@@ -881,6 +888,7 @@ class MainWindow(QMainWindow):
 
         btn_layout_bottom.addStretch()
 
+        # 检测间隔
         btn_layout_bottom.addWidget(QLabel("检测间隔:"))
         self.interval_spin = QDoubleSpinBox()
         self.interval_spin.setRange(0.1, 3600.0)
@@ -893,6 +901,7 @@ class MainWindow(QMainWindow):
 
         btn_layout_bottom.addStretch()
 
+        # 保存、加载
         self.btn_save = QPushButton("💾 保存配置")
         self.btn_save.setObjectName("btn_save")
         self.btn_save.clicked.connect(self.save_config)
