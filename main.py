@@ -340,7 +340,7 @@ class CoordinatePicker(QWidget):
 
 
 class MiniWindow(QWidget):
-    """精简小窗口 - 报警信息和切换按钮同一行，无静音"""
+    """重新设计的小窗口 - 更精致、紧凑"""
     def __init__(self, parent=None):
         super().__init__(parent)
         self.parent_window = parent
@@ -350,41 +350,40 @@ class MiniWindow(QWidget):
             Qt.FramelessWindowHint |
             Qt.Tool
         )
-        self.setFixedSize(200, 50)
+        self.setFixedSize(220, 60)
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setStyleSheet("""
             QWidget {
-                background-color: rgba(30, 30, 46, 0.96);
+                background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                                  stop:0 rgba(35, 35, 55, 0.97),
+                                                  stop:1 rgba(25, 25, 40, 0.97));
                 border: 2px solid #4a9eff;
-                border-radius: 12px;
+                border-radius: 14px;
+                box-shadow: 0 4px 20px rgba(0,0,0,0.5);
             }
             QLabel {
                 color: #e0e0f0;
                 font-family: "Microsoft YaHei";
-                font-size: 14px;
+                font-size: 16px;
                 font-weight: bold;
             }
             QPushButton {
-                background-color: #363650;
+                background-color: #3a5a7a;
                 color: #e0e0f0;
                 border: none;
-                border-radius: 6px;
-                padding: 4px 12px;
+                border-radius: 8px;
+                padding: 6px 16px;
                 font-weight: bold;
                 font-family: "Microsoft YaHei";
-                font-size: 12px;
-                min-height: 22px;
+                font-size: 13px;
+                min-height: 24px;
             }
-            QPushButton:hover { background-color: #464668; }
-            QPushButton#btn_restore_mini {
-                background-color: #3a5a7a;
-            }
-            QPushButton#btn_restore_mini:hover { background-color: #4a6a8a; }
+            QPushButton:hover { background-color: #4a6a8a; }
         """)
         
         layout = QHBoxLayout(self)
-        layout.setSpacing(8)
-        layout.setContentsMargins(10, 6, 10, 6)
+        layout.setSpacing(10)
+        layout.setContentsMargins(14, 8, 14, 8)
         
         self.alarm_label = QLabel("✅ 正常")
         self.alarm_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
@@ -392,8 +391,6 @@ class MiniWindow(QWidget):
         layout.addWidget(self.alarm_label, 1)
         
         self.btn_restore = QPushButton("切换")
-        self.btn_restore.setObjectName("btn_restore_mini")
-        self.btn_restore.setFixedSize(50, 28)
         self.btn_restore.clicked.connect(self.restore_window)
         layout.addWidget(self.btn_restore)
         
@@ -547,7 +544,6 @@ class MainWindow(QMainWindow):
         self.setWindowFlags(self.windowFlags() | Qt.WindowStaysOnTopHint)
         self.resize(1200, 750)
         self.mini_window = None
-        self.mini_muted = False
         self.chart_visible = True
         
         self.setStyleSheet("""
@@ -614,6 +610,10 @@ class MainWindow(QMainWindow):
                 background-color: #4a4a6a;
             }
             QPushButton#btn_chart_toggle:hover { background-color: #5a5a7a; }
+            QPushButton#btn_clear_time {
+                background-color: #7a5a4a;
+            }
+            QPushButton#btn_clear_time:hover { background-color: #9a6a5a; }
             QFrame#hint_frame {
                 background-color: #2a2a42;
                 border-radius: 8px;
@@ -698,9 +698,11 @@ class MainWindow(QMainWindow):
             QLineEdit:focus { border-color: #4a9eff; }
             QPushButton#btn_pick_reselect {
                 background-color: #4a6a5a;
-                padding: 2px 8px;
+                padding: 4px 8px;
                 font-size: 11px;
                 border-radius: 4px;
+                min-width: 40px;
+                min-height: 20px;
             }
             QPushButton#btn_pick_reselect:hover { background-color: #5a7a6a; }
         """)
@@ -765,12 +767,12 @@ class MainWindow(QMainWindow):
         self.download_progress.setValue(0)
         main_layout.addWidget(self.download_progress)
         
-        # 监控表格 (11列: 启用, 名称, 备注, 当前值, 下限, 上限, 坐标, 状态, 报警时间, 静音, 拾取)
+        # 监控表格 (11列: 启用, 名称, 备注, 当前值, 下限, 上限, 坐标, 状态, 报警时间, 静音, 区域)
         self.table = QTableWidget()
         self.table.setColumnCount(11)
         self.table.setHorizontalHeaderLabels([
             "启用", "名称", "备注", "当前值", "下限", "上限", 
-            "坐标 (X,Y,W,H)", "状态", "报警时间", "🔇 静音", "拾取"
+            "坐标 (X,Y,W,H)", "状态", "报警时间", "🔇 静音", "区域"
         ])
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.setAlternatingRowColors(True)
@@ -786,7 +788,7 @@ class MainWindow(QMainWindow):
         self.table.setColumnWidth(7, 85)
         self.table.setColumnWidth(8, 110)
         self.table.setColumnWidth(9, 60)
-        self.table.setColumnWidth(10, 60)
+        self.table.setColumnWidth(10, 70)   # 加宽，防止按钮溢出
         self.table.horizontalHeader().setStretchLastSection(False) 
         self.table.verticalHeader().setVisible(False)
         main_layout.addWidget(self.table, 3)
@@ -830,6 +832,12 @@ class MainWindow(QMainWindow):
         btn_layout.addWidget(self.btn_stop)
         
         btn_layout.addStretch()
+        
+        # 清空报警时间按钮
+        self.btn_clear_time = QPushButton("🗑 清空报警时间")
+        self.btn_clear_time.setObjectName("btn_clear_time")
+        self.btn_clear_time.clicked.connect(self.clear_alarm_time)
+        btn_layout.addWidget(self.btn_clear_time)
         
         # 小窗口切换按钮
         self.btn_mini = QPushButton("📱 小窗口模式")
@@ -891,6 +899,18 @@ class MainWindow(QMainWindow):
         
         self.table.model().rowsInserted.connect(self._on_rows_inserted)
         self.table.model().rowsRemoved.connect(self._on_rows_removed)
+    
+    def clear_alarm_time(self):
+        """清空所有报警时间"""
+        for row in range(self.table.rowCount()):
+            if self.table.item(row, 1) is None:
+                continue
+            self.table.setItem(row, 8, QTableWidgetItem("--"))
+            # 居中
+            it = self.table.item(row, 8)
+            if it:
+                it.setTextAlignment(Qt.AlignCenter)
+        self.status_label.setText("状态: 已清空报警时间")
     
     def toggle_chart(self):
         self.chart_visible = not self.chart_visible
@@ -1098,7 +1118,7 @@ class MainWindow(QMainWindow):
         self.row_muted[row] = False
         mute_check.stateChanged.connect(lambda state, r=row: self._on_mute_changed(r, state))
         
-        # 拾取按钮（文字改为"拾取"）
+        # 拾取按钮（文字改为"区域"？但功能是拾取，保留文字"拾取"更明确，列标题已改为"区域"）
         pick_btn = QPushButton("拾取")
         pick_btn.setObjectName("btn_pick_reselect")
         pick_btn.clicked.connect(lambda checked, r=row: self.reselect_point(r))
