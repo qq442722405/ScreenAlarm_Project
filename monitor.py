@@ -35,6 +35,8 @@ class MonitorThread(QThread):
         self.alarm_loop_enabled = True
         self.alarm_status = {}
         self.manual_clear = False
+        # 灵敏度默认 5
+        self.sensitivity = 5
 
     def set_interval(self, ms):
         self.interval_ms = max(100, ms)
@@ -48,6 +50,9 @@ class MonitorThread(QThread):
         if reader is not None:
             self.ocr_ready = True
             self.ocr_status.emit("就绪 ✅", True)
+
+    def set_sensitivity(self, value):
+        self.sensitivity = max(1, min(10, value))
 
     def stop(self):
         self.running = False
@@ -108,21 +113,32 @@ class MonitorThread(QThread):
             return False
 
     def _preprocess_image(self, img_np):
+        """使用当前灵敏度参数进行预处理"""
         try:
+            sens = self.sensitivity
+            # 映射参数：灵敏度越高，对比度增强越强，块越小（更敏感）
+            clip_limit = 1.0 + (sens / 10.0) * 2.0  # 1.0~3.0
+            # block_size 必须为奇数，范围 5~17
+            block_size = max(3, int(5 + (10 - sens) * 1.5))
+            if block_size % 2 == 0:
+                block_size += 1
+            c_value = max(1, int(2 + (10 - sens) * 0.5))
+
             height, width = img_np.shape[:2]
             scaled = cv2.resize(img_np, (width * 3, height * 3), interpolation=cv2.INTER_LINEAR)
             if len(scaled.shape) == 3:
                 gray = cv2.cvtColor(scaled, cv2.COLOR_RGB2GRAY)
             else:
                 gray = scaled
-            clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+            clahe = cv2.createCLAHE(clipLimit=clip_limit, tileGridSize=(8, 8))
             enhanced = clahe.apply(gray)
             if np.mean(enhanced) < 80:
                 enhanced = 255 - enhanced
                 enhanced = clahe.apply(enhanced)
             kernel_sharpen = np.array([[-1,-1,-1],[-1,9,-1],[-1,-1,-1]])
             sharpened = cv2.filter2D(enhanced, -1, kernel_sharpen)
-            binary = cv2.adaptiveThreshold(sharpened, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2)
+            binary = cv2.adaptiveThreshold(sharpened, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                                            cv2.THRESH_BINARY, block_size, c_value)
             kernel = np.ones((2,2), np.uint8)
             cleaned = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel, iterations=1)
             cleaned = cv2.morphologyEx(cleaned, cv2.MORPH_OPEN, kernel, iterations=1)
@@ -144,10 +160,16 @@ class MonitorThread(QThread):
             img = Image.frombytes("RGB", screenshot.size, screenshot.rgb)
             img_np = np.array(img)
             processed = self._preprocess_image(img_np)
-            result = self.reader.readtext(processed, allowlist='0123456789.-', paragraph=False, width_ths=0.5, height_ths=0.5, text_threshold=0.4, low_text=0.2)
+
+            # 根据灵敏度调整 text_threshold（灵敏度高则阈值低）
+            text_thr = 0.3 + (10 - self.sensitivity) * 0.03  # 0.3~0.57
+
+            result = self.reader.readtext(processed, allowlist='0123456789.-',
+                                          paragraph=False, width_ths=0.5, height_ths=0.5,
+                                          text_threshold=text_thr, low_text=0.2)
             all_numbers = []
             for bbox, text, confidence in result:
-                if confidence > 0.25:
+                if confidence > 0.2:
                     numbers = re.findall(r'-?\d+\.?\d*', text)
                     for num_str in numbers:
                         try:
@@ -156,9 +178,11 @@ class MonitorThread(QThread):
                         except:
                             pass
             if len(all_numbers) == 0:
-                result2 = self.reader.readtext(img_np, allowlist='0123456789.-', paragraph=False)
+                # 第二次尝试：不放大图像，直接读原图
+                result2 = self.reader.readtext(img_np, allowlist='0123456789.-', paragraph=False,
+                                               text_threshold=text_thr)
                 for bbox, text, confidence in result2:
-                    if confidence > 0.25:
+                    if confidence > 0.2:
                         numbers = re.findall(r'-?\d+\.?\d*', text)
                         for num_str in numbers:
                             try:
