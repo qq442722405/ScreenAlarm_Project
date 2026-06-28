@@ -543,7 +543,7 @@ class MainWindow(QMainWindow):
         self.mini_window = None
         self.chart_visible = True
 
-        # 记录间隔定时器相关
+        # 记录间隔定时器相关（自动由监控控制启停）
         self.record_timer = QTimer()
         self.record_timer.timeout.connect(self.record_current_value)
         self.recording = False
@@ -617,10 +617,6 @@ class MainWindow(QMainWindow):
                 background-color: #7a5a4a;
             }
             QPushButton#btn_clear_time:hover { background-color: #9a6a5a; }
-            QPushButton#btn_record_toggle {
-                background-color: #3a6a6a;
-            }
-            QPushButton#btn_record_toggle:hover { background-color: #4a7a7a; }
             QFrame#hint_frame {
                 background-color: #2a2a42;
                 border-radius: 8px;
@@ -703,15 +699,7 @@ class MainWindow(QMainWindow):
                 padding: 2px 6px;
             }
             QLineEdit:focus { border-color: #4a9eff; }
-            QPushButton#btn_test {
-                background-color: #5a5a7a;
-                padding: 2px 6px;
-                font-size: 11px;
-                border-radius: 4px;
-                min-width: 32px;
-                min-height: 18px;
-            }
-            QPushButton#btn_test:hover { background-color: #6a6a8a; }
+            /* 移除测试按钮的特殊样式，使其与普通按钮大小一致 */
         """)
 
         self.monitoring = False
@@ -821,7 +809,7 @@ class MainWindow(QMainWindow):
         btn_layout_top.addWidget(self.btn_edit)
 
         self.btn_test = QPushButton("🎯 测试")
-        self.btn_test.setObjectName("btn_test")
+        # 不再设置特殊对象名，使用默认样式，与编辑按钮一致
         self.btn_test.clicked.connect(self.test_selected_point)
         btn_layout_top.addWidget(self.btn_test)
 
@@ -875,10 +863,7 @@ class MainWindow(QMainWindow):
         self.record_interval_spin.valueChanged.connect(self.set_record_interval)
         btn_layout_bottom.addWidget(self.record_interval_spin)
 
-        self.btn_record_toggle = QPushButton("▶ 开始记录")
-        self.btn_record_toggle.setObjectName("btn_record_toggle")
-        self.btn_record_toggle.clicked.connect(self.toggle_recording)
-        btn_layout_bottom.addWidget(self.btn_record_toggle)
+        # 已移除“开始记录”按钮，记录由监控自动控制
 
         btn_layout_bottom.addStretch()
 
@@ -1193,23 +1178,13 @@ class MainWindow(QMainWindow):
             self.table.removeRow(row)
             self.status_label.setText("状态: 已删除")
 
-    # ---------- 定时记录功能 ----------
+    # ---------- 定时记录功能（由监控自动控制） ----------
     def set_record_interval(self, value):
         self.record_interval = value * 60  # 转换为秒
         if self.recording:
-            self.record_timer.start(int(self.record_interval * 1000))
-
-    def toggle_recording(self):
-        if not self.recording:
-            self.recording = True
-            self.btn_record_toggle.setText("⏹ 停止记录")
-            self.record_timer.start(int(self.record_interval * 1000))
-            self.status_label.setText("状态: 开始定时记录")
-        else:
-            self.recording = False
-            self.btn_record_toggle.setText("▶ 开始记录")
+            # 如果正在记录，重启定时器以应用新间隔
             self.record_timer.stop()
-            self.status_label.setText("状态: 停止记录")
+            self.record_timer.start(int(self.record_interval * 1000))
 
     def record_current_value(self):
         """定时记录当前所有监控点的值，更新图表"""
@@ -1388,7 +1363,6 @@ class MainWindow(QMainWindow):
 
         # 自动启动记录定时器
         self.recording = True
-        self.btn_record_toggle.setText("⏹ 停止记录")
         self.record_timer.start(int(self.record_interval * 1000))
 
     def stop_monitor(self):
@@ -1396,9 +1370,9 @@ class MainWindow(QMainWindow):
             self.monitor_thread.stop()
             self.monitor_thread.wait()
 
+        # 自动停止记录定时器
         self.recording = False
         self.record_timer.stop()
-        self.btn_record_toggle.setText("▶ 开始记录")
 
         self.monitoring = False
         self.btn_start.setEnabled(True)
