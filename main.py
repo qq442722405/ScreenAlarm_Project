@@ -716,9 +716,9 @@ class MainWindow(QMainWindow):
             QPushButton#btn_test {
                 background-color: #5a5a7a;
                 padding: 2px 6px;
-                font-size: 10px;
+                font-size: 11px;
                 border-radius: 4px;
-                min-width: 28px;
+                min-width: 32px;
                 min-height: 18px;
             }
             QPushButton#btn_test:hover { background-color: #6a6a8a; }
@@ -789,7 +789,7 @@ class MainWindow(QMainWindow):
         self.table.setColumnCount(11)
         self.table.setHorizontalHeaderLabels([
             "启用", "名称", "备注", "当前值", "下限", "上限", 
-            "坐标 (X,Y,W,H)", "状态", "报警时间", "🔇 静音", "拾取"
+            "坐标 (X,Y,W,H)", "状态", "报警时间", "🔇 静音", "操作"
         ])
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.setAlternatingRowColors(True)
@@ -805,7 +805,9 @@ class MainWindow(QMainWindow):
         self.table.setColumnWidth(7, 85)
         self.table.setColumnWidth(8, 110)
         self.table.setColumnWidth(9, 55)
-        self.table.setColumnWidth(10, 90)   # 为拾取+测试预留宽度
+        # 增加拾取和测试按钮列的宽度，确保不被裁切
+        self.table.setColumnWidth(10, 120)
+        
         self.table.horizontalHeader().setStretchLastSection(False) 
         self.table.verticalHeader().setVisible(False)
         main_layout.addWidget(self.table, 3)
@@ -818,84 +820,90 @@ class MainWindow(QMainWindow):
         chart_layout.addWidget(self.trend_chart)
         main_layout.addWidget(self.chart_group, 2)
         
-        # 按钮栏
-        btn_layout = QHBoxLayout()
-        btn_layout.setSpacing(10)
+        # 按钮栏 - 第一排 (主要控制)
+        btn_layout_top = QHBoxLayout()
+        btn_layout_top.setSpacing(10)
         
         self.btn_add = QPushButton("➕ 添加监控点")
         self.btn_add.clicked.connect(self.add_monitor_row)
-        btn_layout.addWidget(self.btn_add)
+        btn_layout_top.addWidget(self.btn_add)
         
         self.btn_edit = QPushButton("✏️ 编辑区域")
         self.btn_edit.clicked.connect(self.edit_monitor_point)
-        btn_layout.addWidget(self.btn_edit)
+        btn_layout_top.addWidget(self.btn_edit)
         
         self.btn_delete = QPushButton("🗑 删除")
         self.btn_delete.setObjectName("btn_delete")
         self.btn_delete.clicked.connect(self.delete_monitor_point)
-        btn_layout.addWidget(self.btn_delete)
+        btn_layout_top.addWidget(self.btn_delete)
         
-        btn_layout.addStretch()
+        btn_layout_top.addStretch()
         
         self.btn_start = QPushButton("▶ 开始监控")
         self.btn_start.setObjectName("btn_start")
         self.btn_start.clicked.connect(self.start_monitor)
-        btn_layout.addWidget(self.btn_start)
+        btn_layout_top.addWidget(self.btn_start)
         
         self.btn_stop = QPushButton("⏹ 停止监控")
         self.btn_stop.setObjectName("btn_stop")
         self.btn_stop.clicked.connect(self.stop_monitor)
         self.btn_stop.setEnabled(False)
-        btn_layout.addWidget(self.btn_stop)
+        btn_layout_top.addWidget(self.btn_stop)
         
-        btn_layout.addStretch()
+        btn_layout_top.addStretch()
         
-        # 清空报警时间
         self.btn_clear_time = QPushButton("🗑 清空报警时间")
         self.btn_clear_time.setObjectName("btn_clear_time")
         self.btn_clear_time.clicked.connect(self.clear_alarm_time)
-        btn_layout.addWidget(self.btn_clear_time)
+        btn_layout_top.addWidget(self.btn_clear_time)
         
-        # 小窗口切换
         self.btn_mini = QPushButton("📱 小窗口模式")
         self.btn_mini.setObjectName("btn_mini")
         self.btn_mini.clicked.connect(self.toggle_mini_mode)
-        btn_layout.addWidget(self.btn_mini)
+        btn_layout_top.addWidget(self.btn_mini)
         
-        # 趋势曲线折叠
         self.btn_chart_toggle = QPushButton("📉 收起曲线")
         self.btn_chart_toggle.setObjectName("btn_chart_toggle")
         self.btn_chart_toggle.clicked.connect(self.toggle_chart)
-        btn_layout.addWidget(self.btn_chart_toggle)
+        btn_layout_top.addWidget(self.btn_chart_toggle)
         
-        # 记录间隔和开关
-        btn_layout.addWidget(QLabel("记录间隔:"))
+        main_layout.addLayout(btn_layout_top)
+        
+        # 按钮栏 - 第二排 (设置与存取)
+        btn_layout_bottom = QHBoxLayout()
+        btn_layout_bottom.setSpacing(10)
+        
+        btn_layout_bottom.addWidget(QLabel("记录间隔:"))
         self.record_interval_spin = QDoubleSpinBox()
         self.record_interval_spin.setRange(1, 3600)
         self.record_interval_spin.setValue(5)
         self.record_interval_spin.setSuffix(" 秒")
         self.record_interval_spin.setFixedWidth(90)
         self.record_interval_spin.valueChanged.connect(self.set_record_interval)
-        btn_layout.addWidget(self.record_interval_spin)
+        btn_layout_bottom.addWidget(self.record_interval_spin)
         
         self.btn_record_toggle = QPushButton("▶ 开始记录")
         self.btn_record_toggle.setObjectName("btn_record_toggle")
         self.btn_record_toggle.clicked.connect(self.toggle_recording)
-        btn_layout.addWidget(self.btn_record_toggle)
+        btn_layout_bottom.addWidget(self.btn_record_toggle)
         
-        btn_layout.addWidget(QLabel("音量:"))
+        btn_layout_bottom.addStretch()
+        
+        btn_layout_bottom.addWidget(QLabel("音量:"))
         self.volume_slider = QSlider(Qt.Horizontal)
         self.volume_slider.setRange(0, 100)
         self.volume_slider.setValue(80)
         self.volume_slider.setFixedWidth(90)
         self.volume_slider.valueChanged.connect(self.on_volume_changed)
-        btn_layout.addWidget(self.volume_slider)
+        btn_layout_bottom.addWidget(self.volume_slider)
         
         self.volume_label = QLabel("80%")
         self.volume_label.setFixedWidth(40)
-        btn_layout.addWidget(self.volume_label)
+        btn_layout_bottom.addWidget(self.volume_label)
         
-        btn_layout.addWidget(QLabel("检测间隔:"))
+        btn_layout_bottom.addStretch()
+        
+        btn_layout_bottom.addWidget(QLabel("检测间隔:"))
         self.interval_spin = QDoubleSpinBox()
         self.interval_spin.setRange(0.1, 3600.0)
         self.interval_spin.setSingleStep(0.5)
@@ -903,18 +911,20 @@ class MainWindow(QMainWindow):
         self.interval_spin.setValue(0.5)
         self.interval_spin.setFixedWidth(80)
         self.interval_spin.valueChanged.connect(self.on_interval_changed)
-        btn_layout.addWidget(self.interval_spin)
+        btn_layout_bottom.addWidget(self.interval_spin)
+        
+        btn_layout_bottom.addStretch()
         
         self.btn_save = QPushButton("💾 保存配置")
         self.btn_save.setObjectName("btn_save")
         self.btn_save.clicked.connect(self.save_config)
-        btn_layout.addWidget(self.btn_save)
+        btn_layout_bottom.addWidget(self.btn_save)
         
         self.btn_load = QPushButton("📂 加载配置")
         self.btn_load.clicked.connect(self.load_config_dialog)
-        btn_layout.addWidget(self.btn_load)
+        btn_layout_bottom.addWidget(self.btn_load)
         
-        main_layout.addLayout(btn_layout)
+        main_layout.addLayout(btn_layout_bottom)
         
         # 状态栏
         status_layout = QHBoxLayout()
@@ -1030,11 +1040,11 @@ class MainWindow(QMainWindow):
             if mute_widget and isinstance(mute_widget, QCheckBox):
                 self.row_muted[row] = mute_widget.isChecked()
                 mute_widget.stateChanged.connect(lambda state, r=row: self._on_mute_changed(r, state))
-            # 拾取和测试按钮放在一个widget中
+            
             btn_widget = QWidget()
             btn_layout = QHBoxLayout(btn_widget)
-            btn_layout.setSpacing(2)
-            btn_layout.setContentsMargins(0, 0, 0, 0)
+            btn_layout.setSpacing(6)
+            btn_layout.setContentsMargins(4, 2, 4, 2)
             btn_layout.setAlignment(Qt.AlignCenter)
             
             pick_btn = QPushButton("拾取")
@@ -1155,11 +1165,10 @@ class MainWindow(QMainWindow):
         self.row_muted[row] = False
         mute_check.stateChanged.connect(lambda state, r=row: self._on_mute_changed(r, state))
         
-        # 拾取+测试按钮
         btn_widget = QWidget()
         btn_layout = QHBoxLayout(btn_widget)
-        btn_layout.setSpacing(2)
-        btn_layout.setContentsMargins(0, 0, 0, 0)
+        btn_layout.setSpacing(6)
+        btn_layout.setContentsMargins(4, 2, 4, 2)
         btn_layout.setAlignment(Qt.AlignCenter)
         
         pick_btn = QPushButton("拾取")
@@ -1554,11 +1563,10 @@ class MainWindow(QMainWindow):
                 self.row_muted[row] = item.get('muted', False)
                 mute_check.stateChanged.connect(lambda state, r=row: self._on_mute_changed(r, state))
                 
-                # 拾取+测试按钮
                 btn_widget = QWidget()
                 btn_layout = QHBoxLayout(btn_widget)
-                btn_layout.setSpacing(2)
-                btn_layout.setContentsMargins(0, 0, 0, 0)
+                btn_layout.setSpacing(6)
+                btn_layout.setContentsMargins(4, 2, 4, 2)
                 btn_layout.setAlignment(Qt.AlignCenter)
                 
                 pick_btn = QPushButton("拾取")
