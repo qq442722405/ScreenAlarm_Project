@@ -340,7 +340,7 @@ class CoordinatePicker(QWidget):
 
 
 class MiniWindow(QWidget):
-    """小窗口模式 - 报警框和按钮框样式统一"""
+    """精简小窗口 - 报警信息和切换按钮在同一行"""
     def __init__(self, parent=None):
         super().__init__(parent)
         self.parent_window = parent
@@ -350,7 +350,7 @@ class MiniWindow(QWidget):
             Qt.FramelessWindowHint |
             Qt.Tool
         )
-        self.setFixedSize(280, 130)
+        self.setFixedSize(260, 50)
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setStyleSheet("""
             QWidget {
@@ -361,17 +361,19 @@ class MiniWindow(QWidget):
             QLabel {
                 color: #e0e0f0;
                 font-family: "Microsoft YaHei";
+                font-size: 14px;
+                font-weight: bold;
             }
             QPushButton {
                 background-color: #363650;
                 color: #e0e0f0;
                 border: none;
                 border-radius: 6px;
-                padding: 6px 12px;
+                padding: 4px 12px;
                 font-weight: bold;
                 font-family: "Microsoft YaHei";
                 font-size: 12px;
-                min-height: 24px;
+                min-height: 22px;
             }
             QPushButton:hover { background-color: #464668; }
             QPushButton#btn_mute_mini {
@@ -386,56 +388,29 @@ class MiniWindow(QWidget):
                 background-color: #3a5a7a;
             }
             QPushButton#btn_restore_mini:hover { background-color: #4a6a8a; }
-            QFrame {
-                background-color: rgba(54, 54, 80, 0.3);
-                border: 1px solid #4a9eff;
-                border-radius: 8px;
-                padding: 4px;
-            }
-            QFrame#alarm_frame {
-                background-color: rgba(54, 54, 80, 0.2);
-            }
-            QFrame#btn_frame {
-                background-color: rgba(54, 54, 80, 0.3);
-            }
         """)
         
-        # 主布局
-        main_layout = QVBoxLayout(self)
-        main_layout.setSpacing(6)
-        main_layout.setContentsMargins(8, 6, 8, 6)
+        layout = QHBoxLayout(self)
+        layout.setSpacing(8)
+        layout.setContentsMargins(10, 6, 10, 6)
         
-        # 报警框（带边框，与按钮框风格统一）
-        alarm_frame = QFrame()
-        alarm_frame.setObjectName("alarm_frame")
-        alarm_layout = QVBoxLayout(alarm_frame)
-        alarm_layout.setContentsMargins(4, 4, 4, 4)
         self.alarm_label = QLabel("✅ 正常")
-        self.alarm_label.setAlignment(Qt.AlignCenter)
-        self.alarm_label.setStyleSheet("font-size: 16px; font-weight: bold; color: #4ade80; padding: 2px 0;")
-        alarm_layout.addWidget(self.alarm_label)
-        main_layout.addWidget(alarm_frame)
+        self.alarm_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        self.alarm_label.setStyleSheet("color: #4ade80; padding: 0px;")
+        layout.addWidget(self.alarm_label, 1)  # 占据剩余空间
         
-        # 按钮框
-        btn_frame = QFrame()
-        btn_frame.setObjectName("btn_frame")
-        btn_layout = QHBoxLayout(btn_frame)
-        btn_layout.setSpacing(8)
-        btn_layout.setContentsMargins(6, 4, 6, 4)
-        
-        self.btn_mute = QPushButton("🔇 静音")
+        self.btn_mute = QPushButton("🔇")
         self.btn_mute.setObjectName("btn_mute_mini")
+        self.btn_mute.setFixedSize(32, 28)
         self.btn_mute.clicked.connect(self.toggle_mute)
-        btn_layout.addWidget(self.btn_mute)
+        layout.addWidget(self.btn_mute)
         
         self.btn_restore = QPushButton("切换")
         self.btn_restore.setObjectName("btn_restore_mini")
+        self.btn_restore.setFixedSize(50, 28)
         self.btn_restore.clicked.connect(self.restore_window)
-        btn_layout.addWidget(self.btn_restore)
+        layout.addWidget(self.btn_restore)
         
-        main_layout.addWidget(btn_frame)
-        
-        # 拖动窗口
         self.drag_pos = None
         self.is_muted = False
     
@@ -453,25 +428,25 @@ class MiniWindow(QWidget):
         self.drag_pos = None
     
     def set_alarm(self, name):
-        if len(name) > 10:
-            name = name[:10] + "..."
+        if len(name) > 12:
+            name = name[:12] + "..."
         self.alarm_label.setText(f"⚠️ {name}")
-        self.alarm_label.setStyleSheet("font-size: 16px; font-weight: bold; color: #ff6b6b; padding: 2px 0;")
+        self.alarm_label.setStyleSheet("color: #ff6b6b; padding: 0px;")
     
     def clear_alarm(self):
         self.alarm_label.setText("✅ 正常")
-        self.alarm_label.setStyleSheet("font-size: 16px; font-weight: bold; color: #4ade80; padding: 2px 0;")
+        self.alarm_label.setStyleSheet("color: #4ade80; padding: 0px;")
     
     def toggle_mute(self):
         self.is_muted = not self.is_muted
         if self.is_muted:
-            self.btn_mute.setText("🔊 取消静音")
+            self.btn_mute.setText("🔊")
             self.btn_mute.setObjectName("btn_mute_mini muted")
-            self.btn_mute.setStyleSheet("background-color: #2a5a3a; color: white; border: none; border-radius: 6px; padding: 6px 12px; font-size: 12px;")
+            self.btn_mute.setStyleSheet("background-color: #2a5a3a; color: white; border: none; border-radius: 6px; padding: 4px 8px; font-size: 12px;")
         else:
-            self.btn_mute.setText("🔇 静音")
+            self.btn_mute.setText("🔇")
             self.btn_mute.setObjectName("btn_mute_mini")
-            self.btn_mute.setStyleSheet("background-color: #b03a3a; color: white; border: none; border-radius: 6px; padding: 6px 12px; font-size: 12px;")
+            self.btn_mute.setStyleSheet("background-color: #b03a3a; color: white; border: none; border-radius: 6px; padding: 4px 8px; font-size: 12px;")
         self.parent_window.toggle_mini_mute(self.is_muted)
     
     def restore_window(self):
@@ -598,6 +573,7 @@ class MainWindow(QMainWindow):
         self.resize(1200, 750)
         self.mini_window = None
         self.mini_muted = False
+        self.chart_visible = True  # 趋势曲线是否可见
         
         self.setStyleSheet("""
             QMainWindow { background-color: #1e1e2e; }
@@ -612,7 +588,7 @@ class MainWindow(QMainWindow):
                 border: 1px solid #33334a;
                 border-radius: 8px;
             }
-            QTableWidget::item { padding: 6px; }
+            QTableWidget::item { padding: 6px; text-align: center; }
             QHeaderView::section {
                 background-color: #2a2a42;
                 color: #e0e0f0;
@@ -659,6 +635,10 @@ class MainWindow(QMainWindow):
                 background-color: #4a6a8a;
             }
             QPushButton#btn_mini:hover { background-color: #5a7a9a; }
+            QPushButton#btn_chart_toggle {
+                background-color: #4a4a6a;
+            }
+            QPushButton#btn_chart_toggle:hover { background-color: #5a5a7a; }
             QFrame#hint_frame {
                 background-color: #2a2a42;
                 border-radius: 8px;
@@ -741,6 +721,13 @@ class MainWindow(QMainWindow):
                 padding: 2px 6px;
             }
             QLineEdit:focus { border-color: #4a9eff; }
+            QPushButton#btn_reselect {
+                background-color: #4a6a5a;
+                padding: 2px 8px;
+                font-size: 11px;
+                border-radius: 4px;
+            }
+            QPushButton#btn_reselect:hover { background-color: #5a7a6a; }
         """)
         
         self.monitoring = False
@@ -803,12 +790,12 @@ class MainWindow(QMainWindow):
         self.download_progress.setValue(0)
         main_layout.addWidget(self.download_progress)
         
-        # 监控表格
+        # 监控表格 (11列: 启用, 名称, 备注, 当前值, 下限, 上限, 坐标, 状态, 报警时间, 静音, 重选)
         self.table = QTableWidget()
-        self.table.setColumnCount(10)
+        self.table.setColumnCount(11)
         self.table.setHorizontalHeaderLabels([
             "启用", "名称", "备注", "当前值", "下限", "上限", 
-            "坐标 (X,Y,W,H)", "状态", "报警时间", "🔇 静音"
+            "坐标 (X,Y,W,H)", "状态", "报警时间", "🔇 静音", "重选"
         ])
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.setAlternatingRowColors(True)
@@ -823,19 +810,19 @@ class MainWindow(QMainWindow):
         self.table.setColumnWidth(6, 130)
         self.table.setColumnWidth(7, 85)
         self.table.setColumnWidth(8, 110)
-        self.table.setColumnWidth(9, 70)
-        
+        self.table.setColumnWidth(9, 60)
+        self.table.setColumnWidth(10, 60)
         self.table.horizontalHeader().setStretchLastSection(False) 
         self.table.verticalHeader().setVisible(False)
         main_layout.addWidget(self.table, 3)
         
         # 趋势曲线
-        chart_group = QGroupBox("📈 数值趋势曲线")
-        chart_layout = QVBoxLayout(chart_group)
+        self.chart_group = QGroupBox("📈 数值趋势曲线")
+        chart_layout = QVBoxLayout(self.chart_group)
         chart_layout.setContentsMargins(12, 18, 12, 12)
         self.trend_chart = TrendChartWidget()
         chart_layout.addWidget(self.trend_chart)
-        main_layout.addWidget(chart_group, 2)
+        main_layout.addWidget(self.chart_group, 2)
         
         # 按钮栏
         btn_layout = QHBoxLayout()
@@ -874,6 +861,12 @@ class MainWindow(QMainWindow):
         self.btn_mini.setObjectName("btn_mini")
         self.btn_mini.clicked.connect(self.toggle_mini_mode)
         btn_layout.addWidget(self.btn_mini)
+        
+        # 趋势曲线折叠按钮
+        self.btn_chart_toggle = QPushButton("📉 收起曲线")
+        self.btn_chart_toggle.setObjectName("btn_chart_toggle")
+        self.btn_chart_toggle.clicked.connect(self.toggle_chart)
+        btn_layout.addWidget(self.btn_chart_toggle)
         
         btn_layout.addWidget(QLabel("音量:"))
         self.volume_slider = QSlider(Qt.Horizontal)
@@ -923,6 +916,12 @@ class MainWindow(QMainWindow):
         
         self.table.model().rowsInserted.connect(self._on_rows_inserted)
         self.table.model().rowsRemoved.connect(self._on_rows_removed)
+    
+    def toggle_chart(self):
+        """折叠/展开趋势曲线"""
+        self.chart_visible = not self.chart_visible
+        self.chart_group.setVisible(self.chart_visible)
+        self.btn_chart_toggle.setText("📉 收起曲线" if self.chart_visible else "📈 展开曲线")
     
     def toggle_mini_mode(self):
         if self.mini_window is None:
@@ -1012,6 +1011,10 @@ class MainWindow(QMainWindow):
             if mute_widget and isinstance(mute_widget, QCheckBox):
                 self.row_muted[row] = mute_widget.isChecked()
                 mute_widget.stateChanged.connect(lambda state, r=row: self._on_mute_changed(r, state))
+            # 重选按钮
+            reselect_btn = self.table.cellWidget(row, 10)
+            if reselect_btn and isinstance(reselect_btn, QPushButton):
+                reselect_btn.clicked.connect(lambda checked, r=row: self.reselect_point(r))
     
     def _on_rows_removed(self, parent, first, last):
         for row in range(first, last + 1):
@@ -1042,7 +1045,7 @@ class MainWindow(QMainWindow):
                     item.setText("报警")
                     item.setBackground(QBrush(QColor(200, 50, 50)))
         self._check_alarms()
-
+    
     def _check_alarms(self):
         should_play = False
         for r in range(self.table.rowCount()):
@@ -1121,6 +1124,12 @@ class MainWindow(QMainWindow):
         self.row_muted[row] = False
         mute_check.stateChanged.connect(lambda state, r=row: self._on_mute_changed(r, state))
         
+        # 重选按钮
+        reselect_btn = QPushButton("重选")
+        reselect_btn.setObjectName("btn_reselect")
+        reselect_btn.clicked.connect(lambda checked, r=row: self.reselect_point(r))
+        self.table.setCellWidget(row, 10, reselect_btn)
+        
         self.table.setItem(row, 1, QTableWidgetItem(f"区域{row+1}"))
         self.table.setItem(row, 3, QTableWidgetItem("--"))
         self.table.setItem(row, 4, QTableWidgetItem("0"))
@@ -1129,10 +1138,38 @@ class MainWindow(QMainWindow):
         self.table.setItem(row, 7, QTableWidgetItem("待监控"))
         self.table.setItem(row, 8, QTableWidgetItem("--"))
         
+        # 设置当前值列居中
+        for col in [1,3,4,5,6,7,8]:
+            item = self.table.item(row, col)
+            if item:
+                item.setTextAlignment(Qt.AlignCenter)
+        
         self.status_label.setText(f"状态: 已添加 区域{row+1}")
     
     def _on_enable_changed(self, row, state):
         self.row_enabled[row] = (state == 2)
+    
+    def reselect_point(self, row):
+        """重新选择区域"""
+        self.picker = CoordinatePicker(self)
+        self.picker.coord_selected.connect(lambda x, y, w, h, r=row: self._on_reselect_completed(r, x, y, w, h))
+        self.picker.showFullScreen()
+    
+    def _on_reselect_completed(self, row, x, y, width, height):
+        self.picker = None
+        if x == 0 and y == 0 and width == 0 and height == 0:
+            return
+        self.table.setItem(row, 6, QTableWidgetItem(f"{x},{y},{width},{height}"))
+        self.status_label.setText(f"状态: 已更新坐标 区域{row+1}")
+        # 如果监控中，更新线程中的坐标
+        if self.monitoring and self.monitor_thread:
+            for m in self.monitor_thread.monitors:
+                if m['row'] == row:
+                    m['x'] = x
+                    m['y'] = y
+                    m['width'] = width
+                    m['height'] = height
+                    break
     
     def edit_monitor_point(self):
         row = self.table.currentRow()
@@ -1146,12 +1183,18 @@ class MainWindow(QMainWindow):
     
     def _on_edit_picker_completed(self, row, x, y, width, height):
         self.picker = None
-        
         if x == 0 and y == 0 and width == 0 and height == 0:
             return
-        
         self.table.setItem(row, 6, QTableWidgetItem(f"{x},{y},{width},{height}"))
         self.status_label.setText("状态: 已更新坐标")
+        if self.monitoring and self.monitor_thread:
+            for m in self.monitor_thread.monitors:
+                if m['row'] == row:
+                    m['x'] = x
+                    m['y'] = y
+                    m['width'] = width
+                    m['height'] = height
+                    break
     
     def delete_monitor_point(self):
         row = self.table.currentRow()
@@ -1265,6 +1308,7 @@ class MainWindow(QMainWindow):
         item = self.table.item(row, 3)
         if item:
             item.setText(f"{value:.2f}")
+            item.setTextAlignment(Qt.AlignCenter)
         
         if row not in self.value_history:
             self.value_history[row] = []
@@ -1293,25 +1337,30 @@ class MainWindow(QMainWindow):
         status_item = QTableWidgetItem(status_text)
         status_item.setBackground(QBrush(color))
         status_item.setForeground(QBrush(QColor(255, 255, 255)))
+        status_item.setTextAlignment(Qt.AlignCenter)
         self.table.setItem(row, 7, status_item)
         
         now = datetime.now().strftime("%H:%M:%S")
         time_item = self.table.item(row, 8)
         if time_item:
             time_item.setText(now)
+            time_item.setTextAlignment(Qt.AlignCenter)
         else:
-            self.table.setItem(row, 8, QTableWidgetItem(now))
+            time_item = QTableWidgetItem(now)
+            time_item.setTextAlignment(Qt.AlignCenter)
+            self.table.setItem(row, 8, time_item)
         
         self.play_alarm(row)
         self.status_label.setText(f"报警: {name} = {value:.2f} [范围: {lower}-{upper}]")
         
         self._check_alarms()
-
+    
     def on_status_updated(self, row, status):
         if status == 'normal':
             status_item = QTableWidgetItem("正常")
             status_item.setBackground(QBrush(QColor(74, 158, 255)))
             status_item.setForeground(QBrush(QColor(255, 255, 255)))
+            status_item.setTextAlignment(Qt.AlignCenter)
             self.table.setItem(row, 7, status_item)
             
             if self.row_alarm.get(row, False):
@@ -1322,17 +1371,20 @@ class MainWindow(QMainWindow):
             status_item = QTableWidgetItem("识别失败")
             status_item.setBackground(QBrush(QColor(100, 100, 115)))
             status_item.setForeground(QBrush(QColor(255, 255, 255)))
+            status_item.setTextAlignment(Qt.AlignCenter)
             self.table.setItem(row, 7, status_item)
         elif status == 'disabled':
             status_item = QTableWidgetItem("已禁用")
             status_item.setBackground(QBrush(QColor(80, 80, 95)))
             status_item.setForeground(QBrush(QColor(200, 200, 210)))
+            status_item.setTextAlignment(Qt.AlignCenter)
             self.table.setItem(row, 7, status_item)
             if self.row_alarm.get(row, False):
                 self.row_alarm[row] = False
             self._check_alarms()
         else:
             status_item = QTableWidgetItem(status)
+            status_item.setTextAlignment(Qt.AlignCenter)
             self.table.setItem(row, 7, status_item)
     
     def _update_status_display(self):
@@ -1405,6 +1457,12 @@ class MainWindow(QMainWindow):
                 self.row_muted[row] = item.get('muted', False)
                 mute_check.stateChanged.connect(lambda state, r=row: self._on_mute_changed(r, state))
                 
+                # 重选按钮
+                reselect_btn = QPushButton("重选")
+                reselect_btn.setObjectName("btn_reselect")
+                reselect_btn.clicked.connect(lambda checked, r=row: self.reselect_point(r))
+                self.table.setCellWidget(row, 10, reselect_btn)
+                
                 self.table.setItem(row, 1, QTableWidgetItem(item['name']))
                 self.table.setItem(row, 3, QTableWidgetItem("--"))
                 self.table.setItem(row, 4, QTableWidgetItem(str(item['lower'])))
@@ -1412,6 +1470,12 @@ class MainWindow(QMainWindow):
                 self.table.setItem(row, 6, QTableWidgetItem(item['coords']))
                 self.table.setItem(row, 7, QTableWidgetItem("待监控"))
                 self.table.setItem(row, 8, QTableWidgetItem("--"))
+                
+                # 居中
+                for col in [1,3,4,5,6,7,8]:
+                    it = self.table.item(row, col)
+                    if it:
+                        it.setTextAlignment(Qt.AlignCenter)
             
             volume = config.get('volume', 80)
             self.volume_slider.setValue(volume)
