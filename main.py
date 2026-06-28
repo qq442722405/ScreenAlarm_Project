@@ -17,11 +17,11 @@ try:
     OCR_AVAILABLE = True
 except ImportError as e:
     OCR_AVAILABLE = False
-    print(f"依赖库未完全安装: {e}")
+    print(f"EasyOCR未安装: {e}")
 
 
 # =====================================================================
-# 后台监控线程（完全保留您原有的业务逻辑，未做任何内部逻辑优化）
+# 后台监控线程 (完全保留你提供的原始代码，未做修改)
 # =====================================================================
 class MonitorThread(QThread):
     value_updated = Signal(int, float)
@@ -76,7 +76,7 @@ class MonitorThread(QThread):
     
     def _init_ocr(self):
         if not OCR_AVAILABLE:
-            self.ocr_status.emit("EasyOCR或相关依赖未安装，请检查 requirements.txt", False)
+            self.ocr_status.emit("EasyOCR未安装，请运行: pip install easyocr", False)
             return False
         try:
             if getattr(sys, 'frozen', False):
@@ -246,21 +246,20 @@ class MonitorThread(QThread):
         if self.sct:
             self.sct.close()
 
-
 # =====================================================================
-# 重新设计的现代化精简小窗口 (GUI 控制台)
+# 重新设计的小窗口 GUI 界面代码 (这是让程序能打开的关键)
 # =====================================================================
 class MiniMonitorWindow(QWidget):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("数值监控")
-        self.setFixedSize(480, 280)  # 精简尺寸，适合挂载在屏幕边缘
-        self.setWindowFlags(Qt.WindowStaysOnTopHint) # 默认置顶，方便悬浮观看
+        self.setWindowTitle("OCR数值监控小助手")
+        self.setFixedSize(500, 300) 
+        self.setWindowFlags(Qt.WindowStaysOnTopHint) # 窗口置顶，方便悬浮观察
         
-        # 扁平化无边框现代质感样式表
+        # 现代化暗黑风格样式表
         self.setStyleSheet("""
             QWidget { background-color: #1e1e24; color: #f5f5f5; font-family: 'Segoe UI', 'Microsoft YaHei'; }
-            QPushButton { border: none; border-radius: 4px; padding: 6px 12px; font-weight: bold; font-size: 12px; }
+            QPushButton { border: none; border-radius: 4px; padding: 6px 12px; font-weight: bold; font-size: 13px; }
             QPushButton#btnStart { background-color: #2ed573; color: white; }
             QPushButton#btnStart:hover { background-color: #26af5f; }
             QPushButton#btnStop { background-color: #ff4757; color: white; }
@@ -268,15 +267,15 @@ class MiniMonitorWindow(QWidget):
             QPushButton#btnClear { background-color: #ffa502; color: white; }
             QPushButton#btnClear:hover { background-color: #e09202; }
             QTableWidget { background-color: #26262b; border: 1px solid #3a3a42; border-radius: 6px; gridline-color: #32323a; }
-            QHeaderView::section { background-color: #32323a; color: #a4b0be; font-size: 11px; font-weight: bold; border: none; padding: 4px; }
+            QHeaderView::section { background-color: #32323a; color: #a4b0be; font-size: 12px; font-weight: bold; border: none; padding: 4px; }
             QProgressBar { border: 1px solid #3a3a42; border-radius: 3px; background-color: #26262b; text-align: center; color: white; font-size: 10px; }
             QProgressBar::chunk { background-color: #1e90ff; }
         """)
 
-        # 预设的监控配置示例 (您可以自行修改坐标 x, y, width, height 以及判定区间)
+        # 监控区域配置 (你可以根据实际需求修改 x, y, width, height 和 判定上下限)
         self.monitors_config = [
-            {'row': 0, 'name': '监控区 1', 'x': 200, 'y': 200, 'width': 100, 'height': 30, 'lower': 10.0, 'upper': 90.0},
-            {'row': 1, 'name': '监控区 2', 'x': 200, 'y': 250, 'width': 100, 'height': 30, 'lower': 20.0, 'upper': 80.0},
+            {'row': 0, 'name': '监控区 1', 'x': 100, 'y': 100, 'width': 120, 'height': 40, 'lower': 10.0, 'upper': 90.0},
+            {'row': 1, 'name': '监控区 2', 'x': 100, 'y': 150, 'width': 120, 'height': 40, 'lower': 20.0, 'upper': 80.0},
         ]
         
         self.thread = None
@@ -287,7 +286,7 @@ class MiniMonitorWindow(QWidget):
         layout.setContentsMargins(12, 12, 12, 12)
         layout.setSpacing(10)
 
-        # 顶部：OCR状态条与进度条
+        # 顶部：状态条与下载进度
         top_layout = QHBoxLayout()
         self.lbl_ocr_status = QLabel("系统就绪，等待启动...")
         self.lbl_ocr_status.setStyleSheet("color: #a4b0be; font-size: 12px;")
@@ -298,11 +297,11 @@ class MiniMonitorWindow(QWidget):
         top_layout.addWidget(self.progress_bar, 2)
         layout.addLayout(top_layout)
 
-        # 中部：核心监测网格视图
+        # 中部：数据表格视图
         self.table = QTableWidget(len(self.monitors_config), 4)
-        self.table.setHorizontalHeaderLabels(["监控名称", "当前数值", "判定范围", "状态"])
+        self.table.setHorizontalHeaderLabels(["监控项", "当前读取值", "判定范围", "状态"])
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        self.table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.table.setEditTriggers(QTableWidget.NoEditTriggers) # 禁止手动编辑单元格
         self.table.setSelectionMode(QTableWidget.NoSelection)
         self.table.verticalHeader().setVisible(False)
 
@@ -310,7 +309,7 @@ class MiniMonitorWindow(QWidget):
             row = m['row']
             self.table.setItem(row, 0, QTableWidgetItem(m['name']))
             self.table.setItem(row, 1, QTableWidgetItem("- -"))
-            self.table.setItem(row, 2, QTableWidgetItem(f"{m['lower']}~{m['upper']}"))
+            self.table.setItem(row, 2, QTableWidgetItem(f"{m['lower']} ~ {m['upper']}"))
             
             status_item = QTableWidgetItem("待机")
             status_item.setForeground(QColor("#a4b0be"))
@@ -318,14 +317,14 @@ class MiniMonitorWindow(QWidget):
             
         layout.addWidget(self.table)
 
-        # 底部：简洁排列的控制按钮
+        # 底部：控制按钮
         btn_layout = QHBoxLayout()
         self.btn_start = QPushButton("开始监控")
         self.btn_start.setObjectName("btnStart")
-        self.btn_stop = QPushButton("关闭")
+        self.btn_stop = QPushButton("停止监控")
         self.btn_stop.setObjectName("btnStop")
         self.btn_stop.setEnabled(False)
-        self.btn_clear = QPushButton("复位警报")
+        self.btn_clear = QPushButton("消除警报")
         self.btn_clear.setObjectName("btnClear")
 
         self.btn_start.clicked.connect(self.start_monitoring)
@@ -341,9 +340,10 @@ class MiniMonitorWindow(QWidget):
         self.btn_start.setEnabled(False)
         self.btn_stop.setEnabled(True)
         
+        # 实例化后台监控线程
         self.thread = MonitorThread(self.monitors_config)
         
-        # 信号槽对接
+        # 绑定信号
         self.thread.value_updated.connect(self.on_value_updated)
         self.thread.alarm_triggered.connect(self.on_alarm_triggered)
         self.thread.status_updated.connect(self.on_status_updated)
@@ -355,10 +355,10 @@ class MiniMonitorWindow(QWidget):
     def stop_monitoring(self):
         if self.thread and self.thread.isRunning():
             self.thread.stop()
-            self.thread.wait()
+            self.thread.wait() # 确保线程安全退出
         self.btn_start.setEnabled(True)
         self.btn_stop.setEnabled(False)
-        self.lbl_ocr_status.setText("监控已关闭")
+        self.lbl_ocr_status.setText("监控已停止")
         for i in range(self.table.rowCount()):
             item = self.table.item(i, 3)
             if item:
@@ -370,7 +370,7 @@ class MiniMonitorWindow(QWidget):
         if self.thread:
             self.thread.reset_all_alarms()
 
-    # --- 槽函数实现 ---
+    # --- 以下为处理线程信号的回调函数 ---
     def on_value_updated(self, row, value):
         val_item = self.table.item(row, 1)
         if val_item:
@@ -384,7 +384,7 @@ class MiniMonitorWindow(QWidget):
             status_item.setForeground(QColor("white"))
 
     def on_status_updated(self, row, status):
-        if row == -1:
+        if row == -1: # 处理全局错误
             self.lbl_ocr_status.setText(status)
             return
             
@@ -397,7 +397,7 @@ class MiniMonitorWindow(QWidget):
             status_item.setBackground(QColor("#2ed573"))
             status_item.setForeground(QColor("white"))
         elif status == 'error':
-            status_item.setText("识别失败")
+            status_item.setText("读取失败")
             status_item.setBackground(QColor("#ffa502"))
             status_item.setForeground(QColor("white"))
         elif status == 'disabled':
@@ -405,7 +405,7 @@ class MiniMonitorWindow(QWidget):
             status_item.setBackground(QColor("#747d8c"))
             status_item.setForeground(QColor("white"))
         elif status == '监控中':
-            status_item.setText("检测中...")
+            status_item.setText("监控中...")
             status_item.setBackground(QColor(0, 0, 0, 0))
             status_item.setForeground(QColor("#2ed573"))
 
@@ -422,10 +422,13 @@ class MiniMonitorWindow(QWidget):
             self.progress_bar.setVisible(False)
 
     def closeEvent(self, event):
+        # 窗口关闭时自动停用线程
         self.stop_monitoring()
         event.accept()
 
-
+# =====================================================================
+# 程序入口，必须包含主事件循环，否则程序会一闪而过
+# =====================================================================
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     window = MiniMonitorWindow()
