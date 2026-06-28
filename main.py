@@ -548,7 +548,7 @@ class MainWindow(QMainWindow):
         self.record_timer = QTimer()
         self.record_timer.timeout.connect(self.record_current_value)
         self.recording = False
-        self.record_interval = 5  # 默认5秒
+        self.record_interval = 60 * 60  # 默认60分钟(转换为秒)
         
         self.setStyleSheet("""
             QMainWindow { background-color: #1e1e2e; }
@@ -618,10 +618,6 @@ class MainWindow(QMainWindow):
                 background-color: #7a5a4a;
             }
             QPushButton#btn_clear_time:hover { background-color: #9a6a5a; }
-            QPushButton#btn_record_toggle {
-                background-color: #3a6a6a;
-            }
-            QPushButton#btn_record_toggle:hover { background-color: #4a7a7a; }
             QFrame#hint_frame {
                 background-color: #2a2a42;
                 border-radius: 8px;
@@ -704,22 +700,8 @@ class MainWindow(QMainWindow):
                 padding: 2px 6px;
             }
             QLineEdit:focus { border-color: #4a9eff; }
-            QPushButton#btn_pick_reselect {
-                background-color: #4a6a5a;
-                padding: 2px 6px;
-                font-size: 11px;
-                border-radius: 4px;
-                min-width: 32px;
-                min-height: 18px;
-            }
-            QPushButton#btn_pick_reselect:hover { background-color: #5a7a6a; }
             QPushButton#btn_test {
                 background-color: #5a5a7a;
-                padding: 2px 6px;
-                font-size: 11px;
-                border-radius: 4px;
-                min-width: 32px;
-                min-height: 18px;
             }
             QPushButton#btn_test:hover { background-color: #6a6a8a; }
         """)
@@ -784,12 +766,12 @@ class MainWindow(QMainWindow):
         self.download_progress.setValue(0)
         main_layout.addWidget(self.download_progress)
         
-        # 监控表格 (11列)
+        # 监控表格 (改为10列，去掉了最后的操作按钮列)
         self.table = QTableWidget()
-        self.table.setColumnCount(11)
+        self.table.setColumnCount(10)
         self.table.setHorizontalHeaderLabels([
             "启用", "名称", "备注", "当前值", "下限", "上限", 
-            "坐标 (X,Y,W,H)", "状态", "报警时间", "🔇 静音", "操作"
+            "坐标 (X,Y,W,H)", "状态", "报警时间", "🔇 静音"
         ])
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.setAlternatingRowColors(True)
@@ -805,8 +787,6 @@ class MainWindow(QMainWindow):
         self.table.setColumnWidth(7, 85)
         self.table.setColumnWidth(8, 110)
         self.table.setColumnWidth(9, 55)
-        # 增加拾取和测试按钮列的宽度，确保不被裁切
-        self.table.setColumnWidth(10, 120)
         
         self.table.horizontalHeader().setStretchLastSection(False) 
         self.table.verticalHeader().setVisible(False)
@@ -831,6 +811,12 @@ class MainWindow(QMainWindow):
         self.btn_edit = QPushButton("✏️ 编辑区域")
         self.btn_edit.clicked.connect(self.edit_monitor_point)
         btn_layout_top.addWidget(self.btn_edit)
+        
+        # 新增测试按钮
+        self.btn_test = QPushButton("🎯 测试区域")
+        self.btn_test.setObjectName("btn_test")
+        self.btn_test.clicked.connect(self.test_selected_point)
+        btn_layout_top.addWidget(self.btn_test)
         
         self.btn_delete = QPushButton("🗑 删除")
         self.btn_delete.setObjectName("btn_delete")
@@ -875,17 +861,12 @@ class MainWindow(QMainWindow):
         
         btn_layout_bottom.addWidget(QLabel("记录间隔:"))
         self.record_interval_spin = QDoubleSpinBox()
-        self.record_interval_spin.setRange(1, 3600)
-        self.record_interval_spin.setValue(5)
-        self.record_interval_spin.setSuffix(" 秒")
+        self.record_interval_spin.setRange(1, 1440)  # 最大可以设置24小时(1440分钟)
+        self.record_interval_spin.setValue(60)       # 默认60
+        self.record_interval_spin.setSuffix(" 分钟") # 单位改成分钟
         self.record_interval_spin.setFixedWidth(90)
         self.record_interval_spin.valueChanged.connect(self.set_record_interval)
         btn_layout_bottom.addWidget(self.record_interval_spin)
-        
-        self.btn_record_toggle = QPushButton("▶ 开始记录")
-        self.btn_record_toggle.setObjectName("btn_record_toggle")
-        self.btn_record_toggle.clicked.connect(self.toggle_recording)
-        btn_layout_bottom.addWidget(self.btn_record_toggle)
         
         btn_layout_bottom.addStretch()
         
@@ -1040,24 +1021,6 @@ class MainWindow(QMainWindow):
             if mute_widget and isinstance(mute_widget, QCheckBox):
                 self.row_muted[row] = mute_widget.isChecked()
                 mute_widget.stateChanged.connect(lambda state, r=row: self._on_mute_changed(r, state))
-            
-            btn_widget = QWidget()
-            btn_layout = QHBoxLayout(btn_widget)
-            btn_layout.setSpacing(6)
-            btn_layout.setContentsMargins(4, 2, 4, 2)
-            btn_layout.setAlignment(Qt.AlignCenter)
-            
-            pick_btn = QPushButton("拾取")
-            pick_btn.setObjectName("btn_pick_reselect")
-            pick_btn.clicked.connect(lambda checked, r=row: self.reselect_point(r))
-            btn_layout.addWidget(pick_btn)
-            
-            test_btn = QPushButton("测试")
-            test_btn.setObjectName("btn_test")
-            test_btn.clicked.connect(lambda checked, r=row: self.test_point(r))
-            btn_layout.addWidget(test_btn)
-            
-            self.table.setCellWidget(row, 10, btn_widget)
     
     def _on_rows_removed(self, parent, first, last):
         for row in range(first, last + 1):
@@ -1133,7 +1096,7 @@ class MainWindow(QMainWindow):
         if value >= 100:
             QTimer.singleShot(1000, lambda: self.download_progress.setVisible(False))
     
-    # ---------- 拾取和测试 ----------
+    # ---------- 新建与选中控制 ----------
     def add_monitor_row(self):
         self.picker = CoordinatePicker(self)
         self.picker.coord_selected.connect(self._on_picker_completed)
@@ -1165,24 +1128,6 @@ class MainWindow(QMainWindow):
         self.row_muted[row] = False
         mute_check.stateChanged.connect(lambda state, r=row: self._on_mute_changed(r, state))
         
-        btn_widget = QWidget()
-        btn_layout = QHBoxLayout(btn_widget)
-        btn_layout.setSpacing(6)
-        btn_layout.setContentsMargins(4, 2, 4, 2)
-        btn_layout.setAlignment(Qt.AlignCenter)
-        
-        pick_btn = QPushButton("拾取")
-        pick_btn.setObjectName("btn_pick_reselect")
-        pick_btn.clicked.connect(lambda checked, r=row: self.reselect_point(r))
-        btn_layout.addWidget(pick_btn)
-        
-        test_btn = QPushButton("测试")
-        test_btn.setObjectName("btn_test")
-        test_btn.clicked.connect(lambda checked, r=row: self.test_point(r))
-        btn_layout.addWidget(test_btn)
-        
-        self.table.setCellWidget(row, 10, btn_widget)
-        
         self.table.setItem(row, 1, QTableWidgetItem(f"区域{row+1}"))
         self.table.setItem(row, 3, QTableWidgetItem("--"))
         self.table.setItem(row, 4, QTableWidgetItem("0"))
@@ -1201,30 +1146,15 @@ class MainWindow(QMainWindow):
     def _on_enable_changed(self, row, state):
         self.row_enabled[row] = (state == 2)
     
-    def reselect_point(self, row):
-        self.picker = CoordinatePicker(self)
-        self.picker.coord_selected.connect(lambda x, y, w, h, r=row: self._on_reselect_completed(r, x, y, w, h))
-        self.picker.showFullScreen()
-    
-    def _on_reselect_completed(self, row, x, y, width, height):
-        self.picker = None
-        if x == 0 and y == 0 and width == 0 and height == 0:
+    def test_selected_point(self):
+        """测试当前选中行的识别效果"""
+        row = self.table.currentRow()
+        if row < 0:
+            QMessageBox.warning(self, "提示", "请先选择一行监控点")
             return
-        self.table.setItem(row, 6, QTableWidgetItem(f"{x},{y},{width},{height}"))
-        self.status_label.setText(f"状态: 已更新坐标 区域{row+1}")
-        if self.monitoring and self.monitor_thread:
-            for m in self.monitor_thread.monitors:
-                if m['row'] == row:
-                    m['x'] = x
-                    m['y'] = y
-                    m['width'] = width
-                    m['height'] = height
-                    break
-    
-    def test_point(self, row):
-        """测试按钮：执行一次OCR识别并弹窗"""
+            
         if not self.monitoring or self.monitor_thread is None:
-            QMessageBox.warning(self, "提示", "请先开始监控")
+            QMessageBox.warning(self, "提示", "请先开始监控后，再进行测试")
             return
         
         # 获取该行的坐标
@@ -1282,24 +1212,13 @@ class MainWindow(QMainWindow):
     
     # ---------- 定时记录功能 ----------
     def set_record_interval(self, value):
-        self.record_interval = value
+        # 转换为秒
+        self.record_interval = value * 60 
         if self.recording:
-            self.record_timer.start(int(value * 1000))
-    
-    def toggle_recording(self):
-        if not self.recording:
-            self.recording = True
-            self.btn_record_toggle.setText("⏹ 停止记录")
             self.record_timer.start(int(self.record_interval * 1000))
-            self.status_label.setText("状态: 开始定时记录")
-        else:
-            self.recording = False
-            self.btn_record_toggle.setText("▶ 开始记录")
-            self.record_timer.stop()
-            self.status_label.setText("状态: 停止记录")
     
     def record_current_value(self):
-        """定时记录当前选中行的当前值"""
+        """定时记录当前所有监控点的值，更新图表"""
         selected = self.table.selectedItems()
         if not selected:
             return
@@ -1396,11 +1315,20 @@ class MainWindow(QMainWindow):
         self.btn_start.setEnabled(False)
         self.btn_stop.setEnabled(True)
         self.status_label.setText("状态: 监控运行中")
+
+        # 自动启动记录定时器
+        self.recording = True
+        self.record_timer.start(int(self.record_interval * 1000))
     
     def stop_monitor(self):
         if self.monitor_thread and self.monitor_thread.isRunning():
             self.monitor_thread.stop()
             self.monitor_thread.wait()
+        
+        # 自动停止记录定时器
+        self.recording = False
+        self.record_timer.stop()
+        
         self.monitoring = False
         self.btn_start.setEnabled(True)
         self.btn_stop.setEnabled(False)
@@ -1563,24 +1491,6 @@ class MainWindow(QMainWindow):
                 self.row_muted[row] = item.get('muted', False)
                 mute_check.stateChanged.connect(lambda state, r=row: self._on_mute_changed(r, state))
                 
-                btn_widget = QWidget()
-                btn_layout = QHBoxLayout(btn_widget)
-                btn_layout.setSpacing(6)
-                btn_layout.setContentsMargins(4, 2, 4, 2)
-                btn_layout.setAlignment(Qt.AlignCenter)
-                
-                pick_btn = QPushButton("拾取")
-                pick_btn.setObjectName("btn_pick_reselect")
-                pick_btn.clicked.connect(lambda checked, r=row: self.reselect_point(r))
-                btn_layout.addWidget(pick_btn)
-                
-                test_btn = QPushButton("测试")
-                test_btn.setObjectName("btn_test")
-                test_btn.clicked.connect(lambda checked, r=row: self.test_point(r))
-                btn_layout.addWidget(test_btn)
-                
-                self.table.setCellWidget(row, 10, btn_widget)
-                
                 self.table.setItem(row, 1, QTableWidgetItem(item['name']))
                 self.table.setItem(row, 3, QTableWidgetItem("--"))
                 self.table.setItem(row, 4, QTableWidgetItem(str(item['lower'])))
@@ -1606,10 +1516,10 @@ class MainWindow(QMainWindow):
             self.interval_spin.setValue(interval)
             self.detect_interval = int(interval * 1000)
             
-            # 恢复记录间隔
-            record_interval = config.get('record_interval', 5)
+            # 恢复记录间隔 (注意之前的配置可能是按秒存的，现在统一当分钟加载兼容，或直接读取为分钟)
+            record_interval = config.get('record_interval', 60)
             self.record_interval_spin.setValue(record_interval)
-            self.record_interval = record_interval
+            self.record_interval = record_interval * 60
             
             # 恢复窗口大小和位置
             geometry = config.get('window_geometry')
