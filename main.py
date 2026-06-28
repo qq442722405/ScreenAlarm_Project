@@ -340,7 +340,7 @@ class CoordinatePicker(QWidget):
 
 
 class MiniWindow(QWidget):
-    """重新设计的小窗口 - 更精致、紧凑"""
+    """精简小窗口 - 报警和切换按钮同一行，高度压缩"""
     def __init__(self, parent=None):
         super().__init__(parent)
         self.parent_window = parent
@@ -350,40 +350,37 @@ class MiniWindow(QWidget):
             Qt.FramelessWindowHint |
             Qt.Tool
         )
-        self.setFixedSize(220, 60)
+        self.setFixedSize(200, 40)
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setStyleSheet("""
             QWidget {
-                background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                                  stop:0 rgba(35, 35, 55, 0.97),
-                                                  stop:1 rgba(25, 25, 40, 0.97));
+                background-color: rgba(30, 30, 46, 0.96);
                 border: 2px solid #4a9eff;
-                border-radius: 14px;
-                box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+                border-radius: 12px;
             }
             QLabel {
                 color: #e0e0f0;
                 font-family: "Microsoft YaHei";
-                font-size: 16px;
+                font-size: 13px;
                 font-weight: bold;
             }
             QPushButton {
                 background-color: #3a5a7a;
                 color: #e0e0f0;
                 border: none;
-                border-radius: 8px;
-                padding: 6px 16px;
+                border-radius: 6px;
+                padding: 4px 12px;
                 font-weight: bold;
                 font-family: "Microsoft YaHei";
-                font-size: 13px;
-                min-height: 24px;
+                font-size: 12px;
+                min-height: 20px;
             }
             QPushButton:hover { background-color: #4a6a8a; }
         """)
         
         layout = QHBoxLayout(self)
-        layout.setSpacing(10)
-        layout.setContentsMargins(14, 8, 14, 8)
+        layout.setSpacing(6)
+        layout.setContentsMargins(8, 4, 8, 4)
         
         self.alarm_label = QLabel("✅ 正常")
         self.alarm_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
@@ -410,8 +407,8 @@ class MiniWindow(QWidget):
         self.drag_pos = None
     
     def set_alarm(self, name):
-        if len(name) > 12:
-            name = name[:12] + "..."
+        if len(name) > 10:
+            name = name[:10] + "..."
         self.alarm_label.setText(f"⚠️ {name}")
         self.alarm_label.setStyleSheet("color: #ff6b6b; padding: 0px;")
     
@@ -474,7 +471,7 @@ class TrendChartWidget(QWidget):
         if len(self.data) < 2:
             painter.setPen(QColor("#7a7a9a"))
             painter.setFont(QFont("Microsoft YaHei", 10))
-            painter.drawText(chart_rect, Qt.AlignCenter, "选中监控行后显示数值变化趋势")
+            painter.drawText(chart_rect, Qt.AlignCenter, "选中监控行后显示数值趋势")
             return
         
         min_val = min(self.data)
@@ -540,11 +537,18 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("屏幕数字监控报警系统")
-        # 大窗口置顶
         self.setWindowFlags(self.windowFlags() | Qt.WindowStaysOnTopHint)
+        # 允许调整窗口大小
+        self.setMinimumSize(800, 600)
         self.resize(1200, 750)
         self.mini_window = None
         self.chart_visible = True
+        
+        # 记录间隔定时器相关
+        self.record_timer = QTimer()
+        self.record_timer.timeout.connect(self.record_current_value)
+        self.recording = False
+        self.record_interval = 5  # 默认5秒
         
         self.setStyleSheet("""
             QMainWindow { background-color: #1e1e2e; }
@@ -614,6 +618,10 @@ class MainWindow(QMainWindow):
                 background-color: #7a5a4a;
             }
             QPushButton#btn_clear_time:hover { background-color: #9a6a5a; }
+            QPushButton#btn_record_toggle {
+                background-color: #3a6a6a;
+            }
+            QPushButton#btn_record_toggle:hover { background-color: #4a7a7a; }
             QFrame#hint_frame {
                 background-color: #2a2a42;
                 border-radius: 8px;
@@ -698,13 +706,22 @@ class MainWindow(QMainWindow):
             QLineEdit:focus { border-color: #4a9eff; }
             QPushButton#btn_pick_reselect {
                 background-color: #4a6a5a;
-                padding: 4px 8px;
+                padding: 2px 6px;
                 font-size: 11px;
                 border-radius: 4px;
-                min-width: 40px;
-                min-height: 20px;
+                min-width: 32px;
+                min-height: 18px;
             }
             QPushButton#btn_pick_reselect:hover { background-color: #5a7a6a; }
+            QPushButton#btn_test {
+                background-color: #5a5a7a;
+                padding: 2px 6px;
+                font-size: 10px;
+                border-radius: 4px;
+                min-width: 28px;
+                min-height: 18px;
+            }
+            QPushButton#btn_test:hover { background-color: #6a6a8a; }
         """)
         
         self.monitoring = False
@@ -767,12 +784,12 @@ class MainWindow(QMainWindow):
         self.download_progress.setValue(0)
         main_layout.addWidget(self.download_progress)
         
-        # 监控表格 (11列: 启用, 名称, 备注, 当前值, 下限, 上限, 坐标, 状态, 报警时间, 静音, 区域)
+        # 监控表格 (11列)
         self.table = QTableWidget()
         self.table.setColumnCount(11)
         self.table.setHorizontalHeaderLabels([
             "启用", "名称", "备注", "当前值", "下限", "上限", 
-            "坐标 (X,Y,W,H)", "状态", "报警时间", "🔇 静音", "区域"
+            "坐标 (X,Y,W,H)", "状态", "报警时间", "🔇 静音", "拾取"
         ])
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.setAlternatingRowColors(True)
@@ -780,15 +797,15 @@ class MainWindow(QMainWindow):
         
         self.table.setColumnWidth(0, 40)
         self.table.setColumnWidth(1, 80)
-        self.table.setColumnWidth(2, 200)
+        self.table.setColumnWidth(2, 180)
         self.table.setColumnWidth(3, 90)
         self.table.setColumnWidth(4, 65)
         self.table.setColumnWidth(5, 65)
         self.table.setColumnWidth(6, 130)
         self.table.setColumnWidth(7, 85)
         self.table.setColumnWidth(8, 110)
-        self.table.setColumnWidth(9, 60)
-        self.table.setColumnWidth(10, 70)   # 加宽，防止按钮溢出
+        self.table.setColumnWidth(9, 55)
+        self.table.setColumnWidth(10, 90)   # 为拾取+测试预留宽度
         self.table.horizontalHeader().setStretchLastSection(False) 
         self.table.verticalHeader().setVisible(False)
         main_layout.addWidget(self.table, 3)
@@ -833,23 +850,38 @@ class MainWindow(QMainWindow):
         
         btn_layout.addStretch()
         
-        # 清空报警时间按钮
+        # 清空报警时间
         self.btn_clear_time = QPushButton("🗑 清空报警时间")
         self.btn_clear_time.setObjectName("btn_clear_time")
         self.btn_clear_time.clicked.connect(self.clear_alarm_time)
         btn_layout.addWidget(self.btn_clear_time)
         
-        # 小窗口切换按钮
+        # 小窗口切换
         self.btn_mini = QPushButton("📱 小窗口模式")
         self.btn_mini.setObjectName("btn_mini")
         self.btn_mini.clicked.connect(self.toggle_mini_mode)
         btn_layout.addWidget(self.btn_mini)
         
-        # 趋势曲线折叠按钮
+        # 趋势曲线折叠
         self.btn_chart_toggle = QPushButton("📉 收起曲线")
         self.btn_chart_toggle.setObjectName("btn_chart_toggle")
         self.btn_chart_toggle.clicked.connect(self.toggle_chart)
         btn_layout.addWidget(self.btn_chart_toggle)
+        
+        # 记录间隔和开关
+        btn_layout.addWidget(QLabel("记录间隔:"))
+        self.record_interval_spin = QDoubleSpinBox()
+        self.record_interval_spin.setRange(1, 3600)
+        self.record_interval_spin.setValue(5)
+        self.record_interval_spin.setSuffix(" 秒")
+        self.record_interval_spin.setFixedWidth(90)
+        self.record_interval_spin.valueChanged.connect(self.set_record_interval)
+        btn_layout.addWidget(self.record_interval_spin)
+        
+        self.btn_record_toggle = QPushButton("▶ 开始记录")
+        self.btn_record_toggle.setObjectName("btn_record_toggle")
+        self.btn_record_toggle.clicked.connect(self.toggle_recording)
+        btn_layout.addWidget(self.btn_record_toggle)
         
         btn_layout.addWidget(QLabel("音量:"))
         self.volume_slider = QSlider(Qt.Horizontal)
@@ -901,12 +933,10 @@ class MainWindow(QMainWindow):
         self.table.model().rowsRemoved.connect(self._on_rows_removed)
     
     def clear_alarm_time(self):
-        """清空所有报警时间"""
         for row in range(self.table.rowCount()):
             if self.table.item(row, 1) is None:
                 continue
             self.table.setItem(row, 8, QTableWidgetItem("--"))
-            # 居中
             it = self.table.item(row, 8)
             if it:
                 it.setTextAlignment(Qt.AlignCenter)
@@ -944,13 +974,9 @@ class MainWindow(QMainWindow):
         self.raise_()
         self.activateWindow()
     
-    def toggle_mini_mute(self, muted):
-        self.mini_muted = muted
-    
     def _update_mini_alarm(self):
         if self.mini_window is None:
             return
-        
         has_alarm = False
         alarm_name = None
         for row in range(self.table.rowCount()):
@@ -960,7 +986,6 @@ class MainWindow(QMainWindow):
                 name_item = self.table.item(row, 1)
                 alarm_name = name_item.text() if name_item else "未知"
                 break
-        
         if has_alarm and alarm_name:
             self.mini_window.set_alarm(alarm_name)
         else:
@@ -1005,10 +1030,24 @@ class MainWindow(QMainWindow):
             if mute_widget and isinstance(mute_widget, QCheckBox):
                 self.row_muted[row] = mute_widget.isChecked()
                 mute_widget.stateChanged.connect(lambda state, r=row: self._on_mute_changed(r, state))
-            # 拾取按钮
-            pick_btn = self.table.cellWidget(row, 10)
-            if pick_btn and isinstance(pick_btn, QPushButton):
-                pick_btn.clicked.connect(lambda checked, r=row: self.reselect_point(r))
+            # 拾取和测试按钮放在一个widget中
+            btn_widget = QWidget()
+            btn_layout = QHBoxLayout(btn_widget)
+            btn_layout.setSpacing(2)
+            btn_layout.setContentsMargins(0, 0, 0, 0)
+            btn_layout.setAlignment(Qt.AlignCenter)
+            
+            pick_btn = QPushButton("拾取")
+            pick_btn.setObjectName("btn_pick_reselect")
+            pick_btn.clicked.connect(lambda checked, r=row: self.reselect_point(r))
+            btn_layout.addWidget(pick_btn)
+            
+            test_btn = QPushButton("测试")
+            test_btn.setObjectName("btn_test")
+            test_btn.clicked.connect(lambda checked, r=row: self.test_point(r))
+            btn_layout.addWidget(test_btn)
+            
+            self.table.setCellWidget(row, 10, btn_widget)
     
     def _on_rows_removed(self, parent, first, last):
         for row in range(first, last + 1):
@@ -1047,9 +1086,7 @@ class MainWindow(QMainWindow):
             if item and item.text() == "报警":
                 should_play = True
                 break
-        
         self._update_mini_alarm()
-        
         if should_play:
             if not self.alarm_playing:
                 self.alarm_player.play()
@@ -1086,6 +1123,7 @@ class MainWindow(QMainWindow):
         if value >= 100:
             QTimer.singleShot(1000, lambda: self.download_progress.setVisible(False))
     
+    # ---------- 拾取和测试 ----------
     def add_monitor_row(self):
         self.picker = CoordinatePicker(self)
         self.picker.coord_selected.connect(self._on_picker_completed)
@@ -1093,7 +1131,6 @@ class MainWindow(QMainWindow):
     
     def _on_picker_completed(self, x, y, width, height):
         self.picker = None
-        
         if x == 0 and y == 0 and width == 0 and height == 0:
             return
         
@@ -1118,11 +1155,24 @@ class MainWindow(QMainWindow):
         self.row_muted[row] = False
         mute_check.stateChanged.connect(lambda state, r=row: self._on_mute_changed(r, state))
         
-        # 拾取按钮（文字改为"区域"？但功能是拾取，保留文字"拾取"更明确，列标题已改为"区域"）
+        # 拾取+测试按钮
+        btn_widget = QWidget()
+        btn_layout = QHBoxLayout(btn_widget)
+        btn_layout.setSpacing(2)
+        btn_layout.setContentsMargins(0, 0, 0, 0)
+        btn_layout.setAlignment(Qt.AlignCenter)
+        
         pick_btn = QPushButton("拾取")
         pick_btn.setObjectName("btn_pick_reselect")
         pick_btn.clicked.connect(lambda checked, r=row: self.reselect_point(r))
-        self.table.setCellWidget(row, 10, pick_btn)
+        btn_layout.addWidget(pick_btn)
+        
+        test_btn = QPushButton("测试")
+        test_btn.setObjectName("btn_test")
+        test_btn.clicked.connect(lambda checked, r=row: self.test_point(r))
+        btn_layout.addWidget(test_btn)
+        
+        self.table.setCellWidget(row, 10, btn_widget)
         
         self.table.setItem(row, 1, QTableWidgetItem(f"区域{row+1}"))
         self.table.setItem(row, 3, QTableWidgetItem("--"))
@@ -1132,7 +1182,6 @@ class MainWindow(QMainWindow):
         self.table.setItem(row, 7, QTableWidgetItem("待监控"))
         self.table.setItem(row, 8, QTableWidgetItem("--"))
         
-        # 居中
         for col in [1,3,4,5,6,7,8]:
             it = self.table.item(row, col)
             if it:
@@ -1144,7 +1193,6 @@ class MainWindow(QMainWindow):
         self.row_enabled[row] = (state == 2)
     
     def reselect_point(self, row):
-        """重新选择区域"""
         self.picker = CoordinatePicker(self)
         self.picker.coord_selected.connect(lambda x, y, w, h, r=row: self._on_reselect_completed(r, x, y, w, h))
         self.picker.showFullScreen()
@@ -1164,12 +1212,35 @@ class MainWindow(QMainWindow):
                     m['height'] = height
                     break
     
+    def test_point(self, row):
+        """测试按钮：执行一次OCR识别并弹窗"""
+        if not self.monitoring or self.monitor_thread is None:
+            QMessageBox.warning(self, "提示", "请先开始监控")
+            return
+        
+        # 获取该行的坐标
+        coords_text = self.table.item(row, 6).text()
+        nums = re.findall(r'\d+', coords_text)
+        if len(nums) < 4:
+            QMessageBox.warning(self, "错误", "坐标数据无效")
+            return
+        x, y, w, h = map(int, nums[:4])
+        
+        # 执行一次捕获
+        try:
+            result = self.monitor_thread._capture_and_ocr(x, y, w, h)
+            if result is not None:
+                QMessageBox.information(self, "测试结果", f"识别到数值: {result:.2f}")
+            else:
+                QMessageBox.warning(self, "测试结果", "未识别到数字")
+        except Exception as e:
+            QMessageBox.critical(self, "错误", f"测试失败: {e}")
+    
     def edit_monitor_point(self):
         row = self.table.currentRow()
         if row < 0:
             QMessageBox.warning(self, "提示", "请先选择一行")
             return
-        
         self.picker = CoordinatePicker(self)
         self.picker.coord_selected.connect(lambda x, y, w, h, r=row: self._on_edit_picker_completed(r, x, y, w, h))
         self.picker.showFullScreen()
@@ -1194,13 +1265,59 @@ class MainWindow(QMainWindow):
         if row < 0:
             QMessageBox.warning(self, "提示", "请先选择一行")
             return
-        
         name = self.table.item(row, 1).text()
         reply = QMessageBox.question(self, "确认删除", f"确定要删除 [{name}] 吗？")
         if reply == QMessageBox.Yes:
             self.table.removeRow(row)
             self.status_label.setText("状态: 已删除")
     
+    # ---------- 定时记录功能 ----------
+    def set_record_interval(self, value):
+        self.record_interval = value
+        if self.recording:
+            self.record_timer.start(int(value * 1000))
+    
+    def toggle_recording(self):
+        if not self.recording:
+            self.recording = True
+            self.btn_record_toggle.setText("⏹ 停止记录")
+            self.record_timer.start(int(self.record_interval * 1000))
+            self.status_label.setText("状态: 开始定时记录")
+        else:
+            self.recording = False
+            self.btn_record_toggle.setText("▶ 开始记录")
+            self.record_timer.stop()
+            self.status_label.setText("状态: 停止记录")
+    
+    def record_current_value(self):
+        """定时记录当前选中行的当前值"""
+        selected = self.table.selectedItems()
+        if not selected:
+            return
+        row = selected[0].row()
+        if row < 0:
+            return
+        # 获取当前值
+        val_item = self.table.item(row, 3)
+        if val_item is None or val_item.text() == "--":
+            return
+        try:
+            value = float(val_item.text())
+        except:
+            return
+        # 添加到历史
+        if row not in self.value_history:
+            self.value_history[row] = []
+        self.value_history[row].append(value)
+        if len(self.value_history[row]) > 15:
+            self.value_history[row].pop(0)
+        # 更新趋势图（如果当前选中的是这一行）
+        if self.table.currentRow() == row:
+            name_item = self.table.item(row, 1)
+            name = name_item.text() if name_item else f"区域{row+1}"
+            self.trend_chart.set_data(self.value_history[row], f"{name} 数值趋势")
+    
+    # ---------- 监控控制 ----------
     def set_ocr_status(self, status, is_ready=False):
         color = "#44ddaa" if is_ready else "#e6b84d"
         self.ocr_status_label.setStyleSheet(
@@ -1302,20 +1419,6 @@ class MainWindow(QMainWindow):
         if item:
             item.setText(f"{value:.2f}")
             item.setTextAlignment(Qt.AlignCenter)
-        
-        if row not in self.value_history:
-            self.value_history[row] = []
-            
-        if not self.value_history[row] or self.value_history[row][-1] != value:
-            self.value_history[row].append(value)
-            if len(self.value_history[row]) > 15:
-                self.value_history[row].pop(0)
-            
-            selected = self.table.selectedItems()
-            if selected and selected[0].row() == row:
-                name_item = self.table.item(row, 1)
-                name = name_item.text() if name_item else f"区域{row+1}"
-                self.trend_chart.set_data(self.value_history[row], f"{name} 数值趋势")
     
     def on_alarm_triggered(self, row, name, value, lower, upper):
         self.row_alarm[row] = True
@@ -1345,7 +1448,6 @@ class MainWindow(QMainWindow):
         
         self.play_alarm(row)
         self.status_label.setText(f"报警: {name} = {value:.2f} [范围: {lower}-{upper}]")
-        
         self._check_alarms()
     
     def on_status_updated(self, row, status):
@@ -1355,11 +1457,9 @@ class MainWindow(QMainWindow):
             status_item.setForeground(QBrush(QColor(255, 255, 255)))
             status_item.setTextAlignment(Qt.AlignCenter)
             self.table.setItem(row, 7, status_item)
-            
             if self.row_alarm.get(row, False):
                 self.row_alarm[row] = False
             self._check_alarms()
-            
         elif status == 'error':
             status_item = QTableWidgetItem("识别失败")
             status_item.setBackground(QBrush(QColor(100, 100, 115)))
@@ -1384,12 +1484,16 @@ class MainWindow(QMainWindow):
         if self.monitoring:
             self.status_label.setText("状态: 监控运行中")
     
+    # ---------- 配置保存与加载 ----------
     def save_config(self):
         config = {
             'monitors': [],
             'volume': self.volume_slider.value(),
             'interval': self.interval_spin.value(),
-            'loop_enabled': self.loop_enabled
+            'loop_enabled': self.loop_enabled,
+            'record_interval': self.record_interval_spin.value(),
+            'window_geometry': self.saveGeometry().toBase64().data().decode('utf-8'),
+            'window_state': self.saveState().toBase64().data().decode('utf-8')
         }
         
         config['header_state'] = self.table.horizontalHeader().saveState().toBase64().data().decode('utf-8')
@@ -1450,11 +1554,24 @@ class MainWindow(QMainWindow):
                 self.row_muted[row] = item.get('muted', False)
                 mute_check.stateChanged.connect(lambda state, r=row: self._on_mute_changed(r, state))
                 
-                # 拾取按钮
+                # 拾取+测试按钮
+                btn_widget = QWidget()
+                btn_layout = QHBoxLayout(btn_widget)
+                btn_layout.setSpacing(2)
+                btn_layout.setContentsMargins(0, 0, 0, 0)
+                btn_layout.setAlignment(Qt.AlignCenter)
+                
                 pick_btn = QPushButton("拾取")
                 pick_btn.setObjectName("btn_pick_reselect")
                 pick_btn.clicked.connect(lambda checked, r=row: self.reselect_point(r))
-                self.table.setCellWidget(row, 10, pick_btn)
+                btn_layout.addWidget(pick_btn)
+                
+                test_btn = QPushButton("测试")
+                test_btn.setObjectName("btn_test")
+                test_btn.clicked.connect(lambda checked, r=row: self.test_point(r))
+                btn_layout.addWidget(test_btn)
+                
+                self.table.setCellWidget(row, 10, btn_widget)
                 
                 self.table.setItem(row, 1, QTableWidgetItem(item['name']))
                 self.table.setItem(row, 3, QTableWidgetItem("--"))
@@ -1464,7 +1581,6 @@ class MainWindow(QMainWindow):
                 self.table.setItem(row, 7, QTableWidgetItem("待监控"))
                 self.table.setItem(row, 8, QTableWidgetItem("--"))
                 
-                # 居中
                 for col in [1,3,4,5,6,7,8]:
                     it = self.table.item(row, col)
                     if it:
@@ -1481,6 +1597,19 @@ class MainWindow(QMainWindow):
             interval = config.get('interval', 0.5) 
             self.interval_spin.setValue(interval)
             self.detect_interval = int(interval * 1000)
+            
+            # 恢复记录间隔
+            record_interval = config.get('record_interval', 5)
+            self.record_interval_spin.setValue(record_interval)
+            self.record_interval = record_interval
+            
+            # 恢复窗口大小和位置
+            geometry = config.get('window_geometry')
+            if geometry:
+                self.restoreGeometry(QByteArray.fromBase64(geometry.encode('utf-8')))
+            state = config.get('window_state')
+            if state:
+                self.restoreState(QByteArray.fromBase64(state.encode('utf-8')))
             
             self.status_label.setText("状态: 配置已加载")
         except Exception as e:
@@ -1499,6 +1628,8 @@ class MainWindow(QMainWindow):
         self.stop_alarm()
         if self.mini_window:
             self.mini_window.close()
+        # 保存窗口尺寸
+        self.save_config()
         event.accept()
 
 
