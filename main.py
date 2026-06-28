@@ -429,9 +429,6 @@ class MainWindow(QMainWindow):
         self.test_reader = None
         self.reader_loading = False
 
-        # 识别灵敏度 (1~10)
-        self.sensitivity = 5
-
         self.setStyleSheet("""
             QMainWindow { background-color: #1e1e2e; }
             QLabel { color: #e0e0f0; font-family: "Microsoft YaHei"; }
@@ -588,6 +585,7 @@ class MainWindow(QMainWindow):
         self.row_enabled = {}
         self.row_alarm = {}
         self.row_muted = {}
+        self.row_sensitivity = {}   # 存储每行的灵敏度
 
         self._setup_ui()
         self.load_config()
@@ -599,7 +597,7 @@ class MainWindow(QMainWindow):
         self.table.itemChanged.connect(self._on_table_item_changed)
         self.table.itemSelectionChanged.connect(self._on_selection_changed)
 
-        # 延迟加载 OCR 模型，避免阻塞启动
+        # 延迟加载 OCR 模型
         QTimer.singleShot(200, self._init_ocr_reader)
 
     def _init_ocr_reader(self):
@@ -638,6 +636,7 @@ class MainWindow(QMainWindow):
         main_layout.setSpacing(12)
         main_layout.setContentsMargins(16, 16, 16, 16)
 
+        # 标题栏
         title_layout = QHBoxLayout()
         title = QLabel("📊 屏幕数字监控报警系统")
         title_font = QFont("Microsoft YaHei")
@@ -651,6 +650,7 @@ class MainWindow(QMainWindow):
         title_layout.addWidget(subtitle)
         main_layout.addLayout(title_layout)
 
+        # OCR状态
         self.ocr_status_label = QLabel("OCR引擎: 初始化中...")
         self.ocr_status_label.setStyleSheet("padding: 6px 14px; background-color: #2a2a42; border-radius: 6px; color: #e6b84d; border: 1px solid #3a3a55;")
         main_layout.addWidget(self.ocr_status_label)
@@ -661,69 +661,62 @@ class MainWindow(QMainWindow):
         self.download_progress.setValue(0)
         main_layout.addWidget(self.download_progress)
 
-        table_header_layout = QHBoxLayout()
-        table_header_layout.addStretch()
-        self.btn_clear_time = QPushButton("🗑 清空报警时间")
-        self.btn_clear_time.setObjectName("btn_clear_time")
-        self.btn_clear_time.clicked.connect(self.clear_alarm_time)
-        table_header_layout.addWidget(self.btn_clear_time)
-        main_layout.addLayout(table_header_layout)
-
+        # 表格（11列：启用、名称、备注、当前值、下限、上限、坐标、状态、报警时间、静音、灵敏度）
         self.table = QTableWidget()
-        self.table.setColumnCount(10)
-        self.table.setHorizontalHeaderLabels(["启用", "名称", "备注", "当前值", "下限", "上限", "坐标", "状态", "报警时间", "静音"])
+        self.table.setColumnCount(11)
+        self.table.setHorizontalHeaderLabels(["启用", "名称", "备注", "当前值", "下限", "上限", "坐标", "状态", "报警时间", "静音", "灵敏度"])
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.setAlternatingRowColors(True)
         self.table.setRowCount(0)
+
+        # 设置列宽
         self.table.setColumnWidth(0, 40)
         self.table.setColumnWidth(1, 80)
-        self.table.setColumnWidth(2, 180)
-        self.table.setColumnWidth(3, 90)
-        self.table.setColumnWidth(4, 65)
-        self.table.setColumnWidth(5, 65)
-        self.table.setColumnWidth(6, 130)
-        self.table.setColumnWidth(7, 85)
-        self.table.setColumnWidth(8, 110)
-        self.table.setColumnWidth(9, 55)
+        self.table.setColumnWidth(2, 150)
+        self.table.setColumnWidth(3, 80)
+        self.table.setColumnWidth(4, 60)
+        self.table.setColumnWidth(5, 60)
+        self.table.setColumnWidth(6, 120)
+        self.table.setColumnWidth(7, 80)
+        self.table.setColumnWidth(8, 100)
+        self.table.setColumnWidth(9, 50)
+        self.table.setColumnWidth(10, 120)  # 灵敏度滑块
+
         self.table.horizontalHeader().setStretchLastSection(False)
         self.table.verticalHeader().setVisible(False)
         main_layout.addWidget(self.table, 3)
 
+        # 趋势曲线
         self.chart_group = QGroupBox("📈 数值趋势曲线")
         chart_layout = QVBoxLayout(self.chart_group)
         chart_layout.setContentsMargins(12, 18, 12, 12)
         self.trend_chart = TrendChartWidget()
         chart_layout.addWidget(self.trend_chart, 1)
-        record_layout = QHBoxLayout()
-        record_layout.addStretch()
-        record_layout.addWidget(QLabel("记录间隔:"))
-        self.record_interval_spin = QDoubleSpinBox()
-        self.record_interval_spin.setRange(1, 1440)
-        self.record_interval_spin.setValue(60)
-        self.record_interval_spin.setSuffix(" 分钟")
-        self.record_interval_spin.setFixedWidth(90)
-        self.record_interval_spin.valueChanged.connect(self.set_record_interval)
-        record_layout.addWidget(self.record_interval_spin)
-        record_layout.addStretch()
-        chart_layout.addLayout(record_layout)
         main_layout.addWidget(self.chart_group, 2)
 
+        # 第一排按钮（全部靠左）
         btn_layout_top = QHBoxLayout()
         btn_layout_top.setSpacing(10)
+        btn_layout_top.setAlignment(Qt.AlignLeft)
+
         self.btn_add = QPushButton("➕ 添加")
         self.btn_add.clicked.connect(self.add_monitor_row)
         btn_layout_top.addWidget(self.btn_add)
+
         self.btn_delete = QPushButton("🗑 删除")
         self.btn_delete.setObjectName("btn_delete")
         self.btn_delete.clicked.connect(self.delete_monitor_point)
         btn_layout_top.addWidget(self.btn_delete)
+
         self.btn_edit = QPushButton("✏️ 编辑")
         self.btn_edit.clicked.connect(self.edit_monitor_point)
         btn_layout_top.addWidget(self.btn_edit)
+
         self.btn_test = QPushButton("🎯 测试")
         self.btn_test.clicked.connect(self.test_selected_point)
         btn_layout_top.addWidget(self.btn_test)
-        btn_layout_top.addStretch()
+
+        # 检测间隔
         btn_layout_top.addWidget(QLabel("检测间隔:"))
         self.interval_spin = QDoubleSpinBox()
         self.interval_spin.setRange(0.1, 3600.0)
@@ -733,66 +726,66 @@ class MainWindow(QMainWindow):
         self.interval_spin.setFixedWidth(80)
         self.interval_spin.valueChanged.connect(self.on_interval_changed)
         btn_layout_top.addWidget(self.interval_spin)
+
         self.btn_start = QPushButton("▶ 开始")
         self.btn_start.setObjectName("btn_start")
         self.btn_start.clicked.connect(self.start_monitor)
         btn_layout_top.addWidget(self.btn_start)
+
         self.btn_stop = QPushButton("⏹ 停止")
         self.btn_stop.setObjectName("btn_stop")
         self.btn_stop.clicked.connect(self.stop_monitor)
         self.btn_stop.setEnabled(False)
         btn_layout_top.addWidget(self.btn_stop)
+
         main_layout.addLayout(btn_layout_top)
 
+        # 第二排按钮（全部靠左）
         btn_layout_bottom = QHBoxLayout()
         btn_layout_bottom.setSpacing(10)
+        btn_layout_bottom.setAlignment(Qt.AlignLeft)
+
+        # 记录间隔（最左）
+        btn_layout_bottom.addWidget(QLabel("记录间隔:"))
+        self.record_interval_spin = QDoubleSpinBox()
+        self.record_interval_spin.setRange(1, 1440)
+        self.record_interval_spin.setValue(60)
+        self.record_interval_spin.setSuffix(" 分钟")
+        self.record_interval_spin.setFixedWidth(90)
+        self.record_interval_spin.valueChanged.connect(self.set_record_interval)
+        btn_layout_bottom.addWidget(self.record_interval_spin)
+
+        # 小窗口
         self.btn_mini = QPushButton("📱 小窗口")
         self.btn_mini.setObjectName("btn_mini")
         self.btn_mini.clicked.connect(self.toggle_mini_mode)
         btn_layout_bottom.addWidget(self.btn_mini)
+
+        # 收起曲线
         self.btn_chart_toggle = QPushButton("📉 收起曲线")
         self.btn_chart_toggle.setObjectName("btn_chart_toggle")
         self.btn_chart_toggle.clicked.connect(self.toggle_chart)
         btn_layout_bottom.addWidget(self.btn_chart_toggle)
 
-        # ---------- 识别灵敏度滑块 ----------
-        btn_layout_bottom.addWidget(QLabel("灵敏度:"))
-        self.sensitivity_slider = QSlider(Qt.Horizontal)
-        self.sensitivity_slider.setRange(1, 10)
-        self.sensitivity_slider.setValue(5)
-        self.sensitivity_slider.setFixedWidth(100)
-        self.sensitivity_slider.setTickPosition(QSlider.TicksBelow)
-        self.sensitivity_slider.setTickInterval(1)
-        self.sensitivity_slider.valueChanged.connect(self.on_sensitivity_changed)
-        btn_layout_bottom.addWidget(self.sensitivity_slider)
-        self.sensitivity_label = QLabel("5")
-        self.sensitivity_label.setFixedWidth(20)
-        btn_layout_bottom.addWidget(self.sensitivity_label)
+        # 清空报警时间（放在收起曲线右边）
+        self.btn_clear_time = QPushButton("🗑 清空报警时间")
+        self.btn_clear_time.setObjectName("btn_clear_time")
+        self.btn_clear_time.clicked.connect(self.clear_alarm_time)
+        btn_layout_bottom.addWidget(self.btn_clear_time)
 
-        btn_layout_bottom.addStretch()
-
-        btn_layout_bottom.addWidget(QLabel("音量:"))
-        self.volume_slider = QSlider(Qt.Horizontal)
-        self.volume_slider.setRange(0, 100)
-        self.volume_slider.setValue(80)
-        self.volume_slider.setFixedWidth(90)
-        self.volume_slider.valueChanged.connect(self.on_volume_changed)
-        btn_layout_bottom.addWidget(self.volume_slider)
-        self.volume_label = QLabel("80%")
-        self.volume_label.setFixedWidth(40)
-        btn_layout_bottom.addWidget(self.volume_label)
-
-        btn_layout_bottom.addStretch()
-
+        # 保存、加载
         self.btn_save = QPushButton("💾 保存配置")
         self.btn_save.setObjectName("btn_save")
         self.btn_save.clicked.connect(self.save_config)
         btn_layout_bottom.addWidget(self.btn_save)
+
         self.btn_load = QPushButton("📂 加载配置")
         self.btn_load.clicked.connect(self.load_config_dialog)
         btn_layout_bottom.addWidget(self.btn_load)
+
         main_layout.addLayout(btn_layout_bottom)
 
+        # 状态栏
         status_layout = QHBoxLayout()
         status_layout.setSpacing(10)
         self.status_label = QLabel("状态: 就绪")
@@ -806,15 +799,53 @@ class MainWindow(QMainWindow):
         self.table.model().rowsInserted.connect(self._on_rows_inserted)
         self.table.model().rowsRemoved.connect(self._on_rows_removed)
 
-    # ---------- 灵敏度更新 ----------
-    def on_sensitivity_changed(self, value):
-        self.sensitivity = value
-        self.sensitivity_label.setText(str(value))
-        # 如果监控正在运行，更新监控线程的参数
-        if self.monitoring and self.monitor_thread is not None:
-            self.monitor_thread.set_sensitivity(value)
+    # ---------- 创建灵敏度滑块控件 ----------
+    def create_sensitivity_widget(self, row, value=5):
+        """创建一个包含滑块和数值标签的控件"""
+        widget = QWidget()
+        layout = QHBoxLayout(widget)
+        layout.setContentsMargins(2, 0, 2, 0)
+        layout.setSpacing(2)
 
-    # ---------- 以下为所有功能方法 ----------
+        slider = QSlider(Qt.Horizontal)
+        slider.setRange(1, 10)
+        slider.setValue(value)
+        slider.setFixedWidth(60)
+        slider.valueChanged.connect(lambda v, r=row: self.on_row_sensitivity_changed(r, v))
+
+        label = QLabel(str(value))
+        label.setFixedWidth(20)
+        label.setAlignment(Qt.AlignCenter)
+
+        layout.addWidget(slider)
+        layout.addWidget(label)
+
+        # 保存引用以便更新标签
+        widget.slider = slider
+        widget.label = label
+        widget.row = row
+        return widget
+
+    def on_row_sensitivity_changed(self, row, value):
+        """行灵敏度变化时更新标签，并存储"""
+        # 更新标签
+        widget = self.table.cellWidget(row, 10)
+        if widget and hasattr(widget, 'label'):
+            widget.label.setText(str(value))
+        # 存储到字典
+        self.row_sensitivity[row] = value
+
+        # 如果监控正在运行，更新对应监控点的灵敏度
+        if self.monitoring and self.monitor_thread is not None:
+            for m in self.monitor_thread.monitors:
+                if m['row'] == row:
+                    m['sensitivity'] = value
+                    break
+
+    def get_row_sensitivity(self, row):
+        return self.row_sensitivity.get(row, 5)
+
+    # ---------- 以下为功能方法 ----------
     def clear_alarm_time(self):
         for row in range(self.table.rowCount()):
             if self.table.item(row, 1) is None:
@@ -906,13 +937,16 @@ class MainWindow(QMainWindow):
 
     def _on_rows_inserted(self, parent, first, last):
         for row in range(first, last + 1):
+            # 启用复选框
             widget = self.table.cellWidget(row, 0)
             if widget and isinstance(widget, QCheckBox):
                 self.row_enabled[row] = widget.isChecked()
+            # 静音复选框
             mute_widget = self.table.cellWidget(row, 9)
             if mute_widget and isinstance(mute_widget, QCheckBox):
                 self.row_muted[row] = mute_widget.isChecked()
                 mute_widget.stateChanged.connect(lambda state, r=row: self._on_mute_changed(r, state))
+            # 灵敏度滑块（已经设置好）
 
     def _on_rows_removed(self, parent, first, last):
         for row in range(first, last + 1):
@@ -922,6 +956,8 @@ class MainWindow(QMainWindow):
                 del self.row_alarm[row]
             if row in self.row_muted:
                 del self.row_muted[row]
+            if row in self.row_sensitivity:
+                del self.row_sensitivity[row]
             if row in self.value_history:
                 del self.value_history[row]
 
@@ -966,11 +1002,6 @@ class MainWindow(QMainWindow):
         if self.monitoring and self.monitor_thread:
             self.monitor_thread.set_interval(self.detect_interval)
 
-    def on_volume_changed(self, value):
-        volume = value / 100.0
-        self.volume_label.setText(f"{value}%")
-        self.alarm_player.set_volume(volume)
-
     def play_alarm(self, row):
         self.raise_()
         self.activateWindow()
@@ -988,6 +1019,7 @@ class MainWindow(QMainWindow):
         if value >= 100:
             QTimer.singleShot(1000, lambda: self.download_progress.setVisible(False))
 
+    # ---------- 添加、编辑、删除 ----------
     def add_monitor_row(self):
         self.picker = CoordinatePicker(self)
         self.picker.coord_selected.connect(self._on_picker_completed)
@@ -1000,20 +1032,33 @@ class MainWindow(QMainWindow):
         row = self.table.rowCount()
         self.table.insertRow(row)
         self.value_history[row] = []
+
+        # 启用
         enable_check = QCheckBox()
         enable_check.setChecked(True)
         enable_check.setStyleSheet("margin-left: 12px;")
         self.table.setCellWidget(row, 0, enable_check)
         self.row_enabled[row] = True
         enable_check.stateChanged.connect(lambda state, r=row: self._on_enable_changed(r, state))
+
+        # 备注
         remark_edit = QLineEdit()
         self.table.setCellWidget(row, 2, remark_edit)
+
+        # 静音
         mute_check = QCheckBox()
         mute_check.setChecked(False)
         mute_check.setStyleSheet("margin-left: 12px;")
         self.table.setCellWidget(row, 9, mute_check)
         self.row_muted[row] = False
         mute_check.stateChanged.connect(lambda state, r=row: self._on_mute_changed(r, state))
+
+        # 灵敏度滑块（默认5）
+        sens_widget = self.create_sensitivity_widget(row, 5)
+        self.table.setCellWidget(row, 10, sens_widget)
+        self.row_sensitivity[row] = 5
+
+        # 文本项
         self.table.setItem(row, 1, QTableWidgetItem(f"区域{row+1}"))
         self.table.setItem(row, 3, QTableWidgetItem("--"))
         self.table.setItem(row, 4, QTableWidgetItem("0"))
@@ -1021,10 +1066,12 @@ class MainWindow(QMainWindow):
         self.table.setItem(row, 6, QTableWidgetItem(f"{x},{y},{width},{height}"))
         self.table.setItem(row, 7, QTableWidgetItem("待监控"))
         self.table.setItem(row, 8, QTableWidgetItem("--"))
+
         for col in [1,3,4,5,6,7,8]:
             it = self.table.item(row, col)
             if it:
                 it.setTextAlignment(Qt.AlignCenter)
+
         self.status_label.setText(f"状态: 已添加 区域{row+1}")
 
     def _on_enable_changed(self, row, state):
@@ -1065,6 +1112,7 @@ class MainWindow(QMainWindow):
             self.table.removeRow(row)
             self.status_label.setText("状态: 已删除")
 
+    # ---------- 记录 ----------
     def set_record_interval(self, value):
         self.record_interval = value * 60
         if self.recording:
@@ -1095,6 +1143,7 @@ class MainWindow(QMainWindow):
             name = name_item.text() if name_item else f"区域{row+1}"
             self.trend_chart.set_data(self.value_history[row], f"{name} 数值趋势")
 
+    # ---------- 测试 ----------
     def test_selected_point(self):
         if self.test_reader is None:
             QMessageBox.warning(self, "提示", "OCR 引擎尚未加载完成，请稍候...")
@@ -1109,6 +1158,9 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "错误", "坐标数据无效")
             return
         x, y, w, h = map(int, nums[:4])
+        # 获取该行的灵敏度
+        sens = self.get_row_sensitivity(row)
+
         try:
             import mss, numpy as np
             from PIL import Image
@@ -1119,14 +1171,13 @@ class MainWindow(QMainWindow):
                 img = Image.frombytes("RGB", screenshot.size, screenshot.rgb)
                 img_np = np.array(img)
 
-            # 使用当前的灵敏度参数进行预处理
-            sensitivity = self.sensitivity
-            # 映射参数
-            clip_limit = 1.0 + (sensitivity / 10.0) * 2.0  # 1.0 ~ 3.0
-            block_size = max(3, int(5 + (10 - sensitivity) * 1.5))  # 5~17 奇数
+            # 使用灵敏度参数
+            clip_limit = 1.0 + (sens / 10.0) * 2.0
+            block_size = max(3, int(5 + (10 - sens) * 1.5))
             if block_size % 2 == 0:
                 block_size += 1
-            c_value = max(1, int(2 + (10 - sensitivity) * 0.5))
+            c_value = max(1, int(2 + (10 - sens) * 0.5))
+            text_thr = 0.3 + (10 - sens) * 0.03
 
             def preprocess(img_np):
                 height, width = img_np.shape[:2]
@@ -1150,10 +1201,11 @@ class MainWindow(QMainWindow):
                 return cv2.cvtColor(cleaned, cv2.COLOR_GRAY2RGB)
 
             processed = preprocess(img_np)
-            result = self.test_reader.readtext(processed, allowlist='0123456789.-', paragraph=False)
+            result = self.test_reader.readtext(processed, allowlist='0123456789.-', paragraph=False,
+                                                text_threshold=text_thr)
             all_numbers = []
             for bbox, text, confidence in result:
-                if confidence > 0.2 + (10 - sensitivity) * 0.03:  # 灵敏度高则阈值低
+                if confidence > 0.2:
                     numbers = re.findall(r'-?\d+\.?\d*', text)
                     for num_str in numbers:
                         try:
@@ -1175,6 +1227,7 @@ class MainWindow(QMainWindow):
         self.ocr_status_label.setStyleSheet(f"padding: 6px 14px; background-color: #2a2a42; border-radius: 6px; color: {color}; border: 1px solid #3a3a55;")
         self.ocr_status_label.setText(f"OCR引擎: {status}")
 
+    # ---------- 监控控制 ----------
     def start_monitor(self):
         if self.monitoring:
             return
@@ -1191,6 +1244,7 @@ class MainWindow(QMainWindow):
         if not has_enabled:
             QMessageBox.warning(self, "提示", "没有启用的监控点，请勾选「启用」复选框")
             return
+
         monitors = []
         for row in range(self.table.rowCount()):
             if self.table.item(row, 1) is None:
@@ -1204,15 +1258,24 @@ class MainWindow(QMainWindow):
                 x, y, w, h = map(int, nums[:4])
             else:
                 continue
-            monitors.append({'name': name, 'x': x, 'y': y, 'width': w, 'height': h, 'lower': lower, 'upper': upper, 'row': row, 'enabled': self._get_row_enabled(row)})
+            sens = self.get_row_sensitivity(row)
+            monitors.append({
+                'name': name,
+                'x': x, 'y': y,
+                'width': w, 'height': h,
+                'lower': lower, 'upper': upper,
+                'row': row,
+                'enabled': self._get_row_enabled(row),
+                'sensitivity': sens
+            })
+
         if not monitors:
             QMessageBox.warning(self, "提示", "没有有效的监控点数据")
             return
+
         self.monitor_thread = MonitorThread(monitors)
         self.monitor_thread.set_interval(self.detect_interval)
         self.monitor_thread.set_alarm_loop(self.loop_enabled)
-        # 传递灵敏度
-        self.monitor_thread.set_sensitivity(self.sensitivity)
         self.monitor_thread.value_updated.connect(self.on_value_updated)
         self.monitor_thread.alarm_triggered.connect(self.on_alarm_triggered)
         self.monitor_thread.status_updated.connect(self.on_status_updated)
@@ -1222,6 +1285,7 @@ class MainWindow(QMainWindow):
             self.monitor_thread.set_reader(self.test_reader)
         self.monitor_thread.get_row_enabled = self._get_row_enabled
         self.monitor_thread.start()
+
         self.monitoring = True
         self.btn_start.setEnabled(False)
         self.btn_stop.setEnabled(True)
@@ -1323,14 +1387,13 @@ class MainWindow(QMainWindow):
         if self.monitoring:
             self.status_label.setText("状态: 监控运行中")
 
+    # ---------- 配置保存与加载 ----------
     def save_config(self):
         config = {
             'monitors': [],
-            'volume': self.volume_slider.value(),
             'interval': self.interval_spin.value(),
             'loop_enabled': self.loop_enabled,
             'record_interval': self.record_interval_spin.value(),
-            'sensitivity': self.sensitivity,
             'window_geometry': self.saveGeometry().toBase64().data().decode('utf-8'),
             'window_state': self.saveState().toBase64().data().decode('utf-8')
         }
@@ -1341,6 +1404,7 @@ class MainWindow(QMainWindow):
             enable_check = self.table.cellWidget(row, 0)
             mute_check = self.table.cellWidget(row, 9)
             remark_widget = self.table.cellWidget(row, 2)
+            sens = self.get_row_sensitivity(row)
             config['monitors'].append({
                 'name': self.table.item(row, 1).text(),
                 'remark': remark_widget.text() if remark_widget else "",
@@ -1348,7 +1412,8 @@ class MainWindow(QMainWindow):
                 'upper': float(self.table.item(row, 5).text()),
                 'coords': self.table.item(row, 6).text(),
                 'enabled': enable_check.isChecked() if enable_check else True,
-                'muted': mute_check.isChecked() if mute_check else False
+                'muted': mute_check.isChecked() if mute_check else False,
+                'sensitivity': sens
             })
         try:
             with open(self.config_file, 'w', encoding='utf-8') as f:
@@ -1367,25 +1432,41 @@ class MainWindow(QMainWindow):
             self.row_enabled.clear()
             self.row_alarm.clear()
             self.row_muted.clear()
+            self.row_sensitivity.clear()
             self.value_history.clear()
+
             for item in config.get('monitors', []):
                 row = self.table.rowCount()
                 self.table.insertRow(row)
                 self.value_history[row] = []
+
+                # 启用
                 enable_check = QCheckBox()
                 enable_check.setChecked(item.get('enabled', True))
                 enable_check.setStyleSheet("margin-left: 12px;")
                 self.table.setCellWidget(row, 0, enable_check)
                 self.row_enabled[row] = item.get('enabled', True)
                 enable_check.stateChanged.connect(lambda state, r=row: self._on_enable_changed(r, state))
+
+                # 备注
                 remark_edit = QLineEdit(item.get('remark', ''))
                 self.table.setCellWidget(row, 2, remark_edit)
+
+                # 静音
                 mute_check = QCheckBox()
                 mute_check.setChecked(item.get('muted', False))
                 mute_check.setStyleSheet("margin-left: 12px;")
                 self.table.setCellWidget(row, 9, mute_check)
                 self.row_muted[row] = item.get('muted', False)
                 mute_check.stateChanged.connect(lambda state, r=row: self._on_mute_changed(r, state))
+
+                # 灵敏度
+                sens = item.get('sensitivity', 5)
+                sens_widget = self.create_sensitivity_widget(row, sens)
+                self.table.setCellWidget(row, 10, sens_widget)
+                self.row_sensitivity[row] = sens
+
+                # 文本项
                 self.table.setItem(row, 1, QTableWidgetItem(item['name']))
                 self.table.setItem(row, 3, QTableWidgetItem("--"))
                 self.table.setItem(row, 4, QTableWidgetItem(str(item['lower'])))
@@ -1393,35 +1474,32 @@ class MainWindow(QMainWindow):
                 self.table.setItem(row, 6, QTableWidgetItem(item['coords']))
                 self.table.setItem(row, 7, QTableWidgetItem("待监控"))
                 self.table.setItem(row, 8, QTableWidgetItem("--"))
+
                 for col in [1,3,4,5,6,7,8]:
                     it = self.table.item(row, col)
                     if it:
                         it.setTextAlignment(Qt.AlignCenter)
-            volume = config.get('volume', 80)
-            self.volume_slider.setValue(volume)
-            self.on_volume_changed(volume)
 
-            # 加载灵敏度
-            sensitivity = config.get('sensitivity', 5)
-            self.sensitivity = sensitivity
-            self.sensitivity_slider.setValue(sensitivity)
-            self.sensitivity_label.setText(str(sensitivity))
-
+            # 恢复其他配置
             header_state = config.get('header_state')
             if header_state:
                 self.table.horizontalHeader().restoreState(QByteArray.fromBase64(header_state.encode('utf-8')))
+
             interval = config.get('interval', 0.5)
             self.interval_spin.setValue(interval)
             self.detect_interval = int(interval * 1000)
+
             record_interval = config.get('record_interval', 60)
             self.record_interval_spin.setValue(record_interval)
             self.record_interval = record_interval * 60
+
             geometry = config.get('window_geometry')
             if geometry:
                 self.restoreGeometry(QByteArray.fromBase64(geometry.encode('utf-8')))
             state = config.get('window_state')
             if state:
                 self.restoreState(QByteArray.fromBase64(state.encode('utf-8')))
+
             self.status_label.setText("状态: 配置已加载")
         except Exception as e:
             print(f"加载失败: {e}")
