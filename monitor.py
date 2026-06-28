@@ -114,22 +114,43 @@ class MonitorThread(QThread):
     
     def _preprocess_image(self, img_np):
         try:
+            # 1. 图像放大3倍，提升细节
             height, width = img_np.shape[:2]
             scaled = cv2.resize(img_np, (width * 3, height * 3), interpolation=cv2.INTER_CUBIC)
             
+            # 2. 转灰度
             if len(scaled.shape) == 3:
                 gray = cv2.cvtColor(scaled, cv2.COLOR_RGB2GRAY)
             else:
                 gray = scaled
             
+            # 3. 对比度增强 (CLAHE)
             clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
             enhanced = clahe.apply(gray)
             
+            # 4. 反色处理（如果是黑底白字，转为白底黑字）
             if np.mean(enhanced) < 80:
                 enhanced = 255 - enhanced
                 enhanced = clahe.apply(enhanced)
             
-            rgb = cv2.cvtColor(enhanced, cv2.COLOR_GRAY2RGB)
+            # 5. 锐化 - 增强边缘，使小数点更清晰
+            kernel_sharpen = np.array([[-1,-1,-1],
+                                       [-1, 9,-1],
+                                       [-1,-1,-1]])
+            sharpened = cv2.filter2D(enhanced, -1, kernel_sharpen)
+            
+            # 6. 自适应二值化 (使用更小的块大小以保留细节)
+            binary = cv2.adaptiveThreshold(sharpened, 255,
+                                           cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                                           cv2.THRESH_BINARY, 11, 2)
+            
+            # 7. 形态学操作 - 去除小噪点，连接断裂
+            kernel = np.ones((2,2), np.uint8)
+            cleaned = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel, iterations=1)
+            cleaned = cv2.morphologyEx(cleaned, cv2.MORPH_OPEN, kernel, iterations=1)
+            
+            # 8. 转回RGB
+            rgb = cv2.cvtColor(cleaned, cv2.COLOR_GRAY2RGB)
             return rgb
             
         except Exception as e:
@@ -151,6 +172,7 @@ class MonitorThread(QThread):
             
             processed = self._preprocess_image(img_np)
             
+            # 第一次识别
             result = self.reader.readtext(
                 processed,
                 allowlist='0123456789.-',
@@ -159,24 +181,51 @@ class MonitorThread(QThread):
                 height_ths=0.5
             )
             
+            # 提取所有数字
+            all_numbers = []
             for bbox, text, confidence in result:
                 if confidence > 0.3:
+                    # 提取所有数字（包括小数）
                     numbers = re.findall(r'-?\d+\.?\d*', text)
-                    if numbers:
-                        return float(numbers[0])
+                    for num_str in numbers:
+                        try:
+                            val = float(num_str)
+                            all_numbers.append((val, confidence, len(num_str)))
+                        except:
+                            pass
             
-            result2 = self.reader.readtext(
-                img_np,
-                allowlist='0123456789.-',
-                paragraph=False
-            )
-            for bbox, text, confidence in result2:
-                if confidence > 0.3:
-                    numbers = re.findall(r'-?\d+\.?\d*', text)
-                    if numbers:
-                        return float(numbers[0])
+            # 如果第一次没有结果，尝试原图
+            if len(all_numbers) == 0:
+                result2 = self.reader.readtext(
+                    img_np,
+                    allowlist='0123456789.-',
+                    paragraph=False
+                )
+                for bbox, text, confidence in result2:
+                    if confidence > 0.3:
+                        numbers = re.findall(r'-?\d+\.?\d*', text)
+                        for num_str in numbers:
+                            try:
+                                val = float(num_str)
+                                all_numbers.append((val, confidence, len(num_str)))
+                            except:
+                                pass
             
-            return None
+            if len(all_numbers) == 0:
+                return None
+            
+            # 选择最合理的数字：优先选带有小数的（因为数字可能是小数）
+            # 如果所有都是整数，取最大的那个（因为可能识别成13而忽略点）
+            # 改进：如果有多个候选，选择长度最长的（可能包含小数）
+            # 排序：先按长度降序，再按置信度降序
+            all_numbers.sort(key=lambda x: (x[2], x[1]), reverse=True)
+            best = all_numbers[0][0]
+            
+            # 如果最佳是整数且大于10，检查是否可能有小数被忽略
+            # 可以检查区域宽度，如果区域较宽，数字可能包含小数
+            # 这里简单处理：如果识别出的整数在10-99之间，并且区域宽度大于30像素，可能是有小数的
+            # 但不做强制转换，因为无法判断
+            return best
             
         except Exception as e:
             return None
