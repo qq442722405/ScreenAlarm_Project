@@ -33,7 +33,6 @@ class MonitorThread(QThread):
         self.interval_ms = 500
         self.get_row_enabled = None
         self.alarm_loop_enabled = True
-        
         self.alarm_status = {}
         self.manual_clear = False
         
@@ -72,21 +71,16 @@ class MonitorThread(QThread):
         if not OCR_AVAILABLE:
             self.ocr_status.emit("EasyOCR未安装，请运行: pip install easyocr", False)
             return False
-        
         try:
             if getattr(sys, 'frozen', False):
                 base_dir = os.path.dirname(sys.executable)
             else:
                 base_dir = os.path.dirname(os.path.abspath(__file__))
-            
             model_dir = os.path.join(base_dir, 'ocr_models')
-            
             if not os.path.exists(model_dir):
                 os.makedirs(model_dir, exist_ok=True)
-            
             self.ocr_status.emit("正在下载/加载EasyOCR模型 (首次约200MB)...", False)
             self.download_progress.emit(0)
-            
             self.reader = easyocr.Reader(
                 ['en'],
                 gpu=False,
@@ -94,7 +88,6 @@ class MonitorThread(QThread):
                 download_enabled=True,
                 verbose=False
             )
-            
             if self.reader is not None:
                 self.ocr_ready = True
                 self.download_progress.emit(100)
@@ -103,7 +96,6 @@ class MonitorThread(QThread):
             else:
                 self.ocr_status.emit("创建OCR对象失败", False)
                 return False
-            
         except Exception as e:
             error_msg = str(e)
             if "Connection" in error_msg or "timeout" in error_msg.lower():
@@ -114,45 +106,25 @@ class MonitorThread(QThread):
     
     def _preprocess_image(self, img_np):
         try:
-            # 1. 图像放大3倍，提升细节
             height, width = img_np.shape[:2]
-            scaled = cv2.resize(img_np, (width * 3, height * 3), interpolation=cv2.INTER_CUBIC)
-            
-            # 2. 转灰度
+            scaled = cv2.resize(img_np, (width * 3, height * 3), interpolation=cv2.INTER_LINEAR)
             if len(scaled.shape) == 3:
                 gray = cv2.cvtColor(scaled, cv2.COLOR_RGB2GRAY)
             else:
                 gray = scaled
-            
-            # 3. 对比度增强 (CLAHE)
             clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
             enhanced = clahe.apply(gray)
-            
-            # 4. 反色处理（如果是黑底白字，转为白底黑字）
             if np.mean(enhanced) < 80:
                 enhanced = 255 - enhanced
                 enhanced = clahe.apply(enhanced)
-            
-            # 5. 锐化 - 增强边缘，使小数点更清晰
-            kernel_sharpen = np.array([[-1,-1,-1],
-                                       [-1, 9,-1],
-                                       [-1,-1,-1]])
+            kernel_sharpen = np.array([[-1,-1,-1],[-1,9,-1],[-1,-1,-1]])
             sharpened = cv2.filter2D(enhanced, -1, kernel_sharpen)
-            
-            # 6. 自适应二值化 (使用更小的块大小以保留细节)
-            binary = cv2.adaptiveThreshold(sharpened, 255,
-                                           cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-                                           cv2.THRESH_BINARY, 11, 2)
-            
-            # 7. 形态学操作 - 去除小噪点，连接断裂
+            binary = cv2.adaptiveThreshold(sharpened, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2)
             kernel = np.ones((2,2), np.uint8)
             cleaned = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel, iterations=1)
             cleaned = cv2.morphologyEx(cleaned, cv2.MORPH_OPEN, kernel, iterations=1)
-            
-            # 8. 转回RGB
             rgb = cv2.cvtColor(cleaned, cv2.COLOR_GRAY2RGB)
             return rgb
-            
         except Exception as e:
             return img_np
     
@@ -164,28 +136,23 @@ class MonitorThread(QThread):
         try:
             if width <= 0 or height <= 0:
                 return None
-            
             monitor = {"top": y, "left": x, "width": width, "height": height}
             screenshot = self.sct.grab(monitor)
             img = Image.frombytes("RGB", screenshot.size, screenshot.rgb)
             img_np = np.array(img)
-            
             processed = self._preprocess_image(img_np)
-            
-            # 第一次识别
             result = self.reader.readtext(
                 processed,
                 allowlist='0123456789.-',
                 paragraph=False,
                 width_ths=0.5,
-                height_ths=0.5
+                height_ths=0.5,
+                text_threshold=0.4,
+                low_text=0.2
             )
-            
-            # 提取所有数字
             all_numbers = []
             for bbox, text, confidence in result:
-                if confidence > 0.3:
-                    # 提取所有数字（包括小数）
+                if confidence > 0.25:
                     numbers = re.findall(r'-?\d+\.?\d*', text)
                     for num_str in numbers:
                         try:
@@ -193,8 +160,6 @@ class MonitorThread(QThread):
                             all_numbers.append((val, confidence, len(num_str)))
                         except:
                             pass
-            
-            # 如果第一次没有结果，尝试原图
             if len(all_numbers) == 0:
                 result2 = self.reader.readtext(
                     img_np,
@@ -202,7 +167,7 @@ class MonitorThread(QThread):
                     paragraph=False
                 )
                 for bbox, text, confidence in result2:
-                    if confidence > 0.3:
+                    if confidence > 0.25:
                         numbers = re.findall(r'-?\d+\.?\d*', text)
                         for num_str in numbers:
                             try:
@@ -210,23 +175,11 @@ class MonitorThread(QThread):
                                 all_numbers.append((val, confidence, len(num_str)))
                             except:
                                 pass
-            
             if len(all_numbers) == 0:
                 return None
-            
-            # 选择最合理的数字：优先选带有小数的（因为数字可能是小数）
-            # 如果所有都是整数，取最大的那个（因为可能识别成13而忽略点）
-            # 改进：如果有多个候选，选择长度最长的（可能包含小数）
-            # 排序：先按长度降序，再按置信度降序
-            all_numbers.sort(key=lambda x: (x[2], x[1]), reverse=True)
+            all_numbers.sort(key=lambda x: (1 if '.' in str(x[0]) else 0, x[2]), reverse=True)
             best = all_numbers[0][0]
-            
-            # 如果最佳是整数且大于10，检查是否可能有小数被忽略
-            # 可以检查区域宽度，如果区域较宽，数字可能包含小数
-            # 这里简单处理：如果识别出的整数在10-99之间，并且区域宽度大于30像素，可能是有小数的
-            # 但不做强制转换，因为无法判断
             return best
-            
         except Exception as e:
             return None
     
@@ -234,7 +187,6 @@ class MonitorThread(QThread):
         if not self._init_ocr():
             self.status_updated.emit(-1, 'OCR加载失败，请检查网络后重启')
             return
-        
         for m in self.monitors:
             self.alarm_status[m['row']] = {
                 'alarm': False, 
@@ -242,46 +194,35 @@ class MonitorThread(QThread):
                 'last_alarm_time': 0
             }
             self.status_updated.emit(m['row'], '监控中')
-        
         interval_sec = self.interval_ms / 1000.0
-        
         while self.running:
             for monitor in self.monitors:
                 if not self.running:
                     break
                 row = monitor['row']
-                
                 if not self._is_enabled(row):
                     self.status_updated.emit(row, 'disabled')
                     self.alarm_status[row]['alarm'] = False
                     continue
-                
                 raw_value = self._capture_and_ocr(
                     monitor['x'], monitor['y'],
                     monitor['width'], monitor['height']
                 )
-                
                 if raw_value is not None:
                     value = float(raw_value)
                     self.value_updated.emit(row, value)
                     lower, upper = monitor['lower'], monitor['upper']
-                    
                     if value < lower or value > upper:
                         now = time.time()
                         last_time = self.alarm_status[row]['last_alarm_time']
-                        
                         if not self.alarm_status[row]['alarm']:
                             self.alarm_status[row]['alarm'] = True
                             self.alarm_status[row]['last_alarm_time'] = now
-                            self.alarm_triggered.emit(
-                                row, monitor['name'], value, lower, upper
-                            )
+                            self.alarm_triggered.emit(row, monitor['name'], value, lower, upper)
                         elif self.alarm_loop_enabled:
                             if now - last_time > 10:
                                 self.alarm_status[row]['last_alarm_time'] = now
-                                self.alarm_triggered.emit(
-                                    row, monitor['name'], value, lower, upper
-                                )
+                                self.alarm_triggered.emit(row, monitor['name'], value, lower, upper)
                     else:
                         if not self.manual_clear:
                             self.alarm_status[row]['alarm'] = False
@@ -293,10 +234,7 @@ class MonitorThread(QThread):
                     self.alarm_status[row]['count'] += 1
                     if self.alarm_status[row]['count'] >= 3:
                         self.status_updated.emit(row, 'error')
-                
                 time.sleep(0.05)
-            
             time.sleep(max(0.05, interval_sec - 0.3))
-        
         if self.sct:
             self.sct.close()
