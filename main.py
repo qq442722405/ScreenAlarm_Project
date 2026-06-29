@@ -9,7 +9,7 @@ from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QTableWidget, QTableWidgetItem, QLabel, QMessageBox,
     QAbstractItemView, QHeaderView, QFileDialog, QLineEdit,
-    QGroupBox, QSlider, QProgressBar, QCheckBox, QDoubleSpinBox
+    QGroupBox, QSlider, QProgressBar, QCheckBox, QSpinBox
 )
 from PySide6.QtCore import Qt, QTimer, QThread, Signal, QPoint, QRect, QByteArray
 from PySide6.QtGui import (
@@ -187,12 +187,14 @@ class CoordinatePicker(QWidget):
         self.coord_label.adjustSize()
         self.coord_label.move((self.width() - self.coord_label.width()) // 2, 60)
         self.setFocus(Qt.OtherFocusReason)
+        self.magnifier_radius = 60
 
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
         painter.drawPixmap(self.rect(), self.screen_pixmap)
         painter.fillRect(self.rect(), QColor(0, 0, 0, 120))
+
         if self.is_selecting and not self.end_pos.isNull():
             rect = self._get_current_rect()
             if rect.width() > 5 and rect.height() > 5:
@@ -216,6 +218,37 @@ class CoordinatePicker(QWidget):
             text_y = rect.y() - 12 if rect.y() > 30 else rect.y() + rect.height() + 25
             painter.drawText(rect.x() + 10, text_y, f"{rect.width()} × {rect.height()}")
 
+        # 绘制放大镜
+        self._draw_magnifier(painter)
+
+    def _draw_magnifier(self, painter):
+        if not self.is_selecting or self.end_pos.isNull():
+            return
+        pos = self.end_pos
+        if not self.rect().contains(pos):
+            return
+        radius = self.magnifier_radius
+        crop_rect = QRect(pos.x() - radius//2, pos.y() - radius//2, radius, radius)
+        crop_rect = crop_rect.intersected(self.total_rect)
+        if crop_rect.width() <= 0 or crop_rect.height() <= 0:
+            return
+        pixmap = self.screen_pixmap.copy(crop_rect)
+        scale = 3
+        scaled = pixmap.scaled(radius * scale, radius * scale, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        painter.save()
+        painter.setPen(QPen(Qt.white, 2))
+        painter.setBrush(QColor(0, 0, 0, 150))
+        painter.drawEllipse(pos, radius, radius)
+        path = QPainterPath()
+        path.addEllipse(pos, radius-2, radius-2)
+        painter.setClipPath(path)
+        painter.drawPixmap(pos.x() - radius*(scale//2), pos.y() - radius*(scale//2), scaled)
+        painter.setClipping(False)
+        painter.setPen(QPen(Qt.white, 1, Qt.DashLine))
+        painter.drawLine(pos.x() - radius, pos.y(), pos.x() + radius, pos.y())
+        painter.drawLine(pos.x(), pos.y() - radius, pos.x(), pos.y() + radius)
+        painter.restore()
+
     def _get_current_rect(self):
         if self.start_pos.isNull():
             return QRect()
@@ -236,13 +269,13 @@ class CoordinatePicker(QWidget):
             self.update()
 
     def mouseMoveEvent(self, event):
+        self.end_pos = event.position().toPoint()
         if self.is_selecting:
-            self.end_pos = event.position().toPoint()
             rect = self._get_current_rect()
             self.coord_label.setText(f"起点: ({self.start_pos.x()}, {self.start_pos.y()})  大小: {rect.width()} × {rect.height()}")
             self.coord_label.adjustSize()
             self.coord_label.move((self.width() - self.coord_label.width()) // 2, 60)
-            self.update()
+        self.update()
 
     def mouseReleaseEvent(self, event):
         if event.button() == Qt.LeftButton and self.is_selecting:
@@ -424,12 +457,11 @@ class MainWindow(QMainWindow):
         self.record_timer = QTimer()
         self.record_timer.timeout.connect(self.record_current_value)
         self.recording = False
-        self.record_interval = 60 * 60
+        self.record_interval = 60  # 分钟
 
         self.test_reader = None
         self.reader_loading = False
 
-        # 样式表
         self.setStyleSheet("""
             QMainWindow { background-color: #1e1e2e; }
             QLabel { color: #e0e0f0; font-family: "Microsoft YaHei"; }
@@ -497,7 +529,7 @@ class MainWindow(QMainWindow):
                 background: #4a9eff;
                 border-radius: 3px;
             }
-            QDoubleSpinBox {
+            QSpinBox {
                 background-color: #363650;
                 color: #e0e0f0;
                 border: 1px solid #4a4a6a;
@@ -505,7 +537,7 @@ class MainWindow(QMainWindow):
                 padding: 5px 10px;
                 min-height: 20px;
             }
-            QDoubleSpinBox:hover { border-color: #4a9eff; }
+            QSpinBox:hover { border-color: #4a9eff; }
             QProgressBar {
                 background-color: #27273d;
                 border: 1px solid #33334a;
@@ -699,13 +731,7 @@ class MainWindow(QMainWindow):
         self.table.setColumnWidth(10, 120)
         self.table.horizontalHeader().setStretchLastSection(False)
         self.table.verticalHeader().setVisible(True)
-
-        # 启用拖拽
-        self.table.setDragDropMode(QAbstractItemView.InternalMove)
-        self.table.setDragEnabled(True)
-        self.table.setAcceptDrops(True)
-        self.table.setDropIndicatorShown(True)
-        self.table.model().rowsMoved.connect(self._on_rows_moved)
+        # 不再启用拖拽（已删除相关设置）
 
         main_layout.addWidget(self.table, 3)
 
@@ -720,7 +746,7 @@ class MainWindow(QMainWindow):
         settings_layout.setSpacing(10)
         settings_layout.setAlignment(Qt.AlignLeft)
         settings_layout.addWidget(QLabel("记录间隔:"))
-        self.record_interval_spin = QDoubleSpinBox()
+        self.record_interval_spin = QSpinBox()
         self.record_interval_spin.setRange(1, 1440)
         self.record_interval_spin.setValue(60)
         self.record_interval_spin.setSuffix(" 分钟")
@@ -728,11 +754,11 @@ class MainWindow(QMainWindow):
         self.record_interval_spin.valueChanged.connect(self.set_record_interval)
         settings_layout.addWidget(self.record_interval_spin)
         settings_layout.addWidget(QLabel("检测间隔:"))
-        self.interval_spin = QDoubleSpinBox()
-        self.interval_spin.setRange(0.1, 3600.0)
-        self.interval_spin.setSingleStep(0.5)
+        self.interval_spin = QSpinBox()
+        self.interval_spin.setRange(1, 3600)
+        self.interval_spin.setSingleStep(1)
+        self.interval_spin.setValue(1)
         self.interval_spin.setSuffix(" 秒")
-        self.interval_spin.setValue(0.5)
         self.interval_spin.setFixedWidth(80)
         self.interval_spin.valueChanged.connect(self.on_interval_changed)
         settings_layout.addWidget(self.interval_spin)
@@ -762,12 +788,10 @@ class MainWindow(QMainWindow):
         self.btn_test.clicked.connect(self.test_selected_point)
         btn_layout_top.addWidget(self.btn_test)
 
-        # 选择模型目录
         self.btn_select_model = QPushButton("📁 选择模型")
         self.btn_select_model.clicked.connect(self.select_model_dir)
         btn_layout_top.addWidget(self.btn_select_model)
 
-        # 合并后的开始/停止按钮
         self.btn_start_stop = QPushButton("▶ 开始监控")
         self.btn_start_stop.setObjectName("btn_start_stop")
         self.btn_start_stop.clicked.connect(self.toggle_monitor)
@@ -862,32 +886,6 @@ class MainWindow(QMainWindow):
             self.stop_monitor()
             self.start_monitor()
 
-    # ---------- 拖拽排序处理 ----------
-    def _on_rows_moved(self, sourceParent, sourceStart, sourceEnd, destinationParent, destinationRow):
-        new_row_enabled = {}
-        new_row_muted = {}
-        new_row_sensitivity = {}
-        for row in range(self.table.rowCount()):
-            enable_widget = self.table.cellWidget(row, 0)
-            if enable_widget and isinstance(enable_widget, QCheckBox):
-                new_row_enabled[row] = enable_widget.isChecked()
-            mute_widget = self.table.cellWidget(row, 9)
-            if mute_widget and isinstance(mute_widget, QCheckBox):
-                new_row_muted[row] = mute_widget.isChecked()
-            sens = self.get_row_sensitivity(row)
-            new_row_sensitivity[row] = sens
-
-        self.row_enabled = new_row_enabled
-        self.row_muted = new_row_muted
-        self.row_sensitivity = new_row_sensitivity
-
-        self.value_history.clear()
-        self.status_label.setText("状态: 行顺序已改变，历史趋势数据已重置")
-
-        if self.monitoring:
-            self.stop_monitor()
-            self.start_monitor()
-
     # ---------- 模型选择 ----------
     def select_model_dir(self):
         dir_path = QFileDialog.getExistingDirectory(self, "选择 EasyOCR 模型目录")
@@ -958,6 +956,7 @@ class MainWindow(QMainWindow):
                 x, y, w, h = map(int, nums[:4])
             else:
                 continue
+            remark = self.table.cellWidget(row, 2).text() if self.table.cellWidget(row, 2) else ""
             sens = self.get_row_sensitivity(row)
             monitors.append({
                 'name': name,
@@ -966,7 +965,8 @@ class MainWindow(QMainWindow):
                 'lower': lower, 'upper': upper,
                 'row': row,
                 'enabled': self._get_row_enabled(row),
-                'sensitivity': sens
+                'sensitivity': sens,
+                'remark': remark
             })
 
         if not monitors:
@@ -990,7 +990,7 @@ class MainWindow(QMainWindow):
         self.btn_start_stop.setText("⏹ 停止监控")
         self.status_label.setText("状态: 监控运行中")
         self.recording = True
-        self.record_timer.start(int(self.record_interval * 1000))
+        self.record_timer.start(int(self.record_interval * 60 * 1000))  # 分钟转毫秒
 
     def stop_monitor(self):
         if self.monitor_thread and self.monitor_thread.isRunning():
@@ -1159,7 +1159,7 @@ class MainWindow(QMainWindow):
             self.stop_alarm()
 
     def on_interval_changed(self, value):
-        self.detect_interval = int(value * 1000)
+        self.detect_interval = value * 1000  # 秒转毫秒
         if self.monitoring and self.monitor_thread:
             self.monitor_thread.set_interval(self.detect_interval)
 
@@ -1201,6 +1201,7 @@ class MainWindow(QMainWindow):
         enable_check.stateChanged.connect(lambda state, r=row: self._on_enable_changed(r, state))
 
         remark_edit = QLineEdit()
+        remark_edit.setPlaceholderText("颜色模式: #RRGGBB,容差")
         self.table.setCellWidget(row, 2, remark_edit)
 
         mute_check = QCheckBox()
@@ -1268,10 +1269,10 @@ class MainWindow(QMainWindow):
             self.status_label.setText("状态: 已删除")
 
     def set_record_interval(self, value):
-        self.record_interval = value * 60
+        self.record_interval = value
         if self.recording:
             self.record_timer.stop()
-            self.record_timer.start(int(self.record_interval * 1000))
+            self.record_timer.start(int(value * 60 * 1000))
 
     def record_current_value(self):
         selected = self.table.selectedItems()
@@ -1312,6 +1313,8 @@ class MainWindow(QMainWindow):
             return
         x, y, w, h = map(int, nums[:4])
         sens = self.get_row_sensitivity(row)
+        # 获取备注
+        remark = self.table.cellWidget(row, 2).text() if self.table.cellWidget(row, 2) else ""
 
         try:
             import mss, numpy as np
@@ -1323,6 +1326,46 @@ class MainWindow(QMainWindow):
                 img = Image.frombytes("RGB", screenshot.size, screenshot.rgb)
                 img_np = np.array(img)
 
+            # 检查是否为颜色模式
+            color_match = re.match(r'#([0-9A-Fa-f]{6})\s*,\s*(\d+)', remark.strip())
+            if color_match:
+                # 简单颜色匹配测试
+                hex_color = '#' + color_match.group(1)
+                tolerance = int(color_match.group(2))
+                # 复用 monitor.py 中的颜色检测逻辑（简化版）
+                hsv = cv2.cvtColor(img_np, cv2.COLOR_RGB2HSV)
+                mean_hsv = np.mean(hsv, axis=(0, 1))
+                # 转换为目标HSV
+                r, g, b = int(hex_color[1:3], 16), int(hex_color[3:5], 16), int(hex_color[5:7], 16)
+                r, g, b = r/255.0, g/255.0, b/255.0
+                maxc = max(r, g, b)
+                minc = min(r, g, b)
+                diff = maxc - minc
+                if diff == 0:
+                    h = 0
+                elif maxc == r:
+                    h = ((g - b) / diff) % 6
+                elif maxc == g:
+                    h = 2 + (b - r) / diff
+                else:
+                    h = 4 + (r - g) / diff
+                h = h * 60 / 2
+                s = ((maxc - minc) / maxc) * 255 if maxc != 0 else 0
+                v = maxc * 255
+                target_hsv = np.array([h, s, v], dtype=np.float32)
+                diff_h = abs(mean_hsv[0] - target_hsv[0])
+                if diff_h > 180:
+                    diff_h = 360 - diff_h
+                diff_s = abs(mean_hsv[1] - target_hsv[1])
+                diff_v = abs(mean_hsv[2] - target_hsv[2])
+                total_diff = diff_h/180 * 100 + diff_s/255 * 100 + diff_v/255 * 100
+                if total_diff <= tolerance:
+                    QMessageBox.information(self, "测试结果", f"颜色匹配成功！差值: {total_diff:.1f}")
+                else:
+                    QMessageBox.warning(self, "测试结果", f"颜色不匹配，差值: {total_diff:.1f} (容差: {tolerance})")
+                return
+
+            # 数字模式
             clip_limit = 1.0 + (sens / 10.0) * 2.0
             block_size = max(3, int(5 + (10 - sens) * 1.5))
             if block_size % 2 == 0:
@@ -1514,6 +1557,7 @@ class MainWindow(QMainWindow):
                 enable_check.stateChanged.connect(lambda state, r=row: self._on_enable_changed(r, state))
 
                 remark_edit = QLineEdit(item.get('remark', ''))
+                remark_edit.setPlaceholderText("颜色模式: #RRGGBB,容差")
                 self.table.setCellWidget(row, 2, remark_edit)
 
                 mute_check = QCheckBox()
@@ -1545,13 +1589,13 @@ class MainWindow(QMainWindow):
             if header_state:
                 self.table.horizontalHeader().restoreState(QByteArray.fromBase64(header_state.encode('utf-8')))
 
-            interval = config.get('interval', 0.5)
+            interval = config.get('interval', 1)
             self.interval_spin.setValue(interval)
-            self.detect_interval = int(interval * 1000)
+            self.detect_interval = interval * 1000
 
             record_interval = config.get('record_interval', 60)
             self.record_interval_spin.setValue(record_interval)
-            self.record_interval = record_interval * 60
+            self.record_interval = record_interval
 
             geometry = config.get('window_geometry')
             if geometry:
