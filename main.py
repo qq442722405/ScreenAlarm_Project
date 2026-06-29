@@ -173,11 +173,14 @@ class CoordinatePicker(QWidget):
         self.showFullScreen()
         self.raise_()
         self.activateWindow()
-        self.magnifier_radius = 60
-
-        self.state = 0          # 0=等待起点，1=已点起点，2=已确定终点
+        self.state = 0
         self.start_pos = QPoint()
-        self.end_pos = QPoint() # 当前鼠标位置（用于预览）
+        self.end_pos = QPoint()
+
+        # 放大镜参数（正方形，固定左上角）
+        self.magnifier_size = 150          # 边长
+        self.magnifier_scale = 3           # 放大倍数
+        self.magnifier_pos = QPoint(10, 10) # 左上角固定位置
 
         self.label = QLabel("🖱 点击左上角确定起点", self)
         self.label.setAlignment(Qt.AlignCenter)
@@ -223,37 +226,36 @@ class CoordinatePicker(QWidget):
                 text_y = rect.y() - 12 if rect.y() > 30 else rect.y() + rect.height() + 25
                 painter.drawText(rect.x() + 10, text_y, f"{rect.width()} × {rect.height()}")
 
-        # 绘制放大镜（始终跟随鼠标）
-        self._draw_magnifier(painter)
+        # 绘制固定放大镜（左上角）
+        self._draw_fixed_magnifier(painter)
 
-    def _draw_magnifier(self, painter):
+    def _draw_fixed_magnifier(self, painter):
+        """在左上角绘制正方形放大镜，内容来自鼠标位置"""
         pos = self.end_pos
         if pos.isNull() or not self.rect().contains(pos):
             return
-        radius = self.magnifier_radius
-        # 裁剪区域：以鼠标为中心
-        crop_rect = QRect(pos.x() - radius//2, pos.y() - radius//2, radius, radius)
+        size = self.magnifier_size
+        scale = self.magnifier_scale
+        # 截取以鼠标为中心的 size 区域
+        half = size // 2
+        crop_rect = QRect(pos.x() - half, pos.y() - half, size, size)
         crop_rect = crop_rect.intersected(self.total_rect)
         if crop_rect.width() <= 0 or crop_rect.height() <= 0:
             return
         pixmap = self.screen_pixmap.copy(crop_rect)
-        scale = 3
-        scaled = pixmap.scaled(radius * scale, radius * scale, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        scaled = pixmap.scaled(size * scale, size * scale, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        # 绘制背景边框
         painter.save()
-        # 绘制圆形背景
         painter.setPen(QPen(Qt.white, 2))
-        painter.setBrush(QColor(0, 0, 0, 150))
-        painter.drawEllipse(pos, radius, radius)
-        # 圆形裁剪并绘制放大图像，中心对齐鼠标
-        path = QPainterPath()
-        path.addEllipse(pos, radius-2, radius-2)
-        painter.setClipPath(path)
-        painter.drawPixmap(pos.x() - radius*(scale//2), pos.y() - radius*(scale//2), scaled)
-        painter.setClipping(False)
+        painter.setBrush(QColor(0, 0, 0, 200))
+        painter.drawRect(self.magnifier_pos.x(), self.magnifier_pos.y(), size, size)
+        # 绘制放大图像（居中裁剪）
+        painter.drawPixmap(self.magnifier_pos.x(), self.magnifier_pos.y(), scaled)
         # 十字准星
+        center = self.magnifier_pos + QPoint(size//2, size//2)
         painter.setPen(QPen(Qt.white, 1, Qt.DashLine))
-        painter.drawLine(pos.x() - radius, pos.y(), pos.x() + radius, pos.y())
-        painter.drawLine(pos.x(), pos.y() - radius, pos.x(), pos.y() + radius)
+        painter.drawLine(center.x() - size//2, center.y(), center.x() + size//2, center.y())
+        painter.drawLine(center.x(), center.y() - size//2, center.x(), center.y() + size//2)
         painter.restore()
 
     def _get_current_rect(self):
@@ -307,7 +309,6 @@ class CoordinatePicker(QWidget):
     def closeEvent(self, event):
         self.setCursor(Qt.ArrowCursor)
         event.accept()
-
 
 class MiniWindow(QWidget):
     def __init__(self, parent=None):
