@@ -429,7 +429,7 @@ class MainWindow(QMainWindow):
         self.test_reader = None
         self.reader_loading = False
 
-        # 样式表（合并开始/停止按钮）
+        # 样式表
         self.setStyleSheet("""
             QMainWindow { background-color: #1e1e2e; }
             QLabel { color: #e0e0f0; font-family: "Microsoft YaHei"; }
@@ -698,9 +698,9 @@ class MainWindow(QMainWindow):
         self.table.setColumnWidth(9, 50)
         self.table.setColumnWidth(10, 120)
         self.table.horizontalHeader().setStretchLastSection(False)
-        self.table.verticalHeader().setVisible(True)  # 显示行号方便拖拽
+        self.table.verticalHeader().setVisible(True)
 
-        # ---------- 启用拖拽 ----------
+        # 启用拖拽
         self.table.setDragDropMode(QAbstractItemView.InternalMove)
         self.table.setDragEnabled(True)
         self.table.setAcceptDrops(True)
@@ -762,7 +762,7 @@ class MainWindow(QMainWindow):
         self.btn_test.clicked.connect(self.test_selected_point)
         btn_layout_top.addWidget(self.btn_test)
 
-        # 新增：选择模型目录按钮
+        # 选择模型目录
         self.btn_select_model = QPushButton("📁 选择模型")
         self.btn_select_model.clicked.connect(self.select_model_dir)
         btn_layout_top.addWidget(self.btn_select_model)
@@ -819,10 +819,51 @@ class MainWindow(QMainWindow):
         self.table.model().rowsInserted.connect(self._on_rows_inserted)
         self.table.model().rowsRemoved.connect(self._on_rows_removed)
 
+    # ---------- 键盘上下移动行 ----------
+    def keyPressEvent(self, event):
+        if event.modifiers() == Qt.ControlModifier:
+            if event.key() == Qt.Key_Up:
+                self._move_row_up()
+                event.accept()
+            elif event.key() == Qt.Key_Down:
+                self._move_row_down()
+                event.accept()
+        super().keyPressEvent(event)
+
+    def _move_row_up(self):
+        row = self.table.currentRow()
+        if row > 0:
+            self._swap_rows(row, row - 1)
+            self.table.selectRow(row - 1)
+
+    def _move_row_down(self):
+        row = self.table.currentRow()
+        if row < self.table.rowCount() - 1:
+            self._swap_rows(row, row + 1)
+            self.table.selectRow(row + 1)
+
+    def _swap_rows(self, row1, row2):
+        for col in range(self.table.columnCount()):
+            item1 = self.table.takeItem(row1, col)
+            item2 = self.table.takeItem(row2, col)
+            self.table.setItem(row1, col, item2)
+            self.table.setItem(row2, col, item1)
+            w1 = self.table.cellWidget(row1, col)
+            w2 = self.table.cellWidget(row2, col)
+            self.table.setCellWidget(row1, col, w2)
+            self.table.setCellWidget(row2, col, w1)
+        # 更新映射
+        self.row_enabled[row1], self.row_enabled[row2] = self.row_enabled.get(row2, True), self.row_enabled.get(row1, True)
+        self.row_muted[row1], self.row_muted[row2] = self.row_muted.get(row2, False), self.row_muted.get(row1, False)
+        self.row_sensitivity[row1], self.row_sensitivity[row2] = self.row_sensitivity.get(row2, 5), self.row_sensitivity.get(row1, 5)
+        self.value_history.clear()
+        self.status_label.setText("状态: 行顺序已改变，历史趋势数据已重置")
+        if self.monitoring:
+            self.stop_monitor()
+            self.start_monitor()
+
     # ---------- 拖拽排序处理 ----------
     def _on_rows_moved(self, sourceParent, sourceStart, sourceEnd, destinationParent, destinationRow):
-        """行移动后重建内部数据结构，并重启监控（如果正在运行）"""
-        # 重建 row_enabled, row_muted, row_sensitivity
         new_row_enabled = {}
         new_row_muted = {}
         new_row_sensitivity = {}
@@ -833,56 +874,46 @@ class MainWindow(QMainWindow):
             mute_widget = self.table.cellWidget(row, 9)
             if mute_widget and isinstance(mute_widget, QCheckBox):
                 new_row_muted[row] = mute_widget.isChecked()
-            sens = self.get_row_sensitivity(row)  # 从控件读取
+            sens = self.get_row_sensitivity(row)
             new_row_sensitivity[row] = sens
 
         self.row_enabled = new_row_enabled
         self.row_muted = new_row_muted
         self.row_sensitivity = new_row_sensitivity
 
-        # 清空历史数据（因为行号已变，无法对应）
         self.value_history.clear()
         self.status_label.setText("状态: 行顺序已改变，历史趋势数据已重置")
 
-        # 如果监控正在运行，需要重启以更新 monitors 中的行号
         if self.monitoring:
             self.stop_monitor()
             self.start_monitor()
 
     # ---------- 模型选择 ----------
     def select_model_dir(self):
-        """选择 EasyOCR 模型目录，重新加载 OCR 引擎"""
         dir_path = QFileDialog.getExistingDirectory(self, "选择 EasyOCR 模型目录")
         if not dir_path:
             return
-        # 如果监控运行，先停止
         was_monitoring = self.monitoring
         if was_monitoring:
             self.stop_monitor()
-        # 重新加载 reader
         self._reload_ocr_reader(dir_path)
-        # 如果之前监控运行，重新启动
         if was_monitoring:
             self.start_monitor()
             self.status_label.setText("状态: 已更换模型并重启监控")
 
     def _reload_ocr_reader(self, model_dir):
-        """使用指定的模型目录重新创建 OCR reader"""
         try:
             import easyocr
-            # 如果已有 reader，释放资源（可选）
             self.test_reader = None
             self.ocr_status_label.setText("OCR引擎: 正在加载新模型...")
-            # 创建新 reader
             self.test_reader = easyocr.Reader(
                 ['en'],
                 gpu=False,
                 model_storage_directory=model_dir,
-                download_enabled=False,  # 不自动下载，使用已有模型
+                download_enabled=False,
                 verbose=False
             )
             self.set_ocr_status("就绪 ✅ (自定义模型)", True)
-            # 如果监控线程存在，更新 reader
             if self.monitor_thread is not None:
                 self.monitor_thread.set_reader(self.test_reader)
             QMessageBox.information(self, "成功", f"模型已加载: {model_dir}")
