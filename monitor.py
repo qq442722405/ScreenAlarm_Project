@@ -107,28 +107,54 @@ class MonitorThread(QThread):
             return False
 
     def _preprocess_image(self, img_np, sensitivity):
-        """使用指定的灵敏度进行预处理"""
+        """优化：针对大尺寸图像降低缩放，动态调整二值化参数"""
         try:
             sens = sensitivity
-            clip_limit = 1.0 + (sens / 10.0) * 2.0
-            block_size = max(3, int(5 + (10 - sens) * 1.5))
-            if block_size % 2 == 0:
-                block_size += 1
-            c_value = max(1, int(2 + (10 - sens) * 0.5))
+            h, w = img_np.shape[:2]
+            max_dim = max(h, w)
 
-            height, width = img_np.shape[:2]
-            scaled = cv2.resize(img_np, (width * 3, height * 3), interpolation=cv2.INTER_LINEAR)
+            # 动态缩放：小图放大，大图保持原样或缩小
+            if max_dim < 100:
+                scale = 3.0
+            elif max_dim < 200:
+                scale = 2.0
+            elif max_dim < 400:
+                scale = 1.5
+            else:
+                scale = 1.0
+
+            if scale != 1.0:
+                new_w = int(w * scale)
+                new_h = int(h * scale)
+                scaled = cv2.resize(img_np, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
+            else:
+                scaled = img_np
+
             if len(scaled.shape) == 3:
                 gray = cv2.cvtColor(scaled, cv2.COLOR_RGB2GRAY)
             else:
                 gray = scaled
+
+            clip_limit = 1.0 + (sens / 10.0) * 2.0
             clahe = cv2.createCLAHE(clipLimit=clip_limit, tileGridSize=(8, 8))
             enhanced = clahe.apply(gray)
+
             if np.mean(enhanced) < 80:
                 enhanced = 255 - enhanced
                 enhanced = clahe.apply(enhanced)
+
             kernel_sharpen = np.array([[-1,-1,-1],[-1,9,-1],[-1,-1,-1]])
             sharpened = cv2.filter2D(enhanced, -1, kernel_sharpen)
+
+            # 自适应二值化：大图使用更小的块保留细节
+            if max_dim > 300:
+                block_size = max(3, int(3 + (10 - sens) * 0.8))
+            else:
+                block_size = max(3, int(5 + (10 - sens) * 1.5))
+            if block_size % 2 == 0:
+                block_size += 1
+            c_value = max(1, int(2 + (10 - sens) * 0.3))
+
             binary = cv2.adaptiveThreshold(sharpened, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
                                             cv2.THRESH_BINARY, block_size, c_value)
             kernel = np.ones((2,2), np.uint8)
@@ -140,7 +166,6 @@ class MonitorThread(QThread):
             return img_np
 
     def _capture_and_ocr(self, monitor):
-        """使用该监控点的灵敏度参数"""
         if not self.ocr_ready or self.reader is None:
             return None
         if self.sct is None:
@@ -156,7 +181,8 @@ class MonitorThread(QThread):
 
             sens = monitor.get('sensitivity', 5)
             processed = self._preprocess_image(img_np, sens)
-            text_thr = 0.3 + (10 - sens) * 0.03
+            # 降低基础阈值，大图时更宽容
+            text_thr = 0.2 + (10 - sens) * 0.04
 
             result = self.reader.readtext(processed, allowlist='0123456789.-',
                                           paragraph=False, width_ths=0.5, height_ths=0.5,
@@ -172,7 +198,6 @@ class MonitorThread(QThread):
                         except:
                             pass
             if len(all_numbers) == 0:
-                # 尝试原图
                 result2 = self.reader.readtext(img_np, allowlist='0123456789.-', paragraph=False,
                                                text_threshold=text_thr)
                 for bbox, text, confidence in result2:
