@@ -35,6 +35,8 @@ class MonitorThread(QThread):
         self.alarm_loop_enabled = True
         self.alarm_status = {}
         self.manual_clear = False
+        # 灵敏度默认 5
+        self.sensitivity = 5
 
     def set_interval(self, ms):
         self.interval_ms = max(100, ms)
@@ -43,10 +45,14 @@ class MonitorThread(QThread):
         self.alarm_loop_enabled = enabled
 
     def set_reader(self, reader):
+        """外部传入已加载的 reader"""
         self.reader = reader
         if reader is not None:
             self.ocr_ready = True
             self.ocr_status.emit("就绪 ✅", True)
+
+    def set_sensitivity(self, value):
+        self.sensitivity = max(1, min(10, value))
 
     def stop(self):
         self.running = False
@@ -106,11 +112,13 @@ class MonitorThread(QThread):
                 self.ocr_status.emit(f"加载失败: {error_msg[:80]}", False)
             return False
 
-    def _preprocess_image(self, img_np, sensitivity):
-        """使用指定的灵敏度进行预处理"""
+    def _preprocess_image(self, img_np):
+        """使用当前灵敏度参数进行预处理"""
         try:
-            sens = sensitivity
-            clip_limit = 1.0 + (sens / 10.0) * 2.0
+            sens = self.sensitivity
+            # 映射参数：灵敏度越高，对比度增强越强，块越小（更敏感）
+            clip_limit = 1.0 + (sens / 10.0) * 2.0  # 1.0~3.0
+            # block_size 必须为奇数，范围 5~17
             block_size = max(3, int(5 + (10 - sens) * 1.5))
             if block_size % 2 == 0:
                 block_size += 1
@@ -139,24 +147,22 @@ class MonitorThread(QThread):
         except Exception:
             return img_np
 
-    def _capture_and_ocr(self, monitor):
-        """使用该监控点的灵敏度参数"""
+    def _capture_and_ocr(self, x, y, width, height):
         if not self.ocr_ready or self.reader is None:
             return None
         if self.sct is None:
             self.sct = mss.mss()
         try:
-            x, y, w, h = monitor['x'], monitor['y'], monitor['width'], monitor['height']
-            if w <= 0 or h <= 0:
+            if width <= 0 or height <= 0:
                 return None
-            monitor_region = {"top": y, "left": x, "width": w, "height": h}
-            screenshot = self.sct.grab(monitor_region)
+            monitor = {"top": y, "left": x, "width": width, "height": height}
+            screenshot = self.sct.grab(monitor)
             img = Image.frombytes("RGB", screenshot.size, screenshot.rgb)
             img_np = np.array(img)
+            processed = self._preprocess_image(img_np)
 
-            sens = monitor.get('sensitivity', 5)
-            processed = self._preprocess_image(img_np, sens)
-            text_thr = 0.3 + (10 - sens) * 0.03
+            # 根据灵敏度调整 text_threshold（灵敏度高则阈值低）
+            text_thr = 0.3 + (10 - self.sensitivity) * 0.03  # 0.3~0.57
 
             result = self.reader.readtext(processed, allowlist='0123456789.-',
                                           paragraph=False, width_ths=0.5, height_ths=0.5,
@@ -172,7 +178,7 @@ class MonitorThread(QThread):
                         except:
                             pass
             if len(all_numbers) == 0:
-                # 尝试原图
+                # 第二次尝试：不放大图像，直接读原图
                 result2 = self.reader.readtext(img_np, allowlist='0123456789.-', paragraph=False,
                                                text_threshold=text_thr)
                 for bbox, text, confidence in result2:
@@ -204,7 +210,6 @@ class MonitorThread(QThread):
         for m in self.monitors:
             self.alarm_status[m['row']] = {'alarm': False, 'count': 0, 'last_alarm_time': 0}
             self.status_updated.emit(m['row'], '监控中')
-
         interval_sec = self.interval_ms / 1000.0
         while self.running:
             for monitor in self.monitors:
@@ -215,7 +220,7 @@ class MonitorThread(QThread):
                     self.status_updated.emit(row, 'disabled')
                     self.alarm_status[row]['alarm'] = False
                     continue
-                raw_value = self._capture_and_ocr(monitor)
+                raw_value = self._capture_and_ocr(monitor['x'], monitor['y'], monitor['width'], monitor['height'])
                 if raw_value is not None:
                     value = float(raw_value)
                     self.value_updated.emit(row, value)
