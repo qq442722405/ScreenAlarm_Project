@@ -106,48 +106,6 @@ class MonitorThread(QThread):
                 self.ocr_status.emit(f"加载失败: {error_msg[:80]}", False)
             return False
 
-    def _hex_to_hsv(self, hex_color):
-        hex_color = hex_color.lstrip('#')
-        if len(hex_color) != 6:
-            return None
-        r, g, b = int(hex_color[0:2], 16), int(hex_color[2:4], 16), int(hex_color[4:6], 16)
-        r, g, b = r/255.0, g/255.0, b/255.0
-        maxc = max(r, g, b)
-        minc = min(r, g, b)
-        diff = maxc - minc
-        if diff == 0:
-            h = 0
-        elif maxc == r:
-            h = ((g - b) / diff) % 6
-        elif maxc == g:
-            h = 2 + (b - r) / diff
-        else:
-            h = 4 + (r - g) / diff
-        h = h * 60
-        if h < 0:
-            h += 360
-        h = h / 2
-        s = ((maxc - minc) / maxc) * 255 if maxc != 0 else 0
-        v = maxc * 255
-        return np.array([h, s, v], dtype=np.float32)
-
-    def _color_match(self, img_np, target_hex, tolerance):
-        try:
-            hsv = cv2.cvtColor(img_np, cv2.COLOR_RGB2HSV)
-            mean_hsv = np.mean(hsv, axis=(0, 1))
-            target_hsv = self._hex_to_hsv(target_hex)
-            if target_hsv is None:
-                return False
-            diff_h = abs(mean_hsv[0] - target_hsv[0])
-            if diff_h > 180:
-                diff_h = 360 - diff_h
-            diff_s = abs(mean_hsv[1] - target_hsv[1])
-            diff_v = abs(mean_hsv[2] - target_hsv[2])
-            total_diff = diff_h/180 * 100 + diff_s/255 * 100 + diff_v/255 * 100
-            return total_diff <= tolerance
-        except:
-            return False
-
     def _preprocess_image(self, img_np, sensitivity):
         try:
             sens = sensitivity
@@ -218,27 +176,27 @@ class MonitorThread(QThread):
             img = Image.frombytes("RGB", screenshot.size, screenshot.rgb)
             img_np = np.array(img)
 
-            # 检查备注是否包含颜色配置
-            remark = monitor.get('remark', '')
-            color_match = re.match(r'#([0-9A-Fa-f]{6})\s*,\s*(\d+)', remark.strip())
-            if color_match:
-                hex_color = '#' + color_match.group(1)
-                tolerance = int(color_match.group(2))
-                if self._color_match(img_np, hex_color, tolerance):
-                    return 'color_match', hex_color
-                else:
-                    return None
-            else:
-                # 数字模式
-                sens = monitor.get('sensitivity', 5)
-                processed = self._preprocess_image(img_np, sens)
-                text_thr = 0.2 + (10 - sens) * 0.04
+            sens = monitor.get('sensitivity', 5)
+            processed = self._preprocess_image(img_np, sens)
+            text_thr = 0.2 + (10 - sens) * 0.04
 
-                result = self.reader.readtext(processed, allowlist='0123456789.-',
-                                              paragraph=False, width_ths=0.5, height_ths=0.5,
-                                              text_threshold=text_thr, low_text=0.2)
-                all_numbers = []
-                for bbox, text, confidence in result:
+            result = self.reader.readtext(processed, allowlist='0123456789.-',
+                                          paragraph=False, width_ths=0.5, height_ths=0.5,
+                                          text_threshold=text_thr, low_text=0.2)
+            all_numbers = []
+            for bbox, text, confidence in result:
+                if confidence > 0.2:
+                    numbers = re.findall(r'-?\d+\.?\d*', text)
+                    for num_str in numbers:
+                        try:
+                            val = float(num_str)
+                            all_numbers.append((val, confidence, len(num_str)))
+                        except:
+                            pass
+            if len(all_numbers) == 0:
+                result2 = self.reader.readtext(img_np, allowlist='0123456789.-', paragraph=False,
+                                               text_threshold=text_thr)
+                for bbox, text, confidence in result2:
                     if confidence > 0.2:
                         numbers = re.findall(r'-?\d+\.?\d*', text)
                         for num_str in numbers:
@@ -247,23 +205,11 @@ class MonitorThread(QThread):
                                 all_numbers.append((val, confidence, len(num_str)))
                             except:
                                 pass
-                if len(all_numbers) == 0:
-                    result2 = self.reader.readtext(img_np, allowlist='0123456789.-', paragraph=False,
-                                                   text_threshold=text_thr)
-                    for bbox, text, confidence in result2:
-                        if confidence > 0.2:
-                            numbers = re.findall(r'-?\d+\.?\d*', text)
-                            for num_str in numbers:
-                                try:
-                                    val = float(num_str)
-                                    all_numbers.append((val, confidence, len(num_str)))
-                                except:
-                                    pass
-                if len(all_numbers) == 0:
-                    return None
-                all_numbers.sort(key=lambda x: (1 if '.' in str(x[0]) else 0, x[2]), reverse=True)
-                best = all_numbers[0][0]
-                return best
+            if len(all_numbers) == 0:
+                return None
+            all_numbers.sort(key=lambda x: (1 if '.' in str(x[0]) else 0, x[2]), reverse=True)
+            best = all_numbers[0][0]
+            return best
         except Exception:
             return None
 
@@ -290,35 +236,28 @@ class MonitorThread(QThread):
                     self.status_updated.emit(row, 'disabled')
                     self.alarm_status[row]['alarm'] = False
                     continue
-                result = self._capture_and_ocr(monitor)
-                if result is not None:
-                    if isinstance(result, tuple) and result[0] == 'color_match':
-                        color = result[1]
-                        self.alarm_status[row]['alarm'] = True
-                        self.alarm_triggered.emit(row, f"颜色匹配 {color}", 0, 0, 0)
-                        self.value_updated.emit(row, 0)
-                        self.status_updated.emit(row, '报警')
-                    else:
-                        value = float(result)
-                        self.value_updated.emit(row, value)
-                        lower, upper = monitor['lower'], monitor['upper']
-                        if value < lower or value > upper:
-                            now = time.time()
-                            last_time = self.alarm_status[row]['last_alarm_time']
-                            if not self.alarm_status[row]['alarm']:
-                                self.alarm_status[row]['alarm'] = True
+                raw_value = self._capture_and_ocr(monitor)
+                if raw_value is not None:
+                    value = float(raw_value)
+                    self.value_updated.emit(row, value)
+                    lower, upper = monitor['lower'], monitor['upper']
+                    if value < lower or value > upper:
+                        now = time.time()
+                        last_time = self.alarm_status[row]['last_alarm_time']
+                        if not self.alarm_status[row]['alarm']:
+                            self.alarm_status[row]['alarm'] = True
+                            self.alarm_status[row]['last_alarm_time'] = now
+                            self.alarm_triggered.emit(row, monitor['name'], value, lower, upper)
+                        elif self.alarm_loop_enabled:
+                            if now - last_time > 10:
                                 self.alarm_status[row]['last_alarm_time'] = now
                                 self.alarm_triggered.emit(row, monitor['name'], value, lower, upper)
-                            elif self.alarm_loop_enabled:
-                                if now - last_time > 10:
-                                    self.alarm_status[row]['last_alarm_time'] = now
-                                    self.alarm_triggered.emit(row, monitor['name'], value, lower, upper)
+                    else:
+                        if not self.manual_clear:
+                            self.alarm_status[row]['alarm'] = False
+                            self.status_updated.emit(row, 'normal')
                         else:
-                            if not self.manual_clear:
-                                self.alarm_status[row]['alarm'] = False
-                                self.status_updated.emit(row, 'normal')
-                            else:
-                                self.alarm_status[row]['alarm'] = False
+                            self.alarm_status[row]['alarm'] = False
                     self.alarm_status[row]['count'] = 0
                 else:
                     self.alarm_status[row]['count'] += 1
