@@ -188,6 +188,8 @@ class CoordinatePicker(QWidget):
         self.coord_label.move((self.width() - self.coord_label.width()) // 2, 60)
         self.setFocus(Qt.OtherFocusReason)
         self.magnifier_radius = 60
+        # 默认显示放大镜（即使未拖拽）
+        self.show_magnifier = True
 
     def paintEvent(self, event):
         painter = QPainter(self)
@@ -218,14 +220,14 @@ class CoordinatePicker(QWidget):
             text_y = rect.y() - 12 if rect.y() > 30 else rect.y() + rect.height() + 25
             painter.drawText(rect.x() + 10, text_y, f"{rect.width()} × {rect.height()}")
 
-        # 绘制放大镜
+        # 始终绘制放大镜（只要鼠标在屏幕内）
         self._draw_magnifier(painter)
 
     def _draw_magnifier(self, painter):
-        if not self.is_selecting or self.end_pos.isNull():
+        if not self.show_magnifier:
             return
         pos = self.end_pos
-        if not self.rect().contains(pos):
+        if pos.isNull() or not self.rect().contains(pos):
             return
         radius = self.magnifier_radius
         crop_rect = QRect(pos.x() - radius//2, pos.y() - radius//2, radius, radius)
@@ -275,7 +277,7 @@ class CoordinatePicker(QWidget):
             self.coord_label.setText(f"起点: ({self.start_pos.x()}, {self.start_pos.y()})  大小: {rect.width()} × {rect.height()}")
             self.coord_label.adjustSize()
             self.coord_label.move((self.width() - self.coord_label.width()) // 2, 60)
-        self.update()
+        self.update()  # 触发放大镜更新
 
     def mouseReleaseEvent(self, event):
         if event.button() == Qt.LeftButton and self.is_selecting:
@@ -591,7 +593,7 @@ class MainWindow(QMainWindow):
         self.monitor_thread = None
         self.config_file = "monitor_config.json"
         self.loop_enabled = True
-        self.detect_interval = 500
+        self.detect_interval = 1000  # 毫秒（默认1秒）
         self.value_history = {}
         self.current_row_data = []
 
@@ -731,7 +733,6 @@ class MainWindow(QMainWindow):
         self.table.setColumnWidth(10, 120)
         self.table.horizontalHeader().setStretchLastSection(False)
         self.table.verticalHeader().setVisible(True)
-        # 不再启用拖拽（已删除相关设置）
 
         main_layout.addWidget(self.table, 3)
 
@@ -956,7 +957,6 @@ class MainWindow(QMainWindow):
                 x, y, w, h = map(int, nums[:4])
             else:
                 continue
-            remark = self.table.cellWidget(row, 2).text() if self.table.cellWidget(row, 2) else ""
             sens = self.get_row_sensitivity(row)
             monitors.append({
                 'name': name,
@@ -966,7 +966,7 @@ class MainWindow(QMainWindow):
                 'row': row,
                 'enabled': self._get_row_enabled(row),
                 'sensitivity': sens,
-                'remark': remark
+                'remark': self.table.cellWidget(row, 2).text() if self.table.cellWidget(row, 2) else ""
             })
 
         if not monitors:
@@ -990,7 +990,7 @@ class MainWindow(QMainWindow):
         self.btn_start_stop.setText("⏹ 停止监控")
         self.status_label.setText("状态: 监控运行中")
         self.recording = True
-        self.record_timer.start(int(self.record_interval * 60 * 1000))  # 分钟转毫秒
+        self.record_timer.start(int(self.record_interval * 60 * 1000))
 
     def stop_monitor(self):
         if self.monitor_thread and self.monitor_thread.isRunning():
@@ -1159,7 +1159,7 @@ class MainWindow(QMainWindow):
             self.stop_alarm()
 
     def on_interval_changed(self, value):
-        self.detect_interval = value * 1000  # 秒转毫秒
+        self.detect_interval = value * 1000
         if self.monitoring and self.monitor_thread:
             self.monitor_thread.set_interval(self.detect_interval)
 
@@ -1201,7 +1201,7 @@ class MainWindow(QMainWindow):
         enable_check.stateChanged.connect(lambda state, r=row: self._on_enable_changed(r, state))
 
         remark_edit = QLineEdit()
-        remark_edit.setPlaceholderText("颜色模式: #RRGGBB,容差")
+        remark_edit.setPlaceholderText("备注（可选）")
         self.table.setCellWidget(row, 2, remark_edit)
 
         mute_check = QCheckBox()
@@ -1313,8 +1313,6 @@ class MainWindow(QMainWindow):
             return
         x, y, w, h = map(int, nums[:4])
         sens = self.get_row_sensitivity(row)
-        # 获取备注
-        remark = self.table.cellWidget(row, 2).text() if self.table.cellWidget(row, 2) else ""
 
         try:
             import mss, numpy as np
@@ -1326,46 +1324,6 @@ class MainWindow(QMainWindow):
                 img = Image.frombytes("RGB", screenshot.size, screenshot.rgb)
                 img_np = np.array(img)
 
-            # 检查是否为颜色模式
-            color_match = re.match(r'#([0-9A-Fa-f]{6})\s*,\s*(\d+)', remark.strip())
-            if color_match:
-                # 简单颜色匹配测试
-                hex_color = '#' + color_match.group(1)
-                tolerance = int(color_match.group(2))
-                # 复用 monitor.py 中的颜色检测逻辑（简化版）
-                hsv = cv2.cvtColor(img_np, cv2.COLOR_RGB2HSV)
-                mean_hsv = np.mean(hsv, axis=(0, 1))
-                # 转换为目标HSV
-                r, g, b = int(hex_color[1:3], 16), int(hex_color[3:5], 16), int(hex_color[5:7], 16)
-                r, g, b = r/255.0, g/255.0, b/255.0
-                maxc = max(r, g, b)
-                minc = min(r, g, b)
-                diff = maxc - minc
-                if diff == 0:
-                    h = 0
-                elif maxc == r:
-                    h = ((g - b) / diff) % 6
-                elif maxc == g:
-                    h = 2 + (b - r) / diff
-                else:
-                    h = 4 + (r - g) / diff
-                h = h * 60 / 2
-                s = ((maxc - minc) / maxc) * 255 if maxc != 0 else 0
-                v = maxc * 255
-                target_hsv = np.array([h, s, v], dtype=np.float32)
-                diff_h = abs(mean_hsv[0] - target_hsv[0])
-                if diff_h > 180:
-                    diff_h = 360 - diff_h
-                diff_s = abs(mean_hsv[1] - target_hsv[1])
-                diff_v = abs(mean_hsv[2] - target_hsv[2])
-                total_diff = diff_h/180 * 100 + diff_s/255 * 100 + diff_v/255 * 100
-                if total_diff <= tolerance:
-                    QMessageBox.information(self, "测试结果", f"颜色匹配成功！差值: {total_diff:.1f}")
-                else:
-                    QMessageBox.warning(self, "测试结果", f"颜色不匹配，差值: {total_diff:.1f} (容差: {tolerance})")
-                return
-
-            # 数字模式
             clip_limit = 1.0 + (sens / 10.0) * 2.0
             block_size = max(3, int(5 + (10 - sens) * 1.5))
             if block_size % 2 == 0:
@@ -1557,7 +1515,7 @@ class MainWindow(QMainWindow):
                 enable_check.stateChanged.connect(lambda state, r=row: self._on_enable_changed(r, state))
 
                 remark_edit = QLineEdit(item.get('remark', ''))
-                remark_edit.setPlaceholderText("颜色模式: #RRGGBB,容差")
+                remark_edit.setPlaceholderText("备注（可选）")
                 self.table.setCellWidget(row, 2, remark_edit)
 
                 mute_check = QCheckBox()
