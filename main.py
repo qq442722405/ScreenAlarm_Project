@@ -173,23 +173,28 @@ class CoordinatePicker(QWidget):
         self.showFullScreen()
         self.raise_()
         self.activateWindow()
-        self.is_selecting = False
+        self.magnifier_radius = 60
+
+        # 状态变量
+        self.state = 0          # 0=等待起点，1=已点起点，2=已确定终点
         self.start_pos = QPoint()
-        self.end_pos = QPoint()
-        self.label = QLabel("🖱 按住左键拖拽选择监控区域，松开鼠标自动完成", self)
+        self.end_pos = QPoint() # 当前鼠标位置（用于预览）
+
+        self.label = QLabel("🖱 点击左上角确定起点", self)
         self.label.setAlignment(Qt.AlignCenter)
         self.label.setStyleSheet("QLabel { color: white; background: rgba(0,0,0,220); padding: 14px 28px; border-radius: 14px; font-size: 18px; font-weight: bold; border: 1px solid rgba(255,255,255,0.2); }")
         self.label.adjustSize()
         self.label.move((self.width() - self.label.width()) // 2, self.height() - self.label.height() - 80)
-        self.coord_label = QLabel("等待选择...", self)
+
+        self.coord_label = QLabel("坐标信息", self)
         self.coord_label.setAlignment(Qt.AlignCenter)
         self.coord_label.setStyleSheet("QLabel { color: #5aa9ff; background: rgba(0,0,0,220); padding: 10px 22px; border-radius: 10px; font-size: 17px; font-weight: bold; border: 1px solid #5aa9ff; }")
         self.coord_label.adjustSize()
         self.coord_label.move((self.width() - self.coord_label.width()) // 2, 60)
+
         self.setFocus(Qt.OtherFocusReason)
-        self.magnifier_radius = 60
-        # 默认显示放大镜（即使未拖拽）
-        self.show_magnifier = True
+        # 默认显示放大镜
+        self.update()
 
     def paintEvent(self, event):
         painter = QPainter(self)
@@ -197,35 +202,33 @@ class CoordinatePicker(QWidget):
         painter.drawPixmap(self.rect(), self.screen_pixmap)
         painter.fillRect(self.rect(), QColor(0, 0, 0, 120))
 
-        if self.is_selecting and not self.end_pos.isNull():
+        # 绘制预览矩形（如果已点击起点）
+        if self.state >= 1 and not self.start_pos.isNull() and not self.end_pos.isNull():
             rect = self._get_current_rect()
-            if rect.width() > 5 and rect.height() > 5:
-                painter.drawPixmap(rect, self.screen_pixmap.copy(rect))
-            pen = QPen(QColor(0, 255, 140), 2)
-            pen.setStyle(Qt.DashLine)
-            painter.setPen(pen)
-            painter.drawRect(rect)
-            painter.setPen(QPen(QColor(0, 255, 140), 2))
-            size = 14
-            painter.drawLine(rect.topLeft(), rect.topLeft() + QPoint(size, 0))
-            painter.drawLine(rect.topLeft(), rect.topLeft() + QPoint(0, size))
-            painter.drawLine(rect.topRight(), rect.topRight() + QPoint(-size, 0))
-            painter.drawLine(rect.topRight(), rect.topRight() + QPoint(0, size))
-            painter.drawLine(rect.bottomLeft(), rect.bottomLeft() + QPoint(size, 0))
-            painter.drawLine(rect.bottomLeft(), rect.bottomLeft() + QPoint(0, -size))
-            painter.drawLine(rect.bottomRight(), rect.bottomRight() + QPoint(-size, 0))
-            painter.drawLine(rect.bottomRight(), rect.bottomRight() + QPoint(0, -size))
-            painter.setPen(Qt.white)
-            painter.setFont(QFont("Arial", 12, QFont.Bold))
-            text_y = rect.y() - 12 if rect.y() > 30 else rect.y() + rect.height() + 25
-            painter.drawText(rect.x() + 10, text_y, f"{rect.width()} × {rect.height()}")
+            if rect.width() > 1 and rect.height() > 1:
+                pen = QPen(QColor(0, 255, 140), 2)
+                pen.setStyle(Qt.DashLine)
+                painter.setPen(pen)
+                painter.drawRect(rect)
+                painter.setPen(QPen(QColor(0, 255, 140), 2))
+                size = 14
+                painter.drawLine(rect.topLeft(), rect.topLeft() + QPoint(size, 0))
+                painter.drawLine(rect.topLeft(), rect.topLeft() + QPoint(0, size))
+                painter.drawLine(rect.topRight(), rect.topRight() + QPoint(-size, 0))
+                painter.drawLine(rect.topRight(), rect.topRight() + QPoint(0, size))
+                painter.drawLine(rect.bottomLeft(), rect.bottomLeft() + QPoint(size, 0))
+                painter.drawLine(rect.bottomLeft(), rect.bottomLeft() + QPoint(0, -size))
+                painter.drawLine(rect.bottomRight(), rect.bottomRight() + QPoint(-size, 0))
+                painter.drawLine(rect.bottomRight(), rect.bottomRight() + QPoint(0, -size))
+                painter.setPen(Qt.white)
+                painter.setFont(QFont("Arial", 12, QFont.Bold))
+                text_y = rect.y() - 12 if rect.y() > 30 else rect.y() + rect.height() + 25
+                painter.drawText(rect.x() + 10, text_y, f"{rect.width()} × {rect.height()}")
 
-        # 始终绘制放大镜（只要鼠标在屏幕内）
+        # 绘制放大镜
         self._draw_magnifier(painter)
 
     def _draw_magnifier(self, painter):
-        if not self.show_magnifier:
-            return
         pos = self.end_pos
         if pos.isNull() or not self.rect().contains(pos):
             return
@@ -262,38 +265,40 @@ class CoordinatePicker(QWidget):
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
-            self.is_selecting = True
-            self.start_pos = event.position().toPoint()
-            self.end_pos = self.start_pos
-            self.label.setText("🖱 拖动鼠标调整区域大小")
-            self.label.adjustSize()
-            self.label.move((self.width() - self.label.width()) // 2, self.height() - self.label.height() - 80)
-            self.update()
+            if self.state == 0:
+                # 第一次点击：记录起点
+                self.start_pos = event.position().toPoint()
+                self.end_pos = self.start_pos
+                self.state = 1
+                self.label.setText("🖱 点击右下角确定终点")
+                self.label.adjustSize()
+                self.label.move((self.width() - self.label.width()) // 2, self.height() - self.label.height() - 80)
+                self.update()
+            elif self.state == 1:
+                # 第二次点击：记录终点，完成选择
+                self.end_pos = event.position().toPoint()
+                rect = self._get_current_rect()
+                if rect.width() > 20 and rect.height() > 20:
+                    self.coord_selected.emit(rect.x(), rect.y(), rect.width(), rect.height())
+                    self.close()
+                else:
+                    self.label.setText("⚠️ 区域太小，请重新点击左上角")
+                    self.label.adjustSize()
+                    self.label.move((self.width() - self.label.width()) // 2, self.height() - self.label.height() - 80)
+                    # 重置状态
+                    self.state = 0
+                    self.start_pos = QPoint()
+                    self.end_pos = QPoint()
+                    self.update()
 
     def mouseMoveEvent(self, event):
         self.end_pos = event.position().toPoint()
-        if self.is_selecting:
+        if self.state >= 1:
             rect = self._get_current_rect()
             self.coord_label.setText(f"起点: ({self.start_pos.x()}, {self.start_pos.y()})  大小: {rect.width()} × {rect.height()}")
             self.coord_label.adjustSize()
             self.coord_label.move((self.width() - self.coord_label.width()) // 2, 60)
-        self.update()  # 触发放大镜更新
-
-    def mouseReleaseEvent(self, event):
-        if event.button() == Qt.LeftButton and self.is_selecting:
-            self.is_selecting = False
-            self.end_pos = event.position().toPoint()
-            rect = self._get_current_rect()
-            if rect.width() > 20 and rect.height() > 20:
-                self.coord_selected.emit(rect.x(), rect.y(), rect.width(), rect.height())
-                self.close()
-            else:
-                self.label.setText("⚠️ 区域太小，请重新拖拽选择")
-                self.label.adjustSize()
-                self.label.move((self.width() - self.label.width()) // 2, self.height() - self.label.height() - 80)
-                self.start_pos = QPoint()
-                self.end_pos = QPoint()
-                self.update()
+        self.update()
 
     def keyPressEvent(self, event):
         if event.key() == Qt.Key_Escape:
