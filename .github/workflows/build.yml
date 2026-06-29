@@ -28,7 +28,7 @@ jobs:
 
       - name: Build EXE with PyInstaller
         run: |
-          python -m PyInstaller --onefile --windowed --name "屏幕数字监控报警" --add-data "警报声.mp3;." main.py
+          python -m PyInstaller --onefile --windowed --name "屏幕数字监控报警" --icon favicon.ico --add-data "警报声.mp3;." --add-data "favicon.ico;." main.py
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
