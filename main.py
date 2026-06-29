@@ -177,8 +177,8 @@ class CoordinatePicker(QWidget):
         self.start_pos = QPoint()
         self.end_pos = QPoint()
 
-        # 放大镜参数（正方形，固定左上角，缩小尺寸）
-        self.magnifier_size = 100          # 边长 100px
+        # 放大镜参数（正方形，固定左上角，尺寸 120x120）
+        self.magnifier_size = 120          # 边长
         self.magnifier_scale = 3           # 放大倍数
         self.magnifier_pos = QPoint(10, 10) # 左上角固定位置
 
@@ -241,14 +241,13 @@ class CoordinatePicker(QWidget):
         if crop_rect.width() <= 0 or crop_rect.height() <= 0:
             return
         pixmap = self.screen_pixmap.copy(crop_rect)
-        # 强制拉伸填充
         scaled = pixmap.scaled(size * scale, size * scale, Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
         painter.save()
         painter.setPen(QPen(Qt.white, 2))
         painter.setBrush(QColor(0, 0, 0, 200))
         painter.drawRect(self.magnifier_pos.x(), self.magnifier_pos.y(), size, size)
         painter.drawPixmap(self.magnifier_pos.x(), self.magnifier_pos.y(), scaled)
-        # 中心点（红色小圆点）
+        # 中心红点
         center = self.magnifier_pos + QPoint(size//2, size//2)
         painter.setPen(Qt.NoPen)
         painter.setBrush(QColor(255, 0, 0, 220))
