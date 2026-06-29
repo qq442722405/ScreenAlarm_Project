@@ -230,33 +230,30 @@ class CoordinatePicker(QWidget):
         self._draw_fixed_magnifier(painter)
 
     def _draw_fixed_magnifier(self, painter):
-        """在左上角绘制正方形放大镜，内容来自鼠标位置"""
-        pos = self.end_pos
-        if pos.isNull() or not self.rect().contains(pos):
-            return
-        size = self.magnifier_size
-        scale = self.magnifier_scale
-        # 截取以鼠标为中心的 size 区域
-        half = size // 2
-        crop_rect = QRect(pos.x() - half, pos.y() - half, size, size)
-        crop_rect = crop_rect.intersected(self.total_rect)
-        if crop_rect.width() <= 0 or crop_rect.height() <= 0:
-            return
-        pixmap = self.screen_pixmap.copy(crop_rect)
-        scaled = pixmap.scaled(size * scale, size * scale, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-        # 绘制背景边框
-        painter.save()
-        painter.setPen(QPen(Qt.white, 2))
-        painter.setBrush(QColor(0, 0, 0, 200))
-        painter.drawRect(self.magnifier_pos.x(), self.magnifier_pos.y(), size, size)
-        # 绘制放大图像（居中裁剪）
-        painter.drawPixmap(self.magnifier_pos.x(), self.magnifier_pos.y(), scaled)
-        # 十字准星
-        center = self.magnifier_pos + QPoint(size//2, size//2)
-        painter.setPen(QPen(Qt.white, 1, Qt.DashLine))
-        painter.drawLine(center.x() - size//2, center.y(), center.x() + size//2, center.y())
-        painter.drawLine(center.x(), center.y() - size//2, center.x(), center.y() + size//2)
-        painter.restore()
+    pos = self.end_pos
+    if pos.isNull() or not self.rect().contains(pos):
+        return
+    size = self.magnifier_size
+    scale = self.magnifier_scale
+    half = size // 2
+    crop_rect = QRect(pos.x() - half, pos.y() - half, size, size)
+    crop_rect = crop_rect.intersected(self.total_rect)
+    if crop_rect.width() <= 0 or crop_rect.height() <= 0:
+        return
+    pixmap = self.screen_pixmap.copy(crop_rect)
+    # 强制拉伸填充，不保持宽高比，确保图像充满放大镜矩形
+    scaled = pixmap.scaled(size * scale, size * scale, Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
+    painter.save()
+    painter.setPen(QPen(Qt.white, 2))
+    painter.setBrush(QColor(0, 0, 0, 200))
+    painter.drawRect(self.magnifier_pos.x(), self.magnifier_pos.y(), size, size)
+    painter.drawPixmap(self.magnifier_pos.x(), self.magnifier_pos.y(), scaled)
+    # 十字准星在放大镜矩形中心
+    center = self.magnifier_pos + QPoint(size//2, size//2)
+    painter.setPen(QPen(Qt.white, 1, Qt.DashLine))
+    painter.drawLine(center.x() - size//2, center.y(), center.x() + size//2, center.y())
+    painter.drawLine(center.x(), center.y() - size//2, center.x(), center.y() + size//2)
+    painter.restore()
 
     def _get_current_rect(self):
         if self.start_pos.isNull():
