@@ -1,3 +1,4 @@
+# === P1: 导入模块、全局变量、AlarmSoundPlayer 类 ===
 import sys
 import json
 import os
@@ -148,7 +149,10 @@ class AlarmSoundPlayer:
     def is_loaded(self):
         return self.sound_file is not None and os.path.exists(self.sound_file)
 
+# === P1 end ===
 
+
+# === P2: CoordinatePicker 类（本次修改放大镜） ===
 class CoordinatePicker(QWidget):
     coord_selected = Signal(int, int, int, int)
     def __init__(self, parent=None):
@@ -177,10 +181,10 @@ class CoordinatePicker(QWidget):
         self.start_pos = QPoint()
         self.end_pos = QPoint()
 
-        # 放大镜参数（正方形，固定左上角）
-        self.magnifier_size = 150          # 边长
-        self.magnifier_scale = 3           # 放大倍数
-        self.magnifier_pos = QPoint(10, 10) # 左上角固定位置
+        # 放大镜参数
+        self.magnifier_size = 150
+        self.magnifier_scale = 3
+        self.magnifier_pos = QPoint(10, 10)
 
         self.label = QLabel("🖱 点击左上角确定起点", self)
         self.label.setAlignment(Qt.AlignCenter)
@@ -203,7 +207,6 @@ class CoordinatePicker(QWidget):
         painter.drawPixmap(self.rect(), self.screen_pixmap)
         painter.fillRect(self.rect(), QColor(0, 0, 0, 120))
 
-        # 绘制预览矩形
         if self.state >= 1 and not self.start_pos.isNull() and not self.end_pos.isNull():
             rect = self._get_current_rect()
             if rect.width() > 1 and rect.height() > 1:
@@ -226,34 +229,32 @@ class CoordinatePicker(QWidget):
                 text_y = rect.y() - 12 if rect.y() > 30 else rect.y() + rect.height() + 25
                 painter.drawText(rect.x() + 10, text_y, f"{rect.width()} × {rect.height()}")
 
-        # 绘制固定放大镜（左上角）
         self._draw_fixed_magnifier(painter)
 
     def _draw_fixed_magnifier(self, painter):
-    pos = self.end_pos
-    if pos.isNull() or not self.rect().contains(pos):
-        return
-    size = self.magnifier_size
-    scale = self.magnifier_scale
-    half = size // 2
-    crop_rect = QRect(pos.x() - half, pos.y() - half, size, size)
-    crop_rect = crop_rect.intersected(self.total_rect)
-    if crop_rect.width() <= 0 or crop_rect.height() <= 0:
-        return
-    pixmap = self.screen_pixmap.copy(crop_rect)
-    # 强制拉伸填充，不保持宽高比，确保图像充满放大镜矩形
-    scaled = pixmap.scaled(size * scale, size * scale, Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
-    painter.save()
-    painter.setPen(QPen(Qt.white, 2))
-    painter.setBrush(QColor(0, 0, 0, 200))
-    painter.drawRect(self.magnifier_pos.x(), self.magnifier_pos.y(), size, size)
-    painter.drawPixmap(self.magnifier_pos.x(), self.magnifier_pos.y(), scaled)
-    # 十字准星在放大镜矩形中心
-    center = self.magnifier_pos + QPoint(size//2, size//2)
-    painter.setPen(QPen(Qt.white, 1, Qt.DashLine))
-    painter.drawLine(center.x() - size//2, center.y(), center.x() + size//2, center.y())
-    painter.drawLine(center.x(), center.y() - size//2, center.x(), center.y() + size//2)
-    painter.restore()
+        pos = self.end_pos
+        if pos.isNull() or not self.rect().contains(pos):
+            return
+        size = self.magnifier_size
+        scale = self.magnifier_scale
+        half = size // 2
+        crop_rect = QRect(pos.x() - half, pos.y() - half, size, size)
+        crop_rect = crop_rect.intersected(self.total_rect)
+        if crop_rect.width() <= 0 or crop_rect.height() <= 0:
+            return
+        pixmap = self.screen_pixmap.copy(crop_rect)
+        # 强制拉伸填充，不留空白
+        scaled = pixmap.scaled(size * scale, size * scale, Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
+        painter.save()
+        painter.setPen(QPen(Qt.white, 2))
+        painter.setBrush(QColor(0, 0, 0, 200))
+        painter.drawRect(self.magnifier_pos.x(), self.magnifier_pos.y(), size, size)
+        painter.drawPixmap(self.magnifier_pos.x(), self.magnifier_pos.y(), scaled)
+        center = self.magnifier_pos + QPoint(size//2, size//2)
+        painter.setPen(QPen(Qt.white, 1, Qt.DashLine))
+        painter.drawLine(center.x() - size//2, center.y(), center.x() + size//2, center.y())
+        painter.drawLine(center.x(), center.y() - size//2, center.x(), center.y() + size//2)
+        painter.restore()
 
     def _get_current_rect(self):
         if self.start_pos.isNull():
@@ -306,7 +307,10 @@ class CoordinatePicker(QWidget):
     def closeEvent(self, event):
         self.setCursor(Qt.ArrowCursor)
         event.accept()
+# === P2 end ===
 
+
+# === P3: MiniWindow 类 ===
 class MiniWindow(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -357,8 +361,10 @@ class MiniWindow(QWidget):
     def closeEvent(self, event):
         self.parent_window.mini_window = None
         event.accept()
+# === P3 end ===
 
 
+# === P4: TrendChartWidget 类 ===
 class TrendChartWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -446,8 +452,10 @@ class TrendChartWidget(QWidget):
             painter.setFont(QFont("Arial", 8))
             painter.drawText(chart_rect.left(), chart_rect.bottom() + 18, "首变")
             painter.drawText(chart_rect.right() - 40, chart_rect.bottom() + 18, f"第{len(self.data)}变")
+# === P4 end ===
 
 
+# === P5: MainWindow.__init__ 及样式表 ===
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -590,7 +598,7 @@ class MainWindow(QMainWindow):
         self.monitor_thread = None
         self.config_file = "monitor_config.json"
         self.loop_enabled = True
-        self.detect_interval = 1000  # 毫秒
+        self.detect_interval = 1000
         self.value_history = {}
         self.current_row_data = []
 
@@ -644,7 +652,6 @@ class MainWindow(QMainWindow):
         else:
             self.set_ocr_status("加载失败，请检查网络后重启", False)
 
-    # ---------- 灵敏度控件 ----------
     def create_sensitivity_widget(self, row, value=5):
         widget = QWidget()
         layout = QHBoxLayout(widget)
@@ -679,7 +686,6 @@ class MainWindow(QMainWindow):
     def get_row_sensitivity(self, row):
         return self.row_sensitivity.get(row, 5)
 
-    # ---------- UI 构建 ----------
     def _setup_ui(self):
         central = QWidget()
         self.setCentralWidget(central)
@@ -710,7 +716,6 @@ class MainWindow(QMainWindow):
         self.download_progress.setValue(0)
         main_layout.addWidget(self.download_progress)
 
-        # ---------- 表格 ----------
         self.table = QTableWidget()
         self.table.setColumnCount(11)
         self.table.setHorizontalHeaderLabels(["启用", "名称", "备注", "当前值", "下限", "上限", "坐标", "状态", "报警时间", "静音", "灵敏度"])
@@ -733,14 +738,12 @@ class MainWindow(QMainWindow):
 
         main_layout.addWidget(self.table, 3)
 
-        # ---------- 趋势曲线 ----------
         self.chart_group = QGroupBox("📈 数值趋势曲线")
         chart_layout = QVBoxLayout(self.chart_group)
         chart_layout.setContentsMargins(12, 18, 12, 12)
         self.trend_chart = TrendChartWidget()
         chart_layout.addWidget(self.trend_chart, 1)
 
-        # 保留记录间隔和检测间隔控件（仅显示，记录由 on_value_updated 实时触发）
         settings_layout = QHBoxLayout()
         settings_layout.setSpacing(10)
         settings_layout.setAlignment(Qt.AlignLeft)
@@ -750,7 +753,7 @@ class MainWindow(QMainWindow):
         self.record_interval_spin.setValue(60)
         self.record_interval_spin.setSuffix(" 分钟")
         self.record_interval_spin.setFixedWidth(90)
-        self.record_interval_spin.setEnabled(False)  # 不再使用，但保留显示
+        self.record_interval_spin.setEnabled(False)
         settings_layout.addWidget(self.record_interval_spin)
         settings_layout.addWidget(QLabel("检测间隔:"))
         self.interval_spin = QSpinBox()
@@ -765,70 +768,54 @@ class MainWindow(QMainWindow):
         chart_layout.addLayout(settings_layout)
         main_layout.addWidget(self.chart_group, 2)
 
-        # ---------- 第一排按钮 ----------
         btn_layout_top = QHBoxLayout()
         btn_layout_top.setSpacing(10)
         btn_layout_top.setAlignment(Qt.AlignLeft)
-
         self.btn_add = QPushButton("➕ 添加")
         self.btn_add.clicked.connect(self.add_monitor_row)
         btn_layout_top.addWidget(self.btn_add)
-
         self.btn_delete = QPushButton("🗑 删除")
         self.btn_delete.setObjectName("btn_delete")
         self.btn_delete.clicked.connect(self.delete_monitor_point)
         btn_layout_top.addWidget(self.btn_delete)
-
         self.btn_edit = QPushButton("✏️ 编辑")
         self.btn_edit.clicked.connect(self.edit_monitor_point)
         btn_layout_top.addWidget(self.btn_edit)
-
         self.btn_test = QPushButton("🎯 测试")
         self.btn_test.clicked.connect(self.test_selected_point)
         btn_layout_top.addWidget(self.btn_test)
-
         self.btn_select_model = QPushButton("📁 选择模型")
         self.btn_select_model.clicked.connect(self.select_model_dir)
         btn_layout_top.addWidget(self.btn_select_model)
-
         self.btn_start_stop = QPushButton("▶ 开始监控")
         self.btn_start_stop.setObjectName("btn_start_stop")
         self.btn_start_stop.clicked.connect(self.toggle_monitor)
         btn_layout_top.addWidget(self.btn_start_stop)
-
         main_layout.addLayout(btn_layout_top)
 
-        # ---------- 第二排按钮 ----------
         btn_layout_bottom = QHBoxLayout()
         btn_layout_bottom.setSpacing(10)
         btn_layout_bottom.setAlignment(Qt.AlignLeft)
-
         self.btn_mini = QPushButton("📱 小窗口")
         self.btn_mini.setObjectName("btn_mini")
         self.btn_mini.clicked.connect(self.toggle_mini_mode)
         btn_layout_bottom.addWidget(self.btn_mini)
-
         self.btn_chart_toggle = QPushButton("📉 收起曲线")
         self.btn_chart_toggle.setObjectName("btn_chart_toggle")
         self.btn_chart_toggle.clicked.connect(self.toggle_chart)
         btn_layout_bottom.addWidget(self.btn_chart_toggle)
-
         self.btn_clear_time = QPushButton("🗑 清空报警时间")
         self.btn_clear_time.clicked.connect(self.clear_alarm_time)
         btn_layout_bottom.addWidget(self.btn_clear_time)
-
         self.btn_save = QPushButton("💾 保存配置")
         self.btn_save.setObjectName("btn_save")
         self.btn_save.clicked.connect(self.save_config)
         btn_layout_bottom.addWidget(self.btn_save)
-
         self.btn_load = QPushButton("📂 加载配置")
         self.btn_load.clicked.connect(self.load_config_dialog)
         btn_layout_bottom.addWidget(self.btn_load)
-
         main_layout.addLayout(btn_layout_bottom)
 
-        # ---------- 状态栏 ----------
         status_layout = QHBoxLayout()
         status_layout.setSpacing(10)
         self.status_label = QLabel("状态: 就绪")
@@ -842,7 +829,6 @@ class MainWindow(QMainWindow):
         self.table.model().rowsInserted.connect(self._on_rows_inserted)
         self.table.model().rowsRemoved.connect(self._on_rows_removed)
 
-    # ---------- 键盘上下移动行 ----------
     def keyPressEvent(self, event):
         if event.modifiers() == Qt.ControlModifier:
             if event.key() == Qt.Key_Up:
@@ -875,7 +861,6 @@ class MainWindow(QMainWindow):
             w2 = self.table.cellWidget(row2, col)
             self.table.setCellWidget(row1, col, w2)
             self.table.setCellWidget(row2, col, w1)
-        # 更新映射
         self.row_enabled[row1], self.row_enabled[row2] = self.row_enabled.get(row2, True), self.row_enabled.get(row1, True)
         self.row_muted[row1], self.row_muted[row2] = self.row_muted.get(row2, False), self.row_muted.get(row1, False)
         self.row_sensitivity[row1], self.row_sensitivity[row2] = self.row_sensitivity.get(row2, 5), self.row_sensitivity.get(row1, 5)
@@ -885,7 +870,6 @@ class MainWindow(QMainWindow):
             self.stop_monitor()
             self.start_monitor()
 
-    # ---------- 模型选择 ----------
     def select_model_dir(self):
         dir_path = QFileDialog.getExistingDirectory(self, "选择 EasyOCR 模型目录")
         if not dir_path:
@@ -918,7 +902,6 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "错误", f"加载模型失败: {str(e)}")
             self.set_ocr_status("加载失败", False)
 
-    # ---------- 合并的监控切换 ----------
     def toggle_monitor(self):
         if self.monitoring:
             self.stop_monitor()
@@ -1003,7 +986,6 @@ class MainWindow(QMainWindow):
             self.row_alarm[row] = False
             self._reset_row_colors(row)
 
-    # ---------- 以下为原功能方法 ----------
     def clear_alarm_time(self):
         for row in range(self.table.rowCount()):
             if self.table.item(row, 1) is None:
@@ -1262,15 +1244,13 @@ class MainWindow(QMainWindow):
             self.table.removeRow(row)
             self.status_label.setText("状态: 已删除")
 
-    # ---------- 数值趋势自动记录（由 on_value_updated 触发） ----------
+    # 数值趋势自动记录（由 on_value_updated 触发）
     def record_current_value(self, row, value):
-        """记录当前行的数值到历史，并更新趋势图（如果该行被选中）"""
         if row not in self.value_history:
             self.value_history[row] = []
         self.value_history[row].append(value)
         if len(self.value_history[row]) > 15:
             self.value_history[row].pop(0)
-        # 如果当前选中的行是这一行，更新趋势图
         if self.table.currentRow() == row:
             name_item = self.table.item(row, 1)
             name = name_item.text() if name_item else f"区域{row+1}"
@@ -1367,13 +1347,11 @@ class MainWindow(QMainWindow):
                 status_item.setBackground(QBrush(QColor(74, 158, 255)))
                 status_item.setForeground(QBrush(QColor(255, 255, 255)))
 
-    # ---------- 核心修改：数值更新时自动记录 ----------
     def on_value_updated(self, row, value):
         item = self.table.item(row, 3)
         if item:
             item.setText(f"{value:.2f}")
             item.setTextAlignment(Qt.AlignCenter)
-        # 自动记录到历史并更新趋势图
         self.record_current_value(row, value)
 
     def on_alarm_triggered(self, row, name, value, lower, upper):
@@ -1441,7 +1419,7 @@ class MainWindow(QMainWindow):
             'monitors': [],
             'interval': self.interval_spin.value(),
             'loop_enabled': self.loop_enabled,
-            'record_interval': self.record_interval_spin.value(),  # 保留仅显示
+            'record_interval': self.record_interval_spin.value(),
             'window_geometry': self.saveGeometry().toBase64().data().decode('utf-8'),
             'window_state': self.saveState().toBase64().data().decode('utf-8')
         }
@@ -1560,6 +1538,7 @@ class MainWindow(QMainWindow):
         self.save_config()
         event.accept()
 
+# === P10 end ===
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
