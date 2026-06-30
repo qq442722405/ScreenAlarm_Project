@@ -177,9 +177,9 @@ class CoordinatePicker(QWidget):
         self.start_pos = QPoint()
         self.end_pos = QPoint()
 
-        # 放大镜参数（正方形，固定左上角）
+        # 放大镜参数（正方形，固定左上角，2倍放大）
         self.magnifier_size = 120          # 显示边长
-        self.magnifier_scale = 3           # 放大倍数
+        self.magnifier_scale = 2           # 放大倍数（改为2倍）
         self.magnifier_pos = QPoint(10, 10) # 左上角固定位置
 
         self.label = QLabel("🖱 点击左上角确定起点", self)
@@ -235,7 +235,7 @@ class CoordinatePicker(QWidget):
             return
         size = self.magnifier_size
         scale = self.magnifier_scale
-        # 截取区域尺寸为 size / scale，确保放大后中心对应鼠标
+        # 截取区域尺寸为 size / scale，保证中心对应鼠标位置
         crop_size = size // scale
         half = crop_size // 2
         crop_rect = QRect(pos.x() - half, pos.y() - half, crop_size, crop_size)
@@ -250,11 +250,11 @@ class CoordinatePicker(QWidget):
         painter.setBrush(QColor(0, 0, 0, 200))
         painter.drawRect(self.magnifier_pos.x(), self.magnifier_pos.y(), size, size)
         painter.drawPixmap(self.magnifier_pos.x(), self.magnifier_pos.y(), scaled)
-        # 中心红点（在放大镜矩形中心）
+        # 中心像素点（用极小的红点表示）
         center = self.magnifier_pos + QPoint(size//2, size//2)
-        painter.setPen(Qt.NoPen)
-        painter.setBrush(QColor(255, 0, 0, 220))
-        painter.drawEllipse(center, 4, 4)
+        painter.setPen(QPen(QColor(255, 0, 0), 1))  # 1像素线宽
+        painter.setBrush(Qt.NoBrush)
+        painter.drawPoint(center)  # 绘制单个像素点
         painter.restore()
 
     def _get_current_rect(self):
