@@ -177,8 +177,8 @@ class CoordinatePicker(QWidget):
         self.start_pos = QPoint()
         self.end_pos = QPoint()
 
-        # 放大镜参数（正方形，固定左上角，尺寸 120x120）
-        self.magnifier_size = 120          # 边长
+        # 放大镜参数（正方形，固定左上角）
+        self.magnifier_size = 120          # 显示边长
         self.magnifier_scale = 3           # 放大倍数
         self.magnifier_pos = QPoint(10, 10) # 左上角固定位置
 
@@ -235,19 +235,22 @@ class CoordinatePicker(QWidget):
             return
         size = self.magnifier_size
         scale = self.magnifier_scale
-        half = size // 2
-        crop_rect = QRect(pos.x() - half, pos.y() - half, size, size)
+        # 截取区域尺寸为 size / scale，确保放大后中心对应鼠标
+        crop_size = size // scale
+        half = crop_size // 2
+        crop_rect = QRect(pos.x() - half, pos.y() - half, crop_size, crop_size)
         crop_rect = crop_rect.intersected(self.total_rect)
         if crop_rect.width() <= 0 or crop_rect.height() <= 0:
             return
         pixmap = self.screen_pixmap.copy(crop_rect)
-        scaled = pixmap.scaled(size * scale, size * scale, Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
+        # 缩放至 size x size 显示
+        scaled = pixmap.scaled(size, size, Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
         painter.save()
         painter.setPen(QPen(Qt.white, 2))
         painter.setBrush(QColor(0, 0, 0, 200))
         painter.drawRect(self.magnifier_pos.x(), self.magnifier_pos.y(), size, size)
         painter.drawPixmap(self.magnifier_pos.x(), self.magnifier_pos.y(), scaled)
-        # 中心红点
+        # 中心红点（在放大镜矩形中心）
         center = self.magnifier_pos + QPoint(size//2, size//2)
         painter.setPen(Qt.NoPen)
         painter.setBrush(QColor(255, 0, 0, 220))
