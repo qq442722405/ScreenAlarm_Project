@@ -541,8 +541,11 @@ class MainWindow(QMainWindow):
             }
             QSpinBox:hover { border-color: #4a9eff; }
             QSpinBox::up-button, QSpinBox::down-button {
-                width: 16px;
-                background-color: #4a4a6a;
+                width: 0px;
+                height: 0px;
+                margin: 0px;
+                border: none;
+                background: none;
             }
             QProgressBar {
                 background-color: #27273d;
@@ -650,12 +653,13 @@ class MainWindow(QMainWindow):
         else:
             self.set_ocr_status("加载失败，请检查网络后重启", False)
 
-    # ---------- 灵敏度控件（QSpinBox，支持直接输入数字） ----------
+    # ---------- 灵敏度控件（无箭头） ----------
     def create_sensitivity_widget(self, row, value=5):
         spin = QSpinBox()
         spin.setRange(1, 10)
         spin.setValue(value)
-        spin.setFixedWidth(60)
+        spin.setFixedWidth(50)                     # 宽度适应无箭头
+        spin.setButtonSymbols(QSpinBox.NoButtons)  # 关键：隐藏上下箭头
         spin.valueChanged.connect(lambda v, r=row: self.on_row_sensitivity_changed(r, v))
         return spin
 
@@ -719,7 +723,7 @@ class MainWindow(QMainWindow):
         self.table.setColumnWidth(7, 80)
         self.table.setColumnWidth(8, 100)
         self.table.setColumnWidth(9, 50)
-        self.table.setColumnWidth(10, 70)
+        self.table.setColumnWidth(10, 60)   # 灵敏度列宽调小
         self.table.horizontalHeader().setStretchLastSection(False)
         self.table.verticalHeader().setVisible(True)
 
