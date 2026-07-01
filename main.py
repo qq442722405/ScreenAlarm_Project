@@ -9,7 +9,7 @@ from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QTableWidget, QTableWidgetItem, QLabel, QMessageBox,
     QAbstractItemView, QHeaderView, QFileDialog, QLineEdit,
-    QGroupBox, QSlider, QProgressBar, QCheckBox, QSpinBox
+    QGroupBox, QSlider, QProgressBar, QCheckBox, QSpinBox, QComboBox
 )
 from PySide6.QtCore import Qt, QTimer, QThread, Signal, QPoint, QRect, QByteArray
 from PySide6.QtGui import (
@@ -173,12 +173,14 @@ class CoordinatePicker(QWidget):
         self.showFullScreen()
         self.raise_()
         self.activateWindow()
-        self.magnifier_radius = 60
-
-        # 状态变量
-        self.state = 0          # 0=等待起点，1=已点起点，2=已确定终点
+        self.state = 0
         self.start_pos = QPoint()
-        self.end_pos = QPoint() # 当前鼠标位置（用于预览）
+        self.end_pos = QPoint()
+
+        # 放大镜参数
+        self.magnifier_size = 120
+        self.magnifier_scale = 2
+        self.magnifier_pos = QPoint(10, 10)
 
         self.label = QLabel("🖱 点击左上角确定起点", self)
         self.label.setAlignment(Qt.AlignCenter)
@@ -193,7 +195,6 @@ class CoordinatePicker(QWidget):
         self.coord_label.move((self.width() - self.coord_label.width()) // 2, 60)
 
         self.setFocus(Qt.OtherFocusReason)
-        # 默认显示放大镜
         self.update()
 
     def paintEvent(self, event):
@@ -202,7 +203,6 @@ class CoordinatePicker(QWidget):
         painter.drawPixmap(self.rect(), self.screen_pixmap)
         painter.fillRect(self.rect(), QColor(0, 0, 0, 120))
 
-        # 绘制预览矩形（如果已点击起点）
         if self.state >= 1 and not self.start_pos.isNull() and not self.end_pos.isNull():
             rect = self._get_current_rect()
             if rect.width() > 1 and rect.height() > 1:
@@ -225,33 +225,31 @@ class CoordinatePicker(QWidget):
                 text_y = rect.y() - 12 if rect.y() > 30 else rect.y() + rect.height() + 25
                 painter.drawText(rect.x() + 10, text_y, f"{rect.width()} × {rect.height()}")
 
-        # 绘制放大镜
-        self._draw_magnifier(painter)
+        self._draw_fixed_magnifier(painter)
 
-    def _draw_magnifier(self, painter):
+    def _draw_fixed_magnifier(self, painter):
         pos = self.end_pos
         if pos.isNull() or not self.rect().contains(pos):
             return
-        radius = self.magnifier_radius
-        crop_rect = QRect(pos.x() - radius//2, pos.y() - radius//2, radius, radius)
+        size = self.magnifier_size
+        scale = self.magnifier_scale
+        crop_size = size // scale
+        half = crop_size // 2
+        crop_rect = QRect(pos.x() - half, pos.y() - half, crop_size, crop_size)
         crop_rect = crop_rect.intersected(self.total_rect)
         if crop_rect.width() <= 0 or crop_rect.height() <= 0:
             return
         pixmap = self.screen_pixmap.copy(crop_rect)
-        scale = 3
-        scaled = pixmap.scaled(radius * scale, radius * scale, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        scaled = pixmap.scaled(size, size, Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
         painter.save()
         painter.setPen(QPen(Qt.white, 2))
-        painter.setBrush(QColor(0, 0, 0, 150))
-        painter.drawEllipse(pos, radius, radius)
-        path = QPainterPath()
-        path.addEllipse(pos, radius-2, radius-2)
-        painter.setClipPath(path)
-        painter.drawPixmap(pos.x() - radius*(scale//2), pos.y() - radius*(scale//2), scaled)
-        painter.setClipping(False)
-        painter.setPen(QPen(Qt.white, 1, Qt.DashLine))
-        painter.drawLine(pos.x() - radius, pos.y(), pos.x() + radius, pos.y())
-        painter.drawLine(pos.x(), pos.y() - radius, pos.x(), pos.y() + radius)
+        painter.setBrush(QColor(0, 0, 0, 200))
+        painter.drawRect(self.magnifier_pos.x(), self.magnifier_pos.y(), size, size)
+        painter.drawPixmap(self.magnifier_pos.x(), self.magnifier_pos.y(), scaled)
+        center = self.magnifier_pos + QPoint(size//2, size//2)
+        painter.setPen(QPen(QColor(255, 0, 0), 1))
+        painter.setBrush(Qt.NoBrush)
+        painter.drawPoint(center)
         painter.restore()
 
     def _get_current_rect(self):
@@ -266,7 +264,6 @@ class CoordinatePicker(QWidget):
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
             if self.state == 0:
-                # 第一次点击：记录起点
                 self.start_pos = event.position().toPoint()
                 self.end_pos = self.start_pos
                 self.state = 1
@@ -275,7 +272,6 @@ class CoordinatePicker(QWidget):
                 self.label.move((self.width() - self.label.width()) // 2, self.height() - self.label.height() - 80)
                 self.update()
             elif self.state == 1:
-                # 第二次点击：记录终点，完成选择
                 self.end_pos = event.position().toPoint()
                 rect = self._get_current_rect()
                 if rect.width() > 20 and rect.height() > 20:
@@ -285,7 +281,6 @@ class CoordinatePicker(QWidget):
                     self.label.setText("⚠️ 区域太小，请重新点击左上角")
                     self.label.adjustSize()
                     self.label.move((self.width() - self.label.width()) // 2, self.height() - self.label.height() - 80)
-                    # 重置状态
                     self.state = 0
                     self.start_pos = QPoint()
                     self.end_pos = QPoint()
@@ -461,13 +456,12 @@ class MainWindow(QMainWindow):
         self.mini_window = None
         self.chart_visible = True
 
-        self.record_timer = QTimer()
-        self.record_timer.timeout.connect(self.record_current_value)
-        self.recording = False
-        self.record_interval = 60  # 分钟
-
         self.test_reader = None
         self.reader_loading = False
+
+        self.record_timer = QTimer()
+        self.record_timer.timeout.connect(self.record_current_value)
+        self.record_interval_minutes = 60
 
         self.setStyleSheet("""
             QMainWindow { background-color: #1e1e2e; }
@@ -537,14 +531,44 @@ class MainWindow(QMainWindow):
                 border-radius: 3px;
             }
             QSpinBox {
-                background-color: #363650;
+                background-color: transparent;
                 color: #e0e0f0;
-                border: 1px solid #4a4a6a;
-                border-radius: 6px;
-                padding: 5px 10px;
-                min-height: 20px;
+                border: none;
+                padding: 0px;
+                font-family: "Microsoft YaHei";
+                font-size: 13px;
+                text-align: center;
             }
-            QSpinBox:hover { border-color: #4a9eff; }
+            QSpinBox::up-button, QSpinBox::down-button {
+                width: 0px;
+                height: 0px;
+                margin: 0px;
+                border: none;
+                background: none;
+            }
+            QSpinBox:focus {
+                background-color: #2a2a42;
+                border: 1px solid #4a9eff;
+                border-radius: 4px;
+            }
+            QComboBox {
+                background-color: transparent;
+                color: #e0e0f0;
+                border: none;
+                padding: 0px;
+                font-family: "Microsoft YaHei";
+                font-size: 12px;
+                text-align: center;
+            }
+            QComboBox::drop-down {
+                border: none;
+                width: 12px;
+            }
+            QComboBox QAbstractItemView {
+                background-color: #2a2a42;
+                color: #e0e0f0;
+                selection-background-color: #4a9eff;
+            }
             QProgressBar {
                 background-color: #27273d;
                 border: 1px solid #33334a;
@@ -598,7 +622,7 @@ class MainWindow(QMainWindow):
         self.monitor_thread = None
         self.config_file = "monitor_config.json"
         self.loop_enabled = True
-        self.detect_interval = 1000  # 毫秒（默认1秒）
+        self.detect_interval = 1000
         self.value_history = {}
         self.current_row_data = []
 
@@ -609,7 +633,7 @@ class MainWindow(QMainWindow):
         self.row_enabled = {}
         self.row_alarm = {}
         self.row_muted = {}
-        self.row_sensitivity = {}
+        self.row_mode = {}          # 存储模式 'number' 或 'color'
 
         self._setup_ui()
         self.load_config()
@@ -652,32 +676,61 @@ class MainWindow(QMainWindow):
         else:
             self.set_ocr_status("加载失败，请检查网络后重启", False)
 
+    # ---------- 模式控件 ----------
+    def create_mode_combo(self, row, current_mode='number'):
+        combo = QComboBox()
+        combo.addItem("数值监控", "number")
+        combo.addItem("颜色监控", "color")
+        index = combo.findData(current_mode)
+        if index >= 0:
+            combo.setCurrentIndex(index)
+        combo.currentIndexChanged.connect(lambda idx, r=row: self.on_mode_changed(r, combo))
+        combo.setFixedWidth(80)
+        return combo
+
+    def on_mode_changed(self, row, combo):
+        mode = combo.currentData()
+        self.row_mode[row] = mode
+        # 更新上下限的启用/禁用状态
+        lower_spin = self.table.cellWidget(row, 6)  # 下限列是第6列（0-based）
+        upper_spin = self.table.cellWidget(row, 7)  # 上限列是第7列
+        if mode == 'number':
+            if lower_spin:
+                lower_spin.setEnabled(True)
+                lower_spin.setStyleSheet("background-color: transparent;")
+            if upper_spin:
+                upper_spin.setEnabled(True)
+                upper_spin.setStyleSheet("background-color: transparent;")
+            # 恢复数值模式下的显示格式（如果之前显示了颜色代码）
+            self._update_value_display(row)
+        else:  # color
+            if lower_spin:
+                lower_spin.setEnabled(False)
+                lower_spin.setStyleSheet("background-color: #3a3a50; color: #7a7a9a;")
+                lower_spin.setValue(0)
+            if upper_spin:
+                upper_spin.setEnabled(False)
+                upper_spin.setStyleSheet("background-color: #3a3a50; color: #7a7a9a;")
+                upper_spin.setValue(0)
+            # 当前值显示为颜色代码（仅当已检测到颜色时设置）
+            # 在监控更新时处理
+
+    def _update_value_display(self, row):
+        # 由监控线程更新时调用
+        pass
+
     # ---------- 灵敏度控件 ----------
     def create_sensitivity_widget(self, row, value=5):
-        widget = QWidget()
-        layout = QHBoxLayout(widget)
-        layout.setContentsMargins(2, 0, 2, 0)
-        layout.setSpacing(2)
-        slider = QSlider(Qt.Horizontal)
-        slider.setRange(1, 10)
-        slider.setValue(value)
-        slider.setFixedWidth(60)
-        slider.valueChanged.connect(lambda v, r=row: self.on_row_sensitivity_changed(r, v))
-        label = QLabel(str(value))
-        label.setFixedWidth(20)
-        label.setAlignment(Qt.AlignCenter)
-        layout.addWidget(slider)
-        layout.addWidget(label)
-        widget.slider = slider
-        widget.label = label
-        widget.row = row
-        return widget
+        spin = QSpinBox()
+        spin.setRange(1, 10)
+        spin.setValue(value)
+        spin.setFixedWidth(50)
+        spin.setButtonSymbols(QSpinBox.NoButtons)
+        spin.setAlignment(Qt.AlignCenter)
+        spin.valueChanged.connect(lambda v, r=row: self.on_row_sensitivity_changed(r, v))
+        return spin
 
     def on_row_sensitivity_changed(self, row, value):
-        widget = self.table.cellWidget(row, 10)
-        if widget and hasattr(widget, 'label'):
-            widget.label.setText(str(value))
-        self.row_sensitivity[row] = value
         if self.monitoring and self.monitor_thread is not None:
             for m in self.monitor_thread.monitors:
                 if m['row'] == row:
@@ -685,7 +738,16 @@ class MainWindow(QMainWindow):
                     break
 
     def get_row_sensitivity(self, row):
-        return self.row_sensitivity.get(row, 5)
+        widget = self.table.cellWidget(row, 12)  # 灵敏度列索引12
+        if widget and isinstance(widget, QSpinBox):
+            return widget.value()
+        return 5
+
+    def get_row_mode(self, row):
+        widget = self.table.cellWidget(row, 3)  # 模式列索引3
+        if widget and isinstance(widget, QComboBox):
+            return widget.currentData()
+        return 'number'
 
     # ---------- UI 构建 ----------
     def _setup_ui(self):
@@ -718,30 +780,33 @@ class MainWindow(QMainWindow):
         self.download_progress.setValue(0)
         main_layout.addWidget(self.download_progress)
 
-        # ---------- 表格 ----------
+        # 表格列: 启用, 名称, 模式, 备注, 当前值, 下限, 上限, 坐标, 状态, 报警时间, 静音, 灵敏度 (共12列)
         self.table = QTableWidget()
-        self.table.setColumnCount(11)
-        self.table.setHorizontalHeaderLabels(["启用", "名称", "备注", "当前值", "下限", "上限", "坐标", "状态", "报警时间", "静音", "灵敏度"])
+        self.table.setColumnCount(12)
+        self.table.setHorizontalHeaderLabels(
+            ["启用", "名称", "模式", "备注", "当前值", "下限", "上限", "坐标", "状态", "报警时间", "静音", "灵敏度"]
+        )
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.setAlternatingRowColors(True)
         self.table.setRowCount(0)
         self.table.setColumnWidth(0, 40)
         self.table.setColumnWidth(1, 80)
-        self.table.setColumnWidth(2, 150)
-        self.table.setColumnWidth(3, 80)
-        self.table.setColumnWidth(4, 60)
+        self.table.setColumnWidth(2, 85)
+        self.table.setColumnWidth(3, 120)
+        self.table.setColumnWidth(4, 80)
         self.table.setColumnWidth(5, 60)
-        self.table.setColumnWidth(6, 120)
-        self.table.setColumnWidth(7, 80)
-        self.table.setColumnWidth(8, 100)
-        self.table.setColumnWidth(9, 50)
-        self.table.setColumnWidth(10, 120)
+        self.table.setColumnWidth(6, 60)
+        self.table.setColumnWidth(7, 120)
+        self.table.setColumnWidth(8, 80)
+        self.table.setColumnWidth(9, 100)
+        self.table.setColumnWidth(10, 50)
+        self.table.setColumnWidth(11, 60)
         self.table.horizontalHeader().setStretchLastSection(False)
         self.table.verticalHeader().setVisible(True)
 
         main_layout.addWidget(self.table, 3)
 
-        # ---------- 趋势曲线 ----------
+        # 趋势曲线
         self.chart_group = QGroupBox("📈 数值趋势曲线")
         chart_layout = QVBoxLayout(self.chart_group)
         chart_layout.setContentsMargins(12, 18, 12, 12)
@@ -772,7 +837,7 @@ class MainWindow(QMainWindow):
         chart_layout.addLayout(settings_layout)
         main_layout.addWidget(self.chart_group, 2)
 
-        # ---------- 第一排按钮 ----------
+        # 按钮栏
         btn_layout_top = QHBoxLayout()
         btn_layout_top.setSpacing(10)
         btn_layout_top.setAlignment(Qt.AlignLeft)
@@ -805,7 +870,6 @@ class MainWindow(QMainWindow):
 
         main_layout.addLayout(btn_layout_top)
 
-        # ---------- 第二排按钮 ----------
         btn_layout_bottom = QHBoxLayout()
         btn_layout_bottom.setSpacing(10)
         btn_layout_bottom.setAlignment(Qt.AlignLeft)
@@ -835,7 +899,6 @@ class MainWindow(QMainWindow):
 
         main_layout.addLayout(btn_layout_bottom)
 
-        # ---------- 状态栏 ----------
         status_layout = QHBoxLayout()
         status_layout.setSpacing(10)
         self.status_label = QLabel("状态: 就绪")
@@ -885,7 +948,7 @@ class MainWindow(QMainWindow):
         # 更新映射
         self.row_enabled[row1], self.row_enabled[row2] = self.row_enabled.get(row2, True), self.row_enabled.get(row1, True)
         self.row_muted[row1], self.row_muted[row2] = self.row_muted.get(row2, False), self.row_muted.get(row1, False)
-        self.row_sensitivity[row1], self.row_sensitivity[row2] = self.row_sensitivity.get(row2, 5), self.row_sensitivity.get(row1, 5)
+        self.row_mode[row1], self.row_mode[row2] = self.row_mode.get(row2, 'number'), self.row_mode.get(row1, 'number')
         self.value_history.clear()
         self.status_label.setText("状态: 行顺序已改变，历史趋势数据已重置")
         if self.monitoring:
@@ -925,7 +988,7 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "错误", f"加载模型失败: {str(e)}")
             self.set_ocr_status("加载失败", False)
 
-    # ---------- 合并的监控切换 ----------
+    # ---------- 监控切换 ----------
     def toggle_monitor(self):
         if self.monitoring:
             self.stop_monitor()
@@ -954,24 +1017,28 @@ class MainWindow(QMainWindow):
             if self.table.item(row, 1) is None:
                 continue
             name = self.table.item(row, 1).text()
-            lower = float(self.table.item(row, 4).text())
-            upper = float(self.table.item(row, 5).text())
-            coords = self.table.item(row, 6).text()
+            mode = self.get_row_mode(row)
+            lower = float(self.table.item(row, 5).text()) if mode == 'number' else 0
+            upper = float(self.table.item(row, 6).text()) if mode == 'number' else 0
+            coords = self.table.item(row, 7).text()
             nums = re.findall(r'\d+', coords)
             if len(nums) >= 4:
                 x, y, w, h = map(int, nums[:4])
             else:
                 continue
             sens = self.get_row_sensitivity(row)
+            remark = self.table.cellWidget(row, 4).text() if self.table.cellWidget(row, 4) else ""
             monitors.append({
                 'name': name,
                 'x': x, 'y': y,
                 'width': w, 'height': h,
-                'lower': lower, 'upper': upper,
+                'lower': lower,
+                'upper': upper,
                 'row': row,
                 'enabled': self._get_row_enabled(row),
                 'sensitivity': sens,
-                'remark': self.table.cellWidget(row, 2).text() if self.table.cellWidget(row, 2) else ""
+                'mode': mode,
+                'remark': remark
             })
 
         if not monitors:
@@ -994,33 +1061,73 @@ class MainWindow(QMainWindow):
         self.monitoring = True
         self.btn_start_stop.setText("⏹ 停止监控")
         self.status_label.setText("状态: 监控运行中")
-        self.recording = True
-        self.record_timer.start(int(self.record_interval * 60 * 1000))
+
+        self.record_timer.start(self.record_interval_minutes * 60 * 1000)
 
     def stop_monitor(self):
         if self.monitor_thread and self.monitor_thread.isRunning():
             self.monitor_thread.stop()
             self.monitor_thread.wait()
-        self.recording = False
-        self.record_timer.stop()
         self.monitoring = False
         self.btn_start_stop.setText("▶ 开始监控")
         self.status_label.setText("状态: 已停止")
         self.stop_alarm()
+        self.record_timer.stop()
         for row in range(self.table.rowCount()):
-            item = self.table.item(row, 7)
+            item = self.table.item(row, 9)
             if item and item.text() not in ["报警", "已静音"]:
-                self.table.setItem(row, 7, QTableWidgetItem("已停止"))
+                self.table.setItem(row, 9, QTableWidgetItem("已停止"))
             self.row_alarm[row] = False
             self._reset_row_colors(row)
 
-    # ---------- 以下为原功能方法，保持不变 ----------
+    # ---------- 记录间隔 ----------
+    def set_record_interval(self, value):
+        self.record_interval_minutes = value
+        if self.monitoring and self.record_timer.isActive():
+            self.record_timer.start(value * 60 * 1000)
+
+    def record_current_value(self):
+        row = self.table.currentRow()
+        if row < 0:
+            return
+        val_item = self.table.item(row, 5)  # 当前值列
+        if val_item is None or val_item.text() == "--":
+            return
+        # 对于颜色模式，存储颜色差值（0-100）
+        mode = self.get_row_mode(row)
+        if mode == 'color':
+            # 解析当前值中的差值（如果有括号）
+            text = val_item.text()
+            import re
+            match = re.search(r'差([\d.]+)', text)
+            if match:
+                try:
+                    value = float(match.group(1))
+                except:
+                    return
+            else:
+                return
+        else:
+            try:
+                value = float(val_item.text())
+            except:
+                return
+        if row not in self.value_history:
+            self.value_history[row] = []
+        self.value_history[row].append(value)
+        if len(self.value_history[row]) > 15:
+            self.value_history[row].pop(0)
+        name_item = self.table.item(row, 1)
+        name = name_item.text() if name_item else f"区域{row+1}"
+        self.trend_chart.set_data(self.value_history[row], f"{name} 趋势")
+
+    # ---------- 原有功能方法 ----------
     def clear_alarm_time(self):
         for row in range(self.table.rowCount()):
             if self.table.item(row, 1) is None:
                 continue
-            self.table.setItem(row, 8, QTableWidgetItem("--"))
-            it = self.table.item(row, 8)
+            self.table.setItem(row, 10, QTableWidgetItem("--"))
+            it = self.table.item(row, 10)
             if it:
                 it.setTextAlignment(Qt.AlignCenter)
         self.status_label.setText("状态: 已清空报警时间")
@@ -1063,7 +1170,7 @@ class MainWindow(QMainWindow):
         has_alarm = False
         alarm_name = None
         for row in range(self.table.rowCount()):
-            item = self.table.item(row, 7)
+            item = self.table.item(row, 9)
             if item and item.text() == "报警":
                 has_alarm = True
                 name_item = self.table.item(row, 1)
@@ -1084,32 +1191,37 @@ class MainWindow(QMainWindow):
             return
         name_item = self.table.item(row, 1)
         name = name_item.text() if name_item else f"区域{row+1}"
-        self.trend_chart.set_data(self.value_history[row], f"{name} 数值趋势")
+        self.trend_chart.set_data(self.value_history[row], f"{name} 趋势")
 
     def _on_table_item_changed(self, item):
         if not self.monitoring or self.monitor_thread is None:
             return
         row = item.row()
         col = item.column()
-        if col == 4 or col == 5:
-            try:
-                new_value = float(item.text())
-                for m in self.monitor_thread.monitors:
-                    if m['row'] == row:
-                        if col == 4:
-                            m['lower'] = new_value
-                        elif col == 5:
-                            m['upper'] = new_value
-                        break
-            except ValueError:
-                pass
+        if col == 5 or col == 6:  # 下限或上限
+            mode = self.get_row_mode(row)
+            if mode == 'number':
+                try:
+                    new_value = float(item.text())
+                    for m in self.monitor_thread.monitors:
+                        if m['row'] == row:
+                            if col == 5:
+                                m['lower'] = new_value
+                            elif col == 6:
+                                m['upper'] = new_value
+                            break
+                except ValueError:
+                    pass
 
     def _on_rows_inserted(self, parent, first, last):
         for row in range(first, last + 1):
             widget = self.table.cellWidget(row, 0)
             if widget and isinstance(widget, QCheckBox):
                 self.row_enabled[row] = widget.isChecked()
-            mute_widget = self.table.cellWidget(row, 9)
+            mode_widget = self.table.cellWidget(row, 2)
+            if mode_widget and isinstance(mode_widget, QComboBox):
+                self.row_mode[row] = mode_widget.currentData()
+            mute_widget = self.table.cellWidget(row, 11)
             if mute_widget and isinstance(mute_widget, QCheckBox):
                 self.row_muted[row] = mute_widget.isChecked()
                 mute_widget.stateChanged.connect(lambda state, r=row: self._on_mute_changed(r, state))
@@ -1122,8 +1234,8 @@ class MainWindow(QMainWindow):
                 del self.row_alarm[row]
             if row in self.row_muted:
                 del self.row_muted[row]
-            if row in self.row_sensitivity:
-                del self.row_sensitivity[row]
+            if row in self.row_mode:
+                del self.row_mode[row]
             if row in self.value_history:
                 del self.value_history[row]
 
@@ -1136,7 +1248,7 @@ class MainWindow(QMainWindow):
     def _on_mute_changed(self, row, state):
         self.row_muted[row] = (state == 2)
         if self.row_alarm.get(row, False):
-            item = self.table.item(row, 7)
+            item = self.table.item(row, 9)
             if item:
                 if state == 2:
                     item.setText("已静音")
@@ -1149,7 +1261,7 @@ class MainWindow(QMainWindow):
     def _check_alarms(self):
         should_play = False
         for r in range(self.table.rowCount()):
-            item = self.table.item(r, 7)
+            item = self.table.item(r, 9)
             if item and item.text() == "报警":
                 should_play = True
                 break
@@ -1198,6 +1310,7 @@ class MainWindow(QMainWindow):
         self.table.insertRow(row)
         self.value_history[row] = []
 
+        # 启用
         enable_check = QCheckBox()
         enable_check.setChecked(True)
         enable_check.setStyleSheet("margin-left: 12px;")
@@ -1205,35 +1318,81 @@ class MainWindow(QMainWindow):
         self.row_enabled[row] = True
         enable_check.stateChanged.connect(lambda state, r=row: self._on_enable_changed(r, state))
 
-        remark_edit = QLineEdit()
-        remark_edit.setPlaceholderText("备注（可选）")
-        self.table.setCellWidget(row, 2, remark_edit)
+        # 名称
+        self.table.setItem(row, 1, QTableWidgetItem(f"区域{row+1}"))
 
+        # 模式（默认数值）
+        mode_combo = self.create_mode_combo(row, 'number')
+        self.table.setCellWidget(row, 2, mode_combo)
+        self.row_mode[row] = 'number'
+
+        # 备注
+        remark_edit = QLineEdit()
+        remark_edit.setPlaceholderText("颜色模式: #RRGGBB,容差")
+        self.table.setCellWidget(row, 3, remark_edit)
+
+        # 当前值
+        self.table.setItem(row, 4, QTableWidgetItem("--"))
+
+        # 下限
+        lower_spin = QSpinBox()
+        lower_spin.setRange(-999999, 999999)
+        lower_spin.setValue(0)
+        lower_spin.setFixedWidth(60)
+        lower_spin.setAlignment(Qt.AlignCenter)
+        lower_spin.setButtonSymbols(QSpinBox.NoButtons)
+        lower_spin.valueChanged.connect(lambda v, r=row: self._on_limit_changed(r, 5, v))
+        self.table.setCellWidget(row, 5, lower_spin)
+
+        # 上限
+        upper_spin = QSpinBox()
+        upper_spin.setRange(-999999, 999999)
+        upper_spin.setValue(100)
+        upper_spin.setFixedWidth(60)
+        upper_spin.setAlignment(Qt.AlignCenter)
+        upper_spin.setButtonSymbols(QSpinBox.NoButtons)
+        upper_spin.valueChanged.connect(lambda v, r=row: self._on_limit_changed(r, 6, v))
+        self.table.setCellWidget(row, 6, upper_spin)
+
+        # 坐标
+        self.table.setItem(row, 7, QTableWidgetItem(f"{x},{y},{width},{height}"))
+
+        # 状态
+        self.table.setItem(row, 8, QTableWidgetItem("待监控"))
+
+        # 报警时间
+        self.table.setItem(row, 9, QTableWidgetItem("--"))
+
+        # 静音
         mute_check = QCheckBox()
         mute_check.setChecked(False)
         mute_check.setStyleSheet("margin-left: 12px;")
-        self.table.setCellWidget(row, 9, mute_check)
+        self.table.setCellWidget(row, 10, mute_check)
         self.row_muted[row] = False
         mute_check.stateChanged.connect(lambda state, r=row: self._on_mute_changed(r, state))
 
-        sens_widget = self.create_sensitivity_widget(row, 5)
-        self.table.setCellWidget(row, 10, sens_widget)
-        self.row_sensitivity[row] = 5
+        # 灵敏度
+        sens_spin = self.create_sensitivity_widget(row, 5)
+        self.table.setCellWidget(row, 11, sens_spin)
 
-        self.table.setItem(row, 1, QTableWidgetItem(f"区域{row+1}"))
-        self.table.setItem(row, 3, QTableWidgetItem("--"))
-        self.table.setItem(row, 4, QTableWidgetItem("0"))
-        self.table.setItem(row, 5, QTableWidgetItem("100"))
-        self.table.setItem(row, 6, QTableWidgetItem(f"{x},{y},{width},{height}"))
-        self.table.setItem(row, 7, QTableWidgetItem("待监控"))
-        self.table.setItem(row, 8, QTableWidgetItem("--"))
-
-        for col in [1,3,4,5,6,7,8]:
+        # 设置对齐
+        for col in [1, 4, 7, 8, 9]:
             it = self.table.item(row, col)
             if it:
                 it.setTextAlignment(Qt.AlignCenter)
 
         self.status_label.setText(f"状态: 已添加 区域{row+1}")
+
+    def _on_limit_changed(self, row, col, value):
+        # 仅用于监控中动态更新
+        if self.monitoring and self.monitor_thread:
+            for m in self.monitor_thread.monitors:
+                if m['row'] == row:
+                    if col == 5:
+                        m['lower'] = float(value)
+                    elif col == 6:
+                        m['upper'] = float(value)
+                    break
 
     def _on_enable_changed(self, row, state):
         self.row_enabled[row] = (state == 2)
@@ -1251,7 +1410,7 @@ class MainWindow(QMainWindow):
         self.picker = None
         if x == 0 and y == 0 and width == 0 and height == 0:
             return
-        self.table.setItem(row, 6, QTableWidgetItem(f"{x},{y},{width},{height}"))
+        self.table.setItem(row, 7, QTableWidgetItem(f"{x},{y},{width},{height}"))
         self.status_label.setText("状态: 已更新坐标")
         if self.monitoring and self.monitor_thread:
             for m in self.monitor_thread.monitors:
@@ -1273,36 +1432,6 @@ class MainWindow(QMainWindow):
             self.table.removeRow(row)
             self.status_label.setText("状态: 已删除")
 
-    def set_record_interval(self, value):
-        self.record_interval = value
-        if self.recording:
-            self.record_timer.stop()
-            self.record_timer.start(int(value * 60 * 1000))
-
-    def record_current_value(self):
-        selected = self.table.selectedItems()
-        if not selected:
-            return
-        row = selected[0].row()
-        if row < 0:
-            return
-        val_item = self.table.item(row, 3)
-        if val_item is None or val_item.text() == "--":
-            return
-        try:
-            value = float(val_item.text())
-        except:
-            return
-        if row not in self.value_history:
-            self.value_history[row] = []
-        self.value_history[row].append(value)
-        if len(self.value_history[row]) > 15:
-            self.value_history[row].pop(0)
-        if self.table.currentRow() == row:
-            name_item = self.table.item(row, 1)
-            name = name_item.text() if name_item else f"区域{row+1}"
-            self.trend_chart.set_data(self.value_history[row], f"{name} 数值趋势")
-
     def test_selected_point(self):
         if self.test_reader is None:
             QMessageBox.warning(self, "提示", "OCR 引擎尚未加载完成，请稍候...")
@@ -1311,13 +1440,15 @@ class MainWindow(QMainWindow):
         if row < 0:
             QMessageBox.warning(self, "提示", "请先选择一行监控点")
             return
-        coords_text = self.table.item(row, 6).text()
+        coords_text = self.table.item(row, 7).text()
         nums = re.findall(r'\d+', coords_text)
         if len(nums) < 4:
             QMessageBox.warning(self, "错误", "坐标数据无效")
             return
         x, y, w, h = map(int, nums[:4])
         sens = self.get_row_sensitivity(row)
+        mode = self.get_row_mode(row)
+        remark = self.table.cellWidget(row, 3).text() if self.table.cellWidget(row, 3) else ""
 
         try:
             import mss, numpy as np
@@ -1329,53 +1460,97 @@ class MainWindow(QMainWindow):
                 img = Image.frombytes("RGB", screenshot.size, screenshot.rgb)
                 img_np = np.array(img)
 
-            clip_limit = 1.0 + (sens / 10.0) * 2.0
-            block_size = max(3, int(5 + (10 - sens) * 1.5))
-            if block_size % 2 == 0:
-                block_size += 1
-            c_value = max(1, int(2 + (10 - sens) * 0.5))
-            text_thr = 0.3 + (10 - sens) * 0.03
-
-            def preprocess(img_np):
-                height, width = img_np.shape[:2]
-                scaled = cv2.resize(img_np, (width * 3, height * 3), interpolation=cv2.INTER_LINEAR)
-                if len(scaled.shape) == 3:
-                    gray = cv2.cvtColor(scaled, cv2.COLOR_RGB2GRAY)
+            if mode == 'color':
+                # 颜色检测
+                import re
+                match = re.match(r'#([0-9A-Fa-f]{6})\s*,\s*(\d+)', remark.strip())
+                if not match:
+                    QMessageBox.warning(self, "错误", "颜色模式需在备注填写 #RRGGBB,容差")
+                    return
+                target_hex = '#' + match.group(1)
+                tolerance = int(match.group(2))
+                # 计算平均颜色
+                hsv = cv2.cvtColor(img_np, cv2.COLOR_RGB2HSV)
+                mean_hsv = np.mean(hsv, axis=(0, 1))
+                # 目标HSV
+                r, g, b = int(target_hex[1:3], 16), int(target_hex[3:5], 16), int(target_hex[5:7], 16)
+                r, g, b = r/255.0, g/255.0, b/255.0
+                maxc = max(r, g, b)
+                minc = min(r, g, b)
+                diff = maxc - minc
+                if diff == 0:
+                    h = 0
+                elif maxc == r:
+                    h = ((g - b) / diff) % 6
+                elif maxc == g:
+                    h = 2 + (b - r) / diff
                 else:
-                    gray = scaled
-                clahe = cv2.createCLAHE(clipLimit=clip_limit, tileGridSize=(8, 8))
-                enhanced = clahe.apply(gray)
-                if np.mean(enhanced) < 80:
-                    enhanced = 255 - enhanced
-                    enhanced = clahe.apply(enhanced)
-                kernel_sharpen = np.array([[-1,-1,-1],[-1,9,-1],[-1,-1,-1]])
-                sharpened = cv2.filter2D(enhanced, -1, kernel_sharpen)
-                binary = cv2.adaptiveThreshold(sharpened, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-                                                cv2.THRESH_BINARY, block_size, c_value)
-                kernel = np.ones((2,2), np.uint8)
-                cleaned = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel, iterations=1)
-                cleaned = cv2.morphologyEx(cleaned, cv2.MORPH_OPEN, kernel, iterations=1)
-                return cv2.cvtColor(cleaned, cv2.COLOR_GRAY2RGB)
-
-            processed = preprocess(img_np)
-            result = self.test_reader.readtext(processed, allowlist='0123456789.-', paragraph=False,
-                                                text_threshold=text_thr)
-            all_numbers = []
-            for bbox, text, confidence in result:
-                if confidence > 0.2:
-                    numbers = re.findall(r'-?\d+\.?\d*', text)
-                    for num_str in numbers:
-                        try:
-                            val = float(num_str)
-                            all_numbers.append((val, confidence, len(num_str)))
-                        except:
-                            pass
-            if all_numbers:
-                all_numbers.sort(key=lambda x: (1 if '.' in str(x[0]) else 0, x[2]), reverse=True)
-                best = all_numbers[0][0]
-                QMessageBox.information(self, "测试结果", f"识别到数值: {best:.2f}")
+                    h = 4 + (r - g) / diff
+                h = h * 60 / 2
+                s = ((maxc - minc) / maxc) * 255 if maxc != 0 else 0
+                v = maxc * 255
+                target_hsv = np.array([h, s, v], dtype=np.float32)
+                diff_h = abs(mean_hsv[0] - target_hsv[0])
+                if diff_h > 180:
+                    diff_h = 360 - diff_h
+                diff_s = abs(mean_hsv[1] - target_hsv[1])
+                diff_v = abs(mean_hsv[2] - target_hsv[2])
+                total_diff = diff_h/180 * 100 + diff_s/255 * 100 + diff_v/255 * 100
+                status = "匹配" if total_diff <= tolerance else "不匹配"
+                QMessageBox.information(self, "颜色检测结果",
+                                        f"目标颜色: {target_hex}\n"
+                                        f"平均颜色: #{int(mean_hsv[0]*2):02X}{int(mean_hsv[1]):02X}{int(mean_hsv[2]):02X}\n"
+                                        f"差值: {total_diff:.1f} (容差: {tolerance})\n"
+                                        f"状态: {status}")
             else:
-                QMessageBox.warning(self, "测试结果", "未识别到数字")
+                # 数值检测
+                clip_limit = 1.0 + (sens / 10.0) * 2.0
+                block_size = max(3, int(5 + (10 - sens) * 1.5))
+                if block_size % 2 == 0:
+                    block_size += 1
+                c_value = max(1, int(2 + (10 - sens) * 0.5))
+                text_thr = 0.3 + (10 - sens) * 0.03
+
+                def preprocess(img_np):
+                    height, width = img_np.shape[:2]
+                    scaled = cv2.resize(img_np, (width * 3, height * 3), interpolation=cv2.INTER_LINEAR)
+                    if len(scaled.shape) == 3:
+                        gray = cv2.cvtColor(scaled, cv2.COLOR_RGB2GRAY)
+                    else:
+                        gray = scaled
+                    clahe = cv2.createCLAHE(clipLimit=clip_limit, tileGridSize=(8, 8))
+                    enhanced = clahe.apply(gray)
+                    if np.mean(enhanced) < 80:
+                        enhanced = 255 - enhanced
+                        enhanced = clahe.apply(enhanced)
+                    kernel_sharpen = np.array([[-1,-1,-1],[-1,9,-1],[-1,-1,-1]])
+                    sharpened = cv2.filter2D(enhanced, -1, kernel_sharpen)
+                    binary = cv2.adaptiveThreshold(sharpened, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                                                    cv2.THRESH_BINARY, block_size, c_value)
+                    kernel = np.ones((2,2), np.uint8)
+                    cleaned = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel, iterations=1)
+                    cleaned = cv2.morphologyEx(cleaned, cv2.MORPH_OPEN, kernel, iterations=1)
+                    return cv2.cvtColor(cleaned, cv2.COLOR_GRAY2RGB)
+
+                processed = preprocess(img_np)
+                result = self.test_reader.readtext(processed, allowlist='0123456789.-', paragraph=False,
+                                                    text_threshold=text_thr)
+                all_numbers = []
+                for bbox, text, confidence in result:
+                    if confidence > 0.2:
+                        numbers = re.findall(r'-?\d+\.?\d*', text)
+                        for num_str in numbers:
+                            try:
+                                val = float(num_str)
+                                all_numbers.append((val, confidence, len(num_str)))
+                            except:
+                                pass
+                if all_numbers:
+                    all_numbers.sort(key=lambda x: (1 if '.' in str(x[0]) else 0, x[2]), reverse=True)
+                    best = all_numbers[0][0]
+                    QMessageBox.information(self, "测试结果", f"识别到数值: {best:.2f}")
+                else:
+                    QMessageBox.warning(self, "测试结果", "未识别到数字")
         except Exception as e:
             QMessageBox.critical(self, "错误", f"测试失败: {e}")
 
@@ -1385,7 +1560,7 @@ class MainWindow(QMainWindow):
         self.ocr_status_label.setText(f"OCR引擎: {status}")
 
     def _reset_row_colors(self, row):
-        status_item = self.table.item(row, 7)
+        status_item = self.table.item(row, 9)
         if status_item:
             status_item.setBackground(QBrush(QColor(0, 0, 0, 0)))
             status_item.setForeground(QBrush(QColor(255, 255, 255)))
@@ -1394,13 +1569,21 @@ class MainWindow(QMainWindow):
                 status_item.setBackground(QBrush(QColor(74, 158, 255)))
                 status_item.setForeground(QBrush(QColor(255, 255, 255)))
 
-    def on_value_updated(self, row, value):
-        item = self.table.item(row, 3)
+    def on_value_updated(self, row, value, mode, color_code=None, color_diff=None):
+        item = self.table.item(row, 4)
         if item:
-            item.setText(f"{value:.2f}")
+            if mode == 'number':
+                item.setText(f"{value:.2f}")
+            else:
+                # 颜色模式显示颜色代码和差值
+                if color_code:
+                    if color_diff is not None:
+                        item.setText(f"{color_code} 差{color_diff:.1f}")
+                    else:
+                        item.setText(color_code)
             item.setTextAlignment(Qt.AlignCenter)
 
-    def on_alarm_triggered(self, row, name, value, lower, upper):
+    def on_alarm_triggered(self, row, name, value, lower, upper, mode='number'):
         self.row_alarm[row] = True
         if self._is_row_muted(row):
             status_text = "已静音"
@@ -1412,18 +1595,21 @@ class MainWindow(QMainWindow):
         status_item.setBackground(QBrush(color))
         status_item.setForeground(QBrush(QColor(255, 255, 255)))
         status_item.setTextAlignment(Qt.AlignCenter)
-        self.table.setItem(row, 7, status_item)
+        self.table.setItem(row, 9, status_item)
         now = datetime.now().strftime("%H:%M:%S")
-        time_item = self.table.item(row, 8)
+        time_item = self.table.item(row, 10)
         if time_item:
             time_item.setText(now)
             time_item.setTextAlignment(Qt.AlignCenter)
         else:
             time_item = QTableWidgetItem(now)
             time_item.setTextAlignment(Qt.AlignCenter)
-            self.table.setItem(row, 8, time_item)
+            self.table.setItem(row, 10, time_item)
         self.play_alarm(row)
-        self.status_label.setText(f"报警: {name} = {value:.2f} [范围: {lower}-{upper}]")
+        if mode == 'number':
+            self.status_label.setText(f"报警: {name} = {value:.2f} [范围: {lower}-{upper}]")
+        else:
+            self.status_label.setText(f"报警: {name} 颜色不匹配 (差值 {value:.1f})")
         self._check_alarms()
 
     def on_status_updated(self, row, status):
@@ -1432,7 +1618,7 @@ class MainWindow(QMainWindow):
             status_item.setBackground(QBrush(QColor(74, 158, 255)))
             status_item.setForeground(QBrush(QColor(255, 255, 255)))
             status_item.setTextAlignment(Qt.AlignCenter)
-            self.table.setItem(row, 7, status_item)
+            self.table.setItem(row, 9, status_item)
             if self.row_alarm.get(row, False):
                 self.row_alarm[row] = False
                 self._check_alarms()
@@ -1441,20 +1627,20 @@ class MainWindow(QMainWindow):
             status_item.setBackground(QBrush(QColor(100, 100, 115)))
             status_item.setForeground(QBrush(QColor(255, 255, 255)))
             status_item.setTextAlignment(Qt.AlignCenter)
-            self.table.setItem(row, 7, status_item)
+            self.table.setItem(row, 9, status_item)
         elif status == 'disabled':
             status_item = QTableWidgetItem("已禁用")
             status_item.setBackground(QBrush(QColor(80, 80, 95)))
             status_item.setForeground(QBrush(QColor(200, 200, 210)))
             status_item.setTextAlignment(Qt.AlignCenter)
-            self.table.setItem(row, 7, status_item)
+            self.table.setItem(row, 9, status_item)
             if self.row_alarm.get(row, False):
                 self.row_alarm[row] = False
                 self._check_alarms()
         else:
             status_item = QTableWidgetItem(status)
             status_item.setTextAlignment(Qt.AlignCenter)
-            self.table.setItem(row, 7, status_item)
+            self.table.setItem(row, 9, status_item)
 
     def _update_status_display(self):
         if self.monitoring:
@@ -1474,15 +1660,19 @@ class MainWindow(QMainWindow):
             if self.table.item(row, 1) is None:
                 continue
             enable_check = self.table.cellWidget(row, 0)
-            mute_check = self.table.cellWidget(row, 9)
-            remark_widget = self.table.cellWidget(row, 2)
+            mute_check = self.table.cellWidget(row, 10)
+            remark_widget = self.table.cellWidget(row, 3)
+            mode = self.get_row_mode(row)
+            lower_spin = self.table.cellWidget(row, 5)
+            upper_spin = self.table.cellWidget(row, 6)
             sens = self.get_row_sensitivity(row)
             config['monitors'].append({
                 'name': self.table.item(row, 1).text(),
+                'mode': mode,
                 'remark': remark_widget.text() if remark_widget else "",
-                'lower': float(self.table.item(row, 4).text()),
-                'upper': float(self.table.item(row, 5).text()),
-                'coords': self.table.item(row, 6).text(),
+                'lower': lower_spin.value() if lower_spin else 0,
+                'upper': upper_spin.value() if upper_spin else 0,
+                'coords': self.table.item(row, 7).text(),
                 'enabled': enable_check.isChecked() if enable_check else True,
                 'muted': mute_check.isChecked() if mute_check else False,
                 'sensitivity': sens
@@ -1504,7 +1694,7 @@ class MainWindow(QMainWindow):
             self.row_enabled.clear()
             self.row_alarm.clear()
             self.row_muted.clear()
-            self.row_sensitivity.clear()
+            self.row_mode.clear()
             self.value_history.clear()
 
             for item in config.get('monitors', []):
@@ -1519,31 +1709,59 @@ class MainWindow(QMainWindow):
                 self.row_enabled[row] = item.get('enabled', True)
                 enable_check.stateChanged.connect(lambda state, r=row: self._on_enable_changed(r, state))
 
+                self.table.setItem(row, 1, QTableWidgetItem(item['name']))
+
+                mode = item.get('mode', 'number')
+                mode_combo = self.create_mode_combo(row, mode)
+                self.table.setCellWidget(row, 2, mode_combo)
+                self.row_mode[row] = mode
+
                 remark_edit = QLineEdit(item.get('remark', ''))
-                remark_edit.setPlaceholderText("备注（可选）")
-                self.table.setCellWidget(row, 2, remark_edit)
+                remark_edit.setPlaceholderText("颜色模式: #RRGGBB,容差")
+                self.table.setCellWidget(row, 3, remark_edit)
+
+                self.table.setItem(row, 4, QTableWidgetItem("--"))
+
+                lower_spin = QSpinBox()
+                lower_spin.setRange(-999999, 999999)
+                lower_spin.setValue(item.get('lower', 0))
+                lower_spin.setFixedWidth(60)
+                lower_spin.setAlignment(Qt.AlignCenter)
+                lower_spin.setButtonSymbols(QSpinBox.NoButtons)
+                lower_spin.valueChanged.connect(lambda v, r=row: self._on_limit_changed(r, 5, v))
+                self.table.setCellWidget(row, 5, lower_spin)
+                if mode == 'color':
+                    lower_spin.setEnabled(False)
+                    lower_spin.setStyleSheet("background-color: #3a3a50; color: #7a7a9a;")
+
+                upper_spin = QSpinBox()
+                upper_spin.setRange(-999999, 999999)
+                upper_spin.setValue(item.get('upper', 100))
+                upper_spin.setFixedWidth(60)
+                upper_spin.setAlignment(Qt.AlignCenter)
+                upper_spin.setButtonSymbols(QSpinBox.NoButtons)
+                upper_spin.valueChanged.connect(lambda v, r=row: self._on_limit_changed(r, 6, v))
+                self.table.setCellWidget(row, 6, upper_spin)
+                if mode == 'color':
+                    upper_spin.setEnabled(False)
+                    upper_spin.setStyleSheet("background-color: #3a3a50; color: #7a7a9a;")
+
+                self.table.setItem(row, 7, QTableWidgetItem(item['coords']))
+                self.table.setItem(row, 8, QTableWidgetItem("待监控"))
+                self.table.setItem(row, 9, QTableWidgetItem("--"))
 
                 mute_check = QCheckBox()
                 mute_check.setChecked(item.get('muted', False))
                 mute_check.setStyleSheet("margin-left: 12px;")
-                self.table.setCellWidget(row, 9, mute_check)
+                self.table.setCellWidget(row, 10, mute_check)
                 self.row_muted[row] = item.get('muted', False)
                 mute_check.stateChanged.connect(lambda state, r=row: self._on_mute_changed(r, state))
 
                 sens = item.get('sensitivity', 5)
-                sens_widget = self.create_sensitivity_widget(row, sens)
-                self.table.setCellWidget(row, 10, sens_widget)
-                self.row_sensitivity[row] = sens
+                sens_spin = self.create_sensitivity_widget(row, sens)
+                self.table.setCellWidget(row, 11, sens_spin)
 
-                self.table.setItem(row, 1, QTableWidgetItem(item['name']))
-                self.table.setItem(row, 3, QTableWidgetItem("--"))
-                self.table.setItem(row, 4, QTableWidgetItem(str(item['lower'])))
-                self.table.setItem(row, 5, QTableWidgetItem(str(item['upper'])))
-                self.table.setItem(row, 6, QTableWidgetItem(item['coords']))
-                self.table.setItem(row, 7, QTableWidgetItem("待监控"))
-                self.table.setItem(row, 8, QTableWidgetItem("--"))
-
-                for col in [1,3,4,5,6,7,8]:
+                for col in [1, 4, 7, 8, 9]:
                     it = self.table.item(row, col)
                     if it:
                         it.setTextAlignment(Qt.AlignCenter)
@@ -1558,7 +1776,7 @@ class MainWindow(QMainWindow):
 
             record_interval = config.get('record_interval', 60)
             self.record_interval_spin.setValue(record_interval)
-            self.record_interval = record_interval
+            self.record_interval_minutes = record_interval
 
             geometry = config.get('window_geometry')
             if geometry:
