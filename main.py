@@ -178,9 +178,9 @@ class CoordinatePicker(QWidget):
         self.end_pos = QPoint()
 
         # 放大镜参数（正方形，固定左上角，2倍放大）
-        self.magnifier_size = 120          # 显示边长
-        self.magnifier_scale = 2           # 放大倍数（改为2倍）
-        self.magnifier_pos = QPoint(10, 10) # 左上角固定位置
+        self.magnifier_size = 120
+        self.magnifier_scale = 2
+        self.magnifier_pos = QPoint(10, 10)
 
         self.label = QLabel("🖱 点击左上角确定起点", self)
         self.label.setAlignment(Qt.AlignCenter)
@@ -203,7 +203,6 @@ class CoordinatePicker(QWidget):
         painter.drawPixmap(self.rect(), self.screen_pixmap)
         painter.fillRect(self.rect(), QColor(0, 0, 0, 120))
 
-        # 绘制预览矩形
         if self.state >= 1 and not self.start_pos.isNull() and not self.end_pos.isNull():
             rect = self._get_current_rect()
             if rect.width() > 1 and rect.height() > 1:
@@ -226,7 +225,6 @@ class CoordinatePicker(QWidget):
                 text_y = rect.y() - 12 if rect.y() > 30 else rect.y() + rect.height() + 25
                 painter.drawText(rect.x() + 10, text_y, f"{rect.width()} × {rect.height()}")
 
-        # 绘制固定放大镜（左上角）
         self._draw_fixed_magnifier(painter)
 
     def _draw_fixed_magnifier(self, painter):
@@ -235,7 +233,6 @@ class CoordinatePicker(QWidget):
             return
         size = self.magnifier_size
         scale = self.magnifier_scale
-        # 截取区域尺寸为 size / scale，保证中心对应鼠标位置
         crop_size = size // scale
         half = crop_size // 2
         crop_rect = QRect(pos.x() - half, pos.y() - half, crop_size, crop_size)
@@ -243,18 +240,16 @@ class CoordinatePicker(QWidget):
         if crop_rect.width() <= 0 or crop_rect.height() <= 0:
             return
         pixmap = self.screen_pixmap.copy(crop_rect)
-        # 缩放至 size x size 显示
         scaled = pixmap.scaled(size, size, Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
         painter.save()
         painter.setPen(QPen(Qt.white, 2))
         painter.setBrush(QColor(0, 0, 0, 200))
         painter.drawRect(self.magnifier_pos.x(), self.magnifier_pos.y(), size, size)
         painter.drawPixmap(self.magnifier_pos.x(), self.magnifier_pos.y(), scaled)
-        # 中心像素点（用极小的红点表示）
         center = self.magnifier_pos + QPoint(size//2, size//2)
-        painter.setPen(QPen(QColor(255, 0, 0), 1))  # 1像素线宽
+        painter.setPen(QPen(QColor(255, 0, 0), 1))
         painter.setBrush(Qt.NoBrush)
-        painter.drawPoint(center)  # 绘制单个像素点
+        painter.drawPoint(center)
         painter.restore()
 
     def _get_current_rect(self):
@@ -464,6 +459,11 @@ class MainWindow(QMainWindow):
         self.test_reader = None
         self.reader_loading = False
 
+        # ---------- 新增：记录定时器 ----------
+        self.record_timer = QTimer()
+        self.record_timer.timeout.connect(self.record_current_value)
+        self.record_interval_minutes = 60  # 默认60分钟
+
         self.setStyleSheet("""
             QMainWindow { background-color: #1e1e2e; }
             QLabel { color: #e0e0f0; font-family: "Microsoft YaHei"; }
@@ -540,6 +540,10 @@ class MainWindow(QMainWindow):
                 min-height: 20px;
             }
             QSpinBox:hover { border-color: #4a9eff; }
+            QSpinBox::up-button, QSpinBox::down-button {
+                width: 16px;
+                background-color: #4a4a6a;
+            }
             QProgressBar {
                 background-color: #27273d;
                 border: 1px solid #33334a;
@@ -604,7 +608,7 @@ class MainWindow(QMainWindow):
         self.row_enabled = {}
         self.row_alarm = {}
         self.row_muted = {}
-        self.row_sensitivity = {}
+        # 不再使用 row_sensitivity，直接通过控件读取
 
         self._setup_ui()
         self.load_config()
@@ -647,32 +651,18 @@ class MainWindow(QMainWindow):
         else:
             self.set_ocr_status("加载失败，请检查网络后重启", False)
 
-    # ---------- 灵敏度控件 ----------
+    # ---------- 灵敏度控件（改为 QSpinBox） ----------
     def create_sensitivity_widget(self, row, value=5):
-        widget = QWidget()
-        layout = QHBoxLayout(widget)
-        layout.setContentsMargins(2, 0, 2, 0)
-        layout.setSpacing(2)
-        slider = QSlider(Qt.Horizontal)
-        slider.setRange(1, 10)
-        slider.setValue(value)
-        slider.setFixedWidth(60)
-        slider.valueChanged.connect(lambda v, r=row: self.on_row_sensitivity_changed(r, v))
-        label = QLabel(str(value))
-        label.setFixedWidth(20)
-        label.setAlignment(Qt.AlignCenter)
-        layout.addWidget(slider)
-        layout.addWidget(label)
-        widget.slider = slider
-        widget.label = label
-        widget.row = row
-        return widget
+        """创建灵敏度 QSpinBox（带上下箭头）"""
+        spin = QSpinBox()
+        spin.setRange(1, 10)
+        spin.setValue(value)
+        spin.setFixedWidth(60)
+        spin.valueChanged.connect(lambda v, r=row: self.on_row_sensitivity_changed(r, v))
+        return spin
 
     def on_row_sensitivity_changed(self, row, value):
-        widget = self.table.cellWidget(row, 10)
-        if widget and hasattr(widget, 'label'):
-            widget.label.setText(str(value))
-        self.row_sensitivity[row] = value
+        # 更新监控线程中的灵敏度
         if self.monitoring and self.monitor_thread is not None:
             for m in self.monitor_thread.monitors:
                 if m['row'] == row:
@@ -680,7 +670,11 @@ class MainWindow(QMainWindow):
                     break
 
     def get_row_sensitivity(self, row):
-        return self.row_sensitivity.get(row, 5)
+        """从控件读取灵敏度"""
+        widget = self.table.cellWidget(row, 10)
+        if widget and isinstance(widget, QSpinBox):
+            return widget.value()
+        return 5
 
     # ---------- UI 构建 ----------
     def _setup_ui(self):
@@ -730,7 +724,7 @@ class MainWindow(QMainWindow):
         self.table.setColumnWidth(7, 80)
         self.table.setColumnWidth(8, 100)
         self.table.setColumnWidth(9, 50)
-        self.table.setColumnWidth(10, 120)
+        self.table.setColumnWidth(10, 70)  # 灵敏度列宽度缩小
         self.table.horizontalHeader().setStretchLastSection(False)
         self.table.verticalHeader().setVisible(True)
 
@@ -752,8 +746,8 @@ class MainWindow(QMainWindow):
         self.record_interval_spin.setValue(60)
         self.record_interval_spin.setSuffix(" 分钟")
         self.record_interval_spin.setFixedWidth(90)
-        self.record_interval_spin.setEnabled(False)
-        settings_layout.addWidget(self.record_interval_spin)
+        self.record_interval_spin.valueChanged.connect(self.set_record_interval)
+        settings_layout.addWidget(self.record_interval_spin)  # 启用
         settings_layout.addWidget(QLabel("检测间隔:"))
         self.interval_spin = QSpinBox()
         self.interval_spin.setRange(1, 3600)
@@ -877,10 +871,9 @@ class MainWindow(QMainWindow):
             w2 = self.table.cellWidget(row2, col)
             self.table.setCellWidget(row1, col, w2)
             self.table.setCellWidget(row2, col, w1)
-        # 更新映射
+        # 更新映射（除灵敏度外，其他映射保持）
         self.row_enabled[row1], self.row_enabled[row2] = self.row_enabled.get(row2, True), self.row_enabled.get(row1, True)
         self.row_muted[row1], self.row_muted[row2] = self.row_muted.get(row2, False), self.row_muted.get(row1, False)
-        self.row_sensitivity[row1], self.row_sensitivity[row2] = self.row_sensitivity.get(row2, 5), self.row_sensitivity.get(row1, 5)
         self.value_history.clear()
         self.status_label.setText("状态: 行顺序已改变，历史趋势数据已重置")
         if self.monitoring:
@@ -990,6 +983,9 @@ class MainWindow(QMainWindow):
         self.btn_start_stop.setText("⏹ 停止监控")
         self.status_label.setText("状态: 监控运行中")
 
+        # 启动记录定时器
+        self.record_timer.start(self.record_interval_minutes * 60 * 1000)
+
     def stop_monitor(self):
         if self.monitor_thread and self.monitor_thread.isRunning():
             self.monitor_thread.stop()
@@ -998,12 +994,43 @@ class MainWindow(QMainWindow):
         self.btn_start_stop.setText("▶ 开始监控")
         self.status_label.setText("状态: 已停止")
         self.stop_alarm()
+        # 停止记录定时器
+        self.record_timer.stop()
         for row in range(self.table.rowCount()):
             item = self.table.item(row, 7)
             if item and item.text() not in ["报警", "已静音"]:
                 self.table.setItem(row, 7, QTableWidgetItem("已停止"))
             self.row_alarm[row] = False
             self._reset_row_colors(row)
+
+    # ---------- 记录间隔设置 ----------
+    def set_record_interval(self, value):
+        self.record_interval_minutes = value
+        if self.monitoring and self.record_timer.isActive():
+            self.record_timer.start(value * 60 * 1000)  # 重启定时器
+
+    # ---------- 定时记录方法 ----------
+    def record_current_value(self):
+        """定时记录当前选中行的当前值到历史"""
+        row = self.table.currentRow()
+        if row < 0:
+            return
+        val_item = self.table.item(row, 3)
+        if val_item is None or val_item.text() == "--":
+            return
+        try:
+            value = float(val_item.text())
+        except:
+            return
+        if row not in self.value_history:
+            self.value_history[row] = []
+        self.value_history[row].append(value)
+        if len(self.value_history[row]) > 15:
+            self.value_history[row].pop(0)
+        # 更新趋势图
+        name_item = self.table.item(row, 1)
+        name = name_item.text() if name_item else f"区域{row+1}"
+        self.trend_chart.set_data(self.value_history[row], f"{name} 数值趋势")
 
     # ---------- 以下为原功能方法 ----------
     def clear_alarm_time(self):
@@ -1113,8 +1140,6 @@ class MainWindow(QMainWindow):
                 del self.row_alarm[row]
             if row in self.row_muted:
                 del self.row_muted[row]
-            if row in self.row_sensitivity:
-                del self.row_sensitivity[row]
             if row in self.value_history:
                 del self.value_history[row]
 
@@ -1207,9 +1232,9 @@ class MainWindow(QMainWindow):
         self.row_muted[row] = False
         mute_check.stateChanged.connect(lambda state, r=row: self._on_mute_changed(r, state))
 
-        sens_widget = self.create_sensitivity_widget(row, 5)
-        self.table.setCellWidget(row, 10, sens_widget)
-        self.row_sensitivity[row] = 5
+        # 灵敏度 SpinBox
+        sens_spin = self.create_sensitivity_widget(row, 5)
+        self.table.setCellWidget(row, 10, sens_spin)
 
         self.table.setItem(row, 1, QTableWidgetItem(f"区域{row+1}"))
         self.table.setItem(row, 3, QTableWidgetItem("--"))
@@ -1263,18 +1288,6 @@ class MainWindow(QMainWindow):
         if reply == QMessageBox.Yes:
             self.table.removeRow(row)
             self.status_label.setText("状态: 已删除")
-
-    # ---------- 数值趋势自动记录 ----------
-    def record_current_value(self, row, value):
-        if row not in self.value_history:
-            self.value_history[row] = []
-        self.value_history[row].append(value)
-        if len(self.value_history[row]) > 15:
-            self.value_history[row].pop(0)
-        if self.table.currentRow() == row:
-            name_item = self.table.item(row, 1)
-            name = name_item.text() if name_item else f"区域{row+1}"
-            self.trend_chart.set_data(self.value_history[row], f"{name} 数值趋势")
 
     def test_selected_point(self):
         if self.test_reader is None:
@@ -1372,7 +1385,7 @@ class MainWindow(QMainWindow):
         if item:
             item.setText(f"{value:.2f}")
             item.setTextAlignment(Qt.AlignCenter)
-        self.record_current_value(row, value)
+        # 注意：不再在这里记录历史，由定时器负责
 
     def on_alarm_triggered(self, row, name, value, lower, upper):
         self.row_alarm[row] = True
@@ -1478,7 +1491,6 @@ class MainWindow(QMainWindow):
             self.row_enabled.clear()
             self.row_alarm.clear()
             self.row_muted.clear()
-            self.row_sensitivity.clear()
             self.value_history.clear()
 
             for item in config.get('monitors', []):
@@ -1505,9 +1517,8 @@ class MainWindow(QMainWindow):
                 mute_check.stateChanged.connect(lambda state, r=row: self._on_mute_changed(r, state))
 
                 sens = item.get('sensitivity', 5)
-                sens_widget = self.create_sensitivity_widget(row, sens)
-                self.table.setCellWidget(row, 10, sens_widget)
-                self.row_sensitivity[row] = sens
+                sens_spin = self.create_sensitivity_widget(row, sens)
+                self.table.setCellWidget(row, 10, sens_spin)
 
                 self.table.setItem(row, 1, QTableWidgetItem(item['name']))
                 self.table.setItem(row, 3, QTableWidgetItem("--"))
@@ -1532,6 +1543,7 @@ class MainWindow(QMainWindow):
 
             record_interval = config.get('record_interval', 60)
             self.record_interval_spin.setValue(record_interval)
+            self.record_interval_minutes = record_interval
 
             geometry = config.get('window_geometry')
             if geometry:
