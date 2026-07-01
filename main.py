@@ -459,7 +459,7 @@ class MainWindow(QMainWindow):
         self.test_reader = None
         self.reader_loading = False
 
-        # ---------- 新增：记录定时器 ----------
+        # 记录定时器
         self.record_timer = QTimer()
         self.record_timer.timeout.connect(self.record_current_value)
         self.record_interval_minutes = 60  # 默认60分钟
@@ -608,7 +608,6 @@ class MainWindow(QMainWindow):
         self.row_enabled = {}
         self.row_alarm = {}
         self.row_muted = {}
-        # 不再使用 row_sensitivity，直接通过控件读取
 
         self._setup_ui()
         self.load_config()
@@ -651,9 +650,8 @@ class MainWindow(QMainWindow):
         else:
             self.set_ocr_status("加载失败，请检查网络后重启", False)
 
-    # ---------- 灵敏度控件（改为 QSpinBox） ----------
+    # ---------- 灵敏度控件（QSpinBox，支持直接输入数字） ----------
     def create_sensitivity_widget(self, row, value=5):
-        """创建灵敏度 QSpinBox（带上下箭头）"""
         spin = QSpinBox()
         spin.setRange(1, 10)
         spin.setValue(value)
@@ -662,7 +660,6 @@ class MainWindow(QMainWindow):
         return spin
 
     def on_row_sensitivity_changed(self, row, value):
-        # 更新监控线程中的灵敏度
         if self.monitoring and self.monitor_thread is not None:
             for m in self.monitor_thread.monitors:
                 if m['row'] == row:
@@ -670,7 +667,6 @@ class MainWindow(QMainWindow):
                     break
 
     def get_row_sensitivity(self, row):
-        """从控件读取灵敏度"""
         widget = self.table.cellWidget(row, 10)
         if widget and isinstance(widget, QSpinBox):
             return widget.value()
@@ -707,7 +703,6 @@ class MainWindow(QMainWindow):
         self.download_progress.setValue(0)
         main_layout.addWidget(self.download_progress)
 
-        # ---------- 表格 ----------
         self.table = QTableWidget()
         self.table.setColumnCount(11)
         self.table.setHorizontalHeaderLabels(["启用", "名称", "备注", "当前值", "下限", "上限", "坐标", "状态", "报警时间", "静音", "灵敏度"])
@@ -724,13 +719,12 @@ class MainWindow(QMainWindow):
         self.table.setColumnWidth(7, 80)
         self.table.setColumnWidth(8, 100)
         self.table.setColumnWidth(9, 50)
-        self.table.setColumnWidth(10, 70)  # 灵敏度列宽度缩小
+        self.table.setColumnWidth(10, 70)
         self.table.horizontalHeader().setStretchLastSection(False)
         self.table.verticalHeader().setVisible(True)
 
         main_layout.addWidget(self.table, 3)
 
-        # ---------- 趋势曲线 ----------
         self.chart_group = QGroupBox("📈 数值趋势曲线")
         chart_layout = QVBoxLayout(self.chart_group)
         chart_layout.setContentsMargins(12, 18, 12, 12)
@@ -747,7 +741,7 @@ class MainWindow(QMainWindow):
         self.record_interval_spin.setSuffix(" 分钟")
         self.record_interval_spin.setFixedWidth(90)
         self.record_interval_spin.valueChanged.connect(self.set_record_interval)
-        settings_layout.addWidget(self.record_interval_spin)  # 启用
+        settings_layout.addWidget(self.record_interval_spin)
         settings_layout.addWidget(QLabel("检测间隔:"))
         self.interval_spin = QSpinBox()
         self.interval_spin.setRange(1, 3600)
@@ -761,7 +755,6 @@ class MainWindow(QMainWindow):
         chart_layout.addLayout(settings_layout)
         main_layout.addWidget(self.chart_group, 2)
 
-        # ---------- 第一排按钮 ----------
         btn_layout_top = QHBoxLayout()
         btn_layout_top.setSpacing(10)
         btn_layout_top.setAlignment(Qt.AlignLeft)
@@ -794,7 +787,6 @@ class MainWindow(QMainWindow):
 
         main_layout.addLayout(btn_layout_top)
 
-        # ---------- 第二排按钮 ----------
         btn_layout_bottom = QHBoxLayout()
         btn_layout_bottom.setSpacing(10)
         btn_layout_bottom.setAlignment(Qt.AlignLeft)
@@ -824,7 +816,6 @@ class MainWindow(QMainWindow):
 
         main_layout.addLayout(btn_layout_bottom)
 
-        # ---------- 状态栏 ----------
         status_layout = QHBoxLayout()
         status_layout.setSpacing(10)
         self.status_label = QLabel("状态: 就绪")
@@ -871,7 +862,6 @@ class MainWindow(QMainWindow):
             w2 = self.table.cellWidget(row2, col)
             self.table.setCellWidget(row1, col, w2)
             self.table.setCellWidget(row2, col, w1)
-        # 更新映射（除灵敏度外，其他映射保持）
         self.row_enabled[row1], self.row_enabled[row2] = self.row_enabled.get(row2, True), self.row_enabled.get(row1, True)
         self.row_muted[row1], self.row_muted[row2] = self.row_muted.get(row2, False), self.row_muted.get(row1, False)
         self.value_history.clear()
@@ -913,7 +903,7 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "错误", f"加载模型失败: {str(e)}")
             self.set_ocr_status("加载失败", False)
 
-    # ---------- 合并的监控切换 ----------
+    # ---------- 监控切换 ----------
     def toggle_monitor(self):
         if self.monitoring:
             self.stop_monitor()
@@ -994,7 +984,6 @@ class MainWindow(QMainWindow):
         self.btn_start_stop.setText("▶ 开始监控")
         self.status_label.setText("状态: 已停止")
         self.stop_alarm()
-        # 停止记录定时器
         self.record_timer.stop()
         for row in range(self.table.rowCount()):
             item = self.table.item(row, 7)
@@ -1003,15 +992,13 @@ class MainWindow(QMainWindow):
             self.row_alarm[row] = False
             self._reset_row_colors(row)
 
-    # ---------- 记录间隔设置 ----------
+    # ---------- 记录间隔 ----------
     def set_record_interval(self, value):
         self.record_interval_minutes = value
         if self.monitoring and self.record_timer.isActive():
-            self.record_timer.start(value * 60 * 1000)  # 重启定时器
+            self.record_timer.start(value * 60 * 1000)
 
-    # ---------- 定时记录方法 ----------
     def record_current_value(self):
-        """定时记录当前选中行的当前值到历史"""
         row = self.table.currentRow()
         if row < 0:
             return
@@ -1027,12 +1014,11 @@ class MainWindow(QMainWindow):
         self.value_history[row].append(value)
         if len(self.value_history[row]) > 15:
             self.value_history[row].pop(0)
-        # 更新趋势图
         name_item = self.table.item(row, 1)
         name = name_item.text() if name_item else f"区域{row+1}"
         self.trend_chart.set_data(self.value_history[row], f"{name} 数值趋势")
 
-    # ---------- 以下为原功能方法 ----------
+    # ---------- 以下为原有功能方法 ----------
     def clear_alarm_time(self):
         for row in range(self.table.rowCount()):
             if self.table.item(row, 1) is None:
@@ -1232,7 +1218,6 @@ class MainWindow(QMainWindow):
         self.row_muted[row] = False
         mute_check.stateChanged.connect(lambda state, r=row: self._on_mute_changed(r, state))
 
-        # 灵敏度 SpinBox
         sens_spin = self.create_sensitivity_widget(row, 5)
         self.table.setCellWidget(row, 10, sens_spin)
 
@@ -1385,7 +1370,6 @@ class MainWindow(QMainWindow):
         if item:
             item.setText(f"{value:.2f}")
             item.setTextAlignment(Qt.AlignCenter)
-        # 注意：不再在这里记录历史，由定时器负责
 
     def on_alarm_triggered(self, row, name, value, lower, upper):
         self.row_alarm[row] = True
