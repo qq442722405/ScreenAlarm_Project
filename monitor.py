@@ -17,8 +17,8 @@ except ImportError:
 
 
 class MonitorThread(QThread):
-    value_updated = Signal(int, float, str, str, float)  # row, value, mode, color_code, color_diff
-    alarm_triggered = Signal(int, str, float, float, float, str)  # row, name, value, lower, upper, mode
+    value_updated = Signal(int, float, str, str, float)
+    alarm_triggered = Signal(int, str, float, float, float, str)
     status_updated = Signal(int, str)
     ocr_status = Signal(str, bool)
     download_progress = Signal(int)
@@ -217,7 +217,6 @@ class MonitorThread(QThread):
             diff_s = abs(mean_hsv[1] - target_hsv[1])
             diff_v = abs(mean_hsv[2] - target_hsv[2])
             total_diff = diff_h/180 * 100 + diff_s/255 * 100 + diff_v/255 * 100
-            # 生成颜色代码（平均颜色）
             avg_color = (int(mean_hsv[0]*2), int(mean_hsv[1]), int(mean_hsv[2]))
             color_code = f"#{avg_color[0]:02X}{avg_color[1]:02X}{avg_color[2]:02X}"
             return total_diff, color_code
@@ -241,7 +240,6 @@ class MonitorThread(QThread):
                     except:
                         pass
         if len(all_numbers) == 0:
-            # 尝试原图
             result2 = self.reader.readtext(img_np, allowlist='0123456789.-', paragraph=False,
                                            text_threshold=text_thr)
             for bbox, text, confidence in result2:
@@ -292,11 +290,9 @@ class MonitorThread(QThread):
 
                 mode = monitor.get('mode', 'number')
                 if mode == 'color':
-                    # 颜色模式
                     remark = monitor.get('remark', '')
                     match = re.match(r'#([0-9A-Fa-f]{6})\s*,\s*(\d+)', remark.strip())
                     if not match:
-                        # 备注格式不正确，视为错误
                         self.status_updated.emit(row, 'error')
                         continue
                     target_hex = '#' + match.group(1)
@@ -305,9 +301,7 @@ class MonitorThread(QThread):
                     if color_diff is None:
                         self.status_updated.emit(row, 'error')
                         continue
-                    # 更新当前值
                     self.value_updated.emit(row, color_diff, 'color', color_code, color_diff)
-                    # 判断是否报警（差值大于容差）
                     if color_diff > tolerance:
                         now = time.time()
                         last_time = self.alarm_status[row]['last_alarm_time']
@@ -326,7 +320,6 @@ class MonitorThread(QThread):
                         else:
                             self.alarm_status[row]['alarm'] = False
                 else:
-                    # 数值模式
                     value = self._detect_number(img_np, monitor.get('sensitivity', 5))
                     if value is None:
                         self.status_updated.emit(row, 'error')
