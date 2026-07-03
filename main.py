@@ -173,12 +173,14 @@ class CoordinatePicker(QWidget):
         self.showFullScreen()
         self.raise_()
         self.activateWindow()
-        self.magnifier_radius = 60
-
-        # 状态变量
-        self.state = 0          # 0=等待起点，1=已点起点，2=已确定终点
+        self.state = 0
         self.start_pos = QPoint()
-        self.end_pos = QPoint() # 当前鼠标位置（用于预览）
+        self.end_pos = QPoint()
+
+        # 放大镜参数（正方形，固定左上角，2倍放大）
+        self.magnifier_size = 120          # 显示边长
+        self.magnifier_scale = 2           # 放大倍数（改为2倍）
+        self.magnifier_pos = QPoint(10, 10) # 左上角固定位置
 
         self.label = QLabel("🖱 点击左上角确定起点", self)
         self.label.setAlignment(Qt.AlignCenter)
@@ -193,7 +195,6 @@ class CoordinatePicker(QWidget):
         self.coord_label.move((self.width() - self.coord_label.width()) // 2, 60)
 
         self.setFocus(Qt.OtherFocusReason)
-        # 默认显示放大镜
         self.update()
 
     def paintEvent(self, event):
@@ -202,7 +203,7 @@ class CoordinatePicker(QWidget):
         painter.drawPixmap(self.rect(), self.screen_pixmap)
         painter.fillRect(self.rect(), QColor(0, 0, 0, 120))
 
-        # 绘制预览矩形（如果已点击起点）
+        # 绘制预览矩形
         if self.state >= 1 and not self.start_pos.isNull() and not self.end_pos.isNull():
             rect = self._get_current_rect()
             if rect.width() > 1 and rect.height() > 1:
@@ -225,33 +226,35 @@ class CoordinatePicker(QWidget):
                 text_y = rect.y() - 12 if rect.y() > 30 else rect.y() + rect.height() + 25
                 painter.drawText(rect.x() + 10, text_y, f"{rect.width()} × {rect.height()}")
 
-        # 绘制放大镜
-        self._draw_magnifier(painter)
+        # 绘制固定放大镜（左上角）
+        self._draw_fixed_magnifier(painter)
 
-    def _draw_magnifier(self, painter):
+    def _draw_fixed_magnifier(self, painter):
         pos = self.end_pos
         if pos.isNull() or not self.rect().contains(pos):
             return
-        radius = self.magnifier_radius
-        crop_rect = QRect(pos.x() - radius//2, pos.y() - radius//2, radius, radius)
+        size = self.magnifier_size
+        scale = self.magnifier_scale
+        # 截取区域尺寸为 size / scale，保证中心对应鼠标位置
+        crop_size = size // scale
+        half = crop_size // 2
+        crop_rect = QRect(pos.x() - half, pos.y() - half, crop_size, crop_size)
         crop_rect = crop_rect.intersected(self.total_rect)
         if crop_rect.width() <= 0 or crop_rect.height() <= 0:
             return
         pixmap = self.screen_pixmap.copy(crop_rect)
-        scale = 3
-        scaled = pixmap.scaled(radius * scale, radius * scale, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        # 缩放至 size x size 显示
+        scaled = pixmap.scaled(size, size, Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
         painter.save()
         painter.setPen(QPen(Qt.white, 2))
-        painter.setBrush(QColor(0, 0, 0, 150))
-        painter.drawEllipse(pos, radius, radius)
-        path = QPainterPath()
-        path.addEllipse(pos, radius-2, radius-2)
-        painter.setClipPath(path)
-        painter.drawPixmap(pos.x() - radius*(scale//2), pos.y() - radius*(scale//2), scaled)
-        painter.setClipping(False)
-        painter.setPen(QPen(Qt.white, 1, Qt.DashLine))
-        painter.drawLine(pos.x() - radius, pos.y(), pos.x() + radius, pos.y())
-        painter.drawLine(pos.x(), pos.y() - radius, pos.x(), pos.y() + radius)
+        painter.setBrush(QColor(0, 0, 0, 200))
+        painter.drawRect(self.magnifier_pos.x(), self.magnifier_pos.y(), size, size)
+        painter.drawPixmap(self.magnifier_pos.x(), self.magnifier_pos.y(), scaled)
+        # 中心像素点（用极小的红点表示）
+        center = self.magnifier_pos + QPoint(size//2, size//2)
+        painter.setPen(QPen(QColor(255, 0, 0), 1))  # 1像素线宽
+        painter.setBrush(Qt.NoBrush)
+        painter.drawPoint(center)  # 绘制单个像素点
         painter.restore()
 
     def _get_current_rect(self):
@@ -266,7 +269,6 @@ class CoordinatePicker(QWidget):
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
             if self.state == 0:
-                # 第一次点击：记录起点
                 self.start_pos = event.position().toPoint()
                 self.end_pos = self.start_pos
                 self.state = 1
@@ -275,7 +277,6 @@ class CoordinatePicker(QWidget):
                 self.label.move((self.width() - self.label.width()) // 2, self.height() - self.label.height() - 80)
                 self.update()
             elif self.state == 1:
-                # 第二次点击：记录终点，完成选择
                 self.end_pos = event.position().toPoint()
                 rect = self._get_current_rect()
                 if rect.width() > 20 and rect.height() > 20:
@@ -285,7 +286,6 @@ class CoordinatePicker(QWidget):
                     self.label.setText("⚠️ 区域太小，请重新点击左上角")
                     self.label.adjustSize()
                     self.label.move((self.width() - self.label.width()) // 2, self.height() - self.label.height() - 80)
-                    # 重置状态
                     self.state = 0
                     self.start_pos = QPoint()
                     self.end_pos = QPoint()
@@ -461,11 +461,6 @@ class MainWindow(QMainWindow):
         self.mini_window = None
         self.chart_visible = True
 
-        self.record_timer = QTimer()
-        self.record_timer.timeout.connect(self.record_current_value)
-        self.recording = False
-        self.record_interval = 60  # 分钟
-
         self.test_reader = None
         self.reader_loading = False
 
@@ -598,7 +593,7 @@ class MainWindow(QMainWindow):
         self.monitor_thread = None
         self.config_file = "monitor_config.json"
         self.loop_enabled = True
-        self.detect_interval = 1000  # 毫秒（默认1秒）
+        self.detect_interval = 1000
         self.value_history = {}
         self.current_row_data = []
 
@@ -757,7 +752,7 @@ class MainWindow(QMainWindow):
         self.record_interval_spin.setValue(60)
         self.record_interval_spin.setSuffix(" 分钟")
         self.record_interval_spin.setFixedWidth(90)
-        self.record_interval_spin.valueChanged.connect(self.set_record_interval)
+        self.record_interval_spin.setEnabled(False)
         settings_layout.addWidget(self.record_interval_spin)
         settings_layout.addWidget(QLabel("检测间隔:"))
         self.interval_spin = QSpinBox()
@@ -994,15 +989,11 @@ class MainWindow(QMainWindow):
         self.monitoring = True
         self.btn_start_stop.setText("⏹ 停止监控")
         self.status_label.setText("状态: 监控运行中")
-        self.recording = True
-        self.record_timer.start(int(self.record_interval * 60 * 1000))
 
     def stop_monitor(self):
         if self.monitor_thread and self.monitor_thread.isRunning():
             self.monitor_thread.stop()
             self.monitor_thread.wait()
-        self.recording = False
-        self.record_timer.stop()
         self.monitoring = False
         self.btn_start_stop.setText("▶ 开始监控")
         self.status_label.setText("状态: 已停止")
@@ -1014,7 +1005,7 @@ class MainWindow(QMainWindow):
             self.row_alarm[row] = False
             self._reset_row_colors(row)
 
-    # ---------- 以下为原功能方法，保持不变 ----------
+    # ---------- 以下为原功能方法 ----------
     def clear_alarm_time(self):
         for row in range(self.table.rowCount()):
             if self.table.item(row, 1) is None:
@@ -1273,26 +1264,8 @@ class MainWindow(QMainWindow):
             self.table.removeRow(row)
             self.status_label.setText("状态: 已删除")
 
-    def set_record_interval(self, value):
-        self.record_interval = value
-        if self.recording:
-            self.record_timer.stop()
-            self.record_timer.start(int(value * 60 * 1000))
-
-    def record_current_value(self):
-        selected = self.table.selectedItems()
-        if not selected:
-            return
-        row = selected[0].row()
-        if row < 0:
-            return
-        val_item = self.table.item(row, 3)
-        if val_item is None or val_item.text() == "--":
-            return
-        try:
-            value = float(val_item.text())
-        except:
-            return
+    # ---------- 数值趋势自动记录 ----------
+    def record_current_value(self, row, value):
         if row not in self.value_history:
             self.value_history[row] = []
         self.value_history[row].append(value)
@@ -1399,6 +1372,7 @@ class MainWindow(QMainWindow):
         if item:
             item.setText(f"{value:.2f}")
             item.setTextAlignment(Qt.AlignCenter)
+        self.record_current_value(row, value)
 
     def on_alarm_triggered(self, row, name, value, lower, upper):
         self.row_alarm[row] = True
@@ -1558,7 +1532,6 @@ class MainWindow(QMainWindow):
 
             record_interval = config.get('record_interval', 60)
             self.record_interval_spin.setValue(record_interval)
-            self.record_interval = record_interval
 
             geometry = config.get('window_geometry')
             if geometry:
