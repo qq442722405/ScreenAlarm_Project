@@ -17,8 +17,8 @@ except ImportError:
 
 
 class MonitorThread(QThread):
-    value_updated = Signal(int, float, str, str, float)
-    alarm_triggered = Signal(int, str, float, float, float, str)
+    value_updated = Signal(int, float)
+    alarm_triggered = Signal(int, str, float, float, float)
     status_updated = Signal(int, str)
     ocr_status = Signal(str, bool)
     download_progress = Signal(int)
@@ -106,31 +106,6 @@ class MonitorThread(QThread):
                 self.ocr_status.emit(f"加载失败: {error_msg[:80]}", False)
             return False
 
-    def _hex_to_hsv(self, hex_color):
-        hex_color = hex_color.lstrip('#')
-        if len(hex_color) != 6:
-            return None
-        r, g, b = int(hex_color[0:2], 16), int(hex_color[2:4], 16), int(hex_color[4:6], 16)
-        r, g, b = r/255.0, g/255.0, b/255.0
-        maxc = max(r, g, b)
-        minc = min(r, g, b)
-        diff = maxc - minc
-        if diff == 0:
-            h = 0
-        elif maxc == r:
-            h = ((g - b) / diff) % 6
-        elif maxc == g:
-            h = 2 + (b - r) / diff
-        else:
-            h = 4 + (r - g) / diff
-        h = h * 60
-        if h < 0:
-            h += 360
-        h = h / 2
-        s = ((maxc - minc) / maxc) * 255 if maxc != 0 else 0
-        v = maxc * 255
-        return np.array([h, s, v], dtype=np.float32)
-
     def _preprocess_image(self, img_np, sensitivity):
         try:
             sens = sensitivity
@@ -187,62 +162,29 @@ class MonitorThread(QThread):
         except Exception:
             return img_np
 
-    def _capture_and_process(self, monitor):
+    def _capture_and_ocr(self, monitor):
         if not self.ocr_ready or self.reader is None:
-            return None, None
+            return None
         if self.sct is None:
             self.sct = mss.mss()
         try:
             x, y, w, h = monitor['x'], monitor['y'], monitor['width'], monitor['height']
             if w <= 0 or h <= 0:
-                return None, None
-            region = {"top": y, "left": x, "width": w, "height": h}
-            screenshot = self.sct.grab(region)
+                return None
+            monitor_region = {"top": y, "left": x, "width": w, "height": h}
+            screenshot = self.sct.grab(monitor_region)
             img = Image.frombytes("RGB", screenshot.size, screenshot.rgb)
             img_np = np.array(img)
-            return img_np, None
-        except Exception:
-            return None, None
 
-    def _detect_color(self, img_np, target_hex, tolerance):
-        try:
-            hsv = cv2.cvtColor(img_np, cv2.COLOR_RGB2HSV)
-            mean_hsv = np.mean(hsv, axis=(0, 1))
-            target_hsv = self._hex_to_hsv(target_hex)
-            if target_hsv is None:
-                return None, None
-            diff_h = abs(mean_hsv[0] - target_hsv[0])
-            if diff_h > 180:
-                diff_h = 360 - diff_h
-            diff_s = abs(mean_hsv[1] - target_hsv[1])
-            diff_v = abs(mean_hsv[2] - target_hsv[2])
-            total_diff = diff_h/180 * 100 + diff_s/255 * 100 + diff_v/255 * 100
-            avg_color = (int(mean_hsv[0]*2), int(mean_hsv[1]), int(mean_hsv[2]))
-            color_code = f"#{avg_color[0]:02X}{avg_color[1]:02X}{avg_color[2]:02X}"
-            return total_diff, color_code
-        except Exception:
-            return None, None
+            sens = monitor.get('sensitivity', 5)
+            processed = self._preprocess_image(img_np, sens)
+            text_thr = 0.2 + (10 - sens) * 0.04
 
-    def _detect_number(self, img_np, sensitivity):
-        processed = self._preprocess_image(img_np, sensitivity)
-        text_thr = 0.2 + (10 - sensitivity) * 0.04
-        result = self.reader.readtext(processed, allowlist='0123456789.-',
-                                      paragraph=False, width_ths=0.5, height_ths=0.5,
-                                      text_threshold=text_thr, low_text=0.2)
-        all_numbers = []
-        for bbox, text, confidence in result:
-            if confidence > 0.2:
-                numbers = re.findall(r'-?\d+\.?\d*', text)
-                for num_str in numbers:
-                    try:
-                        val = float(num_str)
-                        all_numbers.append((val, confidence, len(num_str)))
-                    except:
-                        pass
-        if len(all_numbers) == 0:
-            result2 = self.reader.readtext(img_np, allowlist='0123456789.-', paragraph=False,
-                                           text_threshold=text_thr)
-            for bbox, text, confidence in result2:
+            result = self.reader.readtext(processed, allowlist='0123456789.-',
+                                          paragraph=False, width_ths=0.5, height_ths=0.5,
+                                          text_threshold=text_thr, low_text=0.2)
+            all_numbers = []
+            for bbox, text, confidence in result:
                 if confidence > 0.2:
                     numbers = re.findall(r'-?\d+\.?\d*', text)
                     for num_str in numbers:
@@ -251,10 +193,25 @@ class MonitorThread(QThread):
                             all_numbers.append((val, confidence, len(num_str)))
                         except:
                             pass
-        if len(all_numbers) == 0:
+            if len(all_numbers) == 0:
+                result2 = self.reader.readtext(img_np, allowlist='0123456789.-', paragraph=False,
+                                               text_threshold=text_thr)
+                for bbox, text, confidence in result2:
+                    if confidence > 0.2:
+                        numbers = re.findall(r'-?\d+\.?\d*', text)
+                        for num_str in numbers:
+                            try:
+                                val = float(num_str)
+                                all_numbers.append((val, confidence, len(num_str)))
+                            except:
+                                pass
+            if len(all_numbers) == 0:
+                return None
+            all_numbers.sort(key=lambda x: (1 if '.' in str(x[0]) else 0, x[2]), reverse=True)
+            best = all_numbers[0][0]
+            return best
+        except Exception:
             return None
-        all_numbers.sort(key=lambda x: (1 if '.' in str(x[0]) else 0, x[2]), reverse=True)
-        return all_numbers[0][0]
 
     def run(self):
         if self.reader is None:
@@ -279,52 +236,10 @@ class MonitorThread(QThread):
                     self.status_updated.emit(row, 'disabled')
                     self.alarm_status[row]['alarm'] = False
                     continue
-
-                img_np, _ = self._capture_and_process(monitor)
-                if img_np is None:
-                    self.alarm_status[row]['count'] += 1
-                    if self.alarm_status[row]['count'] >= 3:
-                        self.status_updated.emit(row, 'error')
-                    continue
-                self.alarm_status[row]['count'] = 0
-
-                mode = monitor.get('mode', 'number')
-                if mode == 'color':
-                    remark = monitor.get('remark', '')
-                    match = re.match(r'#([0-9A-Fa-f]{6})\s*,\s*(\d+)', remark.strip())
-                    if not match:
-                        self.status_updated.emit(row, 'error')
-                        continue
-                    target_hex = '#' + match.group(1)
-                    tolerance = int(match.group(2))
-                    color_diff, color_code = self._detect_color(img_np, target_hex, tolerance)
-                    if color_diff is None:
-                        self.status_updated.emit(row, 'error')
-                        continue
-                    self.value_updated.emit(row, color_diff, 'color', color_code, color_diff)
-                    if color_diff > tolerance:
-                        now = time.time()
-                        last_time = self.alarm_status[row]['last_alarm_time']
-                        if not self.alarm_status[row]['alarm']:
-                            self.alarm_status[row]['alarm'] = True
-                            self.alarm_status[row]['last_alarm_time'] = now
-                            self.alarm_triggered.emit(row, monitor['name'], color_diff, tolerance, tolerance, 'color')
-                        elif self.alarm_loop_enabled:
-                            if now - last_time > 10:
-                                self.alarm_status[row]['last_alarm_time'] = now
-                                self.alarm_triggered.emit(row, monitor['name'], color_diff, tolerance, tolerance, 'color')
-                    else:
-                        if not self.manual_clear:
-                            self.alarm_status[row]['alarm'] = False
-                            self.status_updated.emit(row, 'normal')
-                        else:
-                            self.alarm_status[row]['alarm'] = False
-                else:
-                    value = self._detect_number(img_np, monitor.get('sensitivity', 5))
-                    if value is None:
-                        self.status_updated.emit(row, 'error')
-                        continue
-                    self.value_updated.emit(row, value, 'number', None, None)
+                raw_value = self._capture_and_ocr(monitor)
+                if raw_value is not None:
+                    value = float(raw_value)
+                    self.value_updated.emit(row, value)
                     lower, upper = monitor['lower'], monitor['upper']
                     if value < lower or value > upper:
                         now = time.time()
@@ -332,18 +247,22 @@ class MonitorThread(QThread):
                         if not self.alarm_status[row]['alarm']:
                             self.alarm_status[row]['alarm'] = True
                             self.alarm_status[row]['last_alarm_time'] = now
-                            self.alarm_triggered.emit(row, monitor['name'], value, lower, upper, 'number')
+                            self.alarm_triggered.emit(row, monitor['name'], value, lower, upper)
                         elif self.alarm_loop_enabled:
                             if now - last_time > 10:
                                 self.alarm_status[row]['last_alarm_time'] = now
-                                self.alarm_triggered.emit(row, monitor['name'], value, lower, upper, 'number')
+                                self.alarm_triggered.emit(row, monitor['name'], value, lower, upper)
                     else:
                         if not self.manual_clear:
                             self.alarm_status[row]['alarm'] = False
                             self.status_updated.emit(row, 'normal')
                         else:
                             self.alarm_status[row]['alarm'] = False
-
+                    self.alarm_status[row]['count'] = 0
+                else:
+                    self.alarm_status[row]['count'] += 1
+                    if self.alarm_status[row]['count'] >= 3:
+                        self.status_updated.emit(row, 'error')
                 time.sleep(0.05)
             time.sleep(max(0.05, interval_sec - 0.3))
         if self.sct:
