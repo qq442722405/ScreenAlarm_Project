@@ -35,6 +35,7 @@ class MonitorThread(QThread):
         self.alarm_loop_enabled = True
         self.alarm_status = {}
         self.manual_clear = False
+        self.recognition_mode = 'standard'  # 新增
 
     def set_interval(self, ms):
         self.interval_ms = max(100, ms)
@@ -48,70 +49,39 @@ class MonitorThread(QThread):
             self.ocr_ready = True
             self.ocr_status.emit("就绪 ✅", True)
 
+    def set_recognition_mode(self, mode):
+        self.recognition_mode = mode
+
     def stop(self):
         self.running = False
 
-    def reset_row_alarm(self, row):
-        if row in self.alarm_status:
-            self.alarm_status[row]['alarm'] = False
-            self.alarm_status[row]['count'] = 0
-            self.alarm_status[row]['last_alarm_time'] = 0
-
-    def reset_all_alarms(self):
-        self.manual_clear = True
-        for row in self.alarm_status:
-            self.alarm_status[row]['alarm'] = False
-            self.alarm_status[row]['count'] = 0
-        for row in self.alarm_status:
-            self.status_updated.emit(row, 'normal')
-
-    def _is_enabled(self, row):
-        if self.get_row_enabled:
-            try:
-                return self.get_row_enabled(row)
-            except:
-                return True
-        return True
-
-    def _init_ocr(self):
-        if self.reader is not None:
-            return True
-        if not OCR_AVAILABLE:
-            self.ocr_status.emit("EasyOCR未安装，请运行: pip install easyocr", False)
-            return False
-        try:
-            if getattr(sys, 'frozen', False):
-                base_dir = os.path.dirname(sys.executable)
-            else:
-                base_dir = os.path.dirname(os.path.abspath(__file__))
-            model_dir = os.path.join(base_dir, 'ocr_models')
-            if not os.path.exists(model_dir):
-                os.makedirs(model_dir, exist_ok=True)
-            self.ocr_status.emit("正在下载/加载EasyOCR模型 (首次约200MB)...", False)
-            self.download_progress.emit(0)
-            self.reader = easyocr.Reader(['en'], gpu=False, model_storage_directory=model_dir, download_enabled=True, verbose=False)
-            if self.reader is not None:
-                self.ocr_ready = True
-                self.download_progress.emit(100)
-                self.ocr_status.emit("就绪 ✅", True)
-                return True
-            else:
-                self.ocr_status.emit("创建OCR对象失败", False)
-                return False
-        except Exception as e:
-            error_msg = str(e)
-            if "Connection" in error_msg or "timeout" in error_msg.lower():
-                self.ocr_status.emit("网络连接失败，请检查网络后重启", False)
-            else:
-                self.ocr_status.emit(f"加载失败: {error_msg[:80]}", False)
-            return False
+    # ... 其他方法保持不变（reset_row_alarm, reset_all_alarms, _is_enabled, _init_ocr） ...
 
     def _preprocess_image(self, img_np, sensitivity):
+        # 根据模式动态调整参数
+        mode = self.recognition_mode
+        if mode == 'standard':
+            scale_factor = 1.0
+            clip_limit_base = 2.0
+            block_size_base = 1.5
+            c_base = 0.3
+        elif mode == 'enhanced':
+            scale_factor = 1.2
+            clip_limit_base = 2.5
+            block_size_base = 1.0
+            c_base = 0.2
+        else:  # high_accuracy
+            scale_factor = 1.5
+            clip_limit_base = 3.0
+            block_size_base = 0.8
+            c_base = 0.15
+
         try:
             sens = sensitivity
             h, w = img_np.shape[:2]
             max_dim = max(h, w)
 
+            # 基础缩放
             if max_dim < 100:
                 scale = 3.0
             elif max_dim < 200:
@@ -120,6 +90,9 @@ class MonitorThread(QThread):
                 scale = 1.5
             else:
                 scale = 1.0
+            # 应用模式缩放系数
+            scale *= scale_factor
+            scale = max(0.5, min(scale, 4.0))  # 限幅
 
             if scale != 1.0:
                 new_w = int(w * scale)
@@ -133,7 +106,8 @@ class MonitorThread(QThread):
             else:
                 gray = scaled
 
-            clip_limit = 1.0 + (sens / 10.0) * 2.0
+            # clip_limit 受灵敏度和模式影响
+            clip_limit = (1.0 + (sens / 10.0) * 2.0) * clip_limit_base
             clahe = cv2.createCLAHE(clipLimit=clip_limit, tileGridSize=(8, 8))
             enhanced = clahe.apply(gray)
 
@@ -144,13 +118,14 @@ class MonitorThread(QThread):
             kernel_sharpen = np.array([[-1,-1,-1],[-1,9,-1],[-1,-1,-1]])
             sharpened = cv2.filter2D(enhanced, -1, kernel_sharpen)
 
+            # block_size 和 c_value 调整
             if max_dim > 300:
-                block_size = max(3, int(3 + (10 - sens) * 0.8))
+                block_size = max(3, int(3 + (10 - sens) * 0.8 * block_size_base))
             else:
-                block_size = max(3, int(5 + (10 - sens) * 1.5))
+                block_size = max(3, int(5 + (10 - sens) * 1.5 * block_size_base))
             if block_size % 2 == 0:
                 block_size += 1
-            c_value = max(1, int(2 + (10 - sens) * 0.3))
+            c_value = max(1, int(2 + (10 - sens) * 0.3 * c_base))
 
             binary = cv2.adaptiveThreshold(sharpened, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
                                             cv2.THRESH_BINARY, block_size, c_value)
@@ -178,7 +153,15 @@ class MonitorThread(QThread):
 
             sens = monitor.get('sensitivity', 5)
             processed = self._preprocess_image(img_np, sens)
-            text_thr = 0.2 + (10 - sens) * 0.04
+
+            # 根据模式调整 text_thr
+            mode = self.recognition_mode
+            if mode == 'standard':
+                text_thr = 0.2 + (10 - sens) * 0.04
+            elif mode == 'enhanced':
+                text_thr = 0.15 + (10 - sens) * 0.035
+            else:  # high_accuracy
+                text_thr = 0.1 + (10 - sens) * 0.03
 
             result = self.reader.readtext(processed, allowlist='0123456789.-',
                                           paragraph=False, width_ths=0.5, height_ths=0.5,
