@@ -1,4 +1,4 @@
-name: PMJSGJ
+name: Build EXE
 
 on:
   push:
@@ -9,7 +9,6 @@ on:
 jobs:
   build:
     runs-on: windows-latest
-    
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -26,13 +25,35 @@ jobs:
           pip install -r requirements.txt
           pip install pyinstaller
 
-      - name: Build EXE with PyInstaller
+      - name: Generate spec file
         run: |
-          python -m PyInstaller --onefile --windowed --name "屏幕数字监控报警" --icon favicon.ico --add-data "警报声.mp3;." --add-data "favicon.ico;." main.py
+          pyi-makespec --onefile --windowed --name "屏幕数值监控报警" --icon favicon.ico --add-data "警报声.mp3;." --add-data "favicon.ico;." 屏幕数值监控报警.py
+
+      - name: Modify spec to include OpenCV
+        shell: powershell
+        run: |
+          $spec = Get-Content '屏幕数值监控报警.spec' -Raw
+          $insert = @"
+          from PyInstaller.utils.hooks import collect_all
+          cv2_datas, cv2_binaries, cv2_hiddenimports = collect_all('cv2')
+          a.datas.extend(cv2_datas)
+          a.binaries.extend(cv2_binaries)
+          a.hiddenimports.extend(cv2_hiddenimports)
+          numpy_datas, numpy_binaries, numpy_hiddenimports = collect_all('numpy')
+          a.datas.extend(numpy_datas)
+          a.binaries.extend(numpy_binaries)
+          a.hiddenimports.extend(numpy_hiddenimports)
+          "@
+          $spec = $spec -replace '(?<=a = Analysis\([\s\S]*?\))', "`n`n$insert"
+          Set-Content -Path '屏幕数值监控报警.spec' -Value $spec
+
+      - name: Build EXE
+        run: |
+          pyinstaller 屏幕数值监控报警.spec
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: 屏幕数字监控报警
+          name: 屏幕数值监控报警
           path: dist/*.exe
           retention-days: 30
