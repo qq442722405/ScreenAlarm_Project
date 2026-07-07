@@ -25,30 +25,445 @@ except ImportError:
     PYGAME_AVAILABLE = False
 
 
-# ---------- 以下为原有类（AlarmSoundPlayer, CoordinatePicker, MiniWindow, TrendChartWidget）保持不变 ----------
-# 为节省篇幅，此处省略（实际使用时请粘贴您原有的完整类定义）
-# 但为了确保本回答可直接使用，我会在最终代码中包含所有类。
-# 由于回答长度限制，我会在末尾提供完整文件的下载方式，但为了满足“完整代码”要求，我将在此处提供全部代码。
-
-
 class AlarmSoundPlayer:
-    # ...（完整实现，与您原版完全一致，此处省略，实际粘贴时需完整）
-    pass
+    """报警声音播放器"""
+    def __init__(self):
+        self.is_playing = False
+        self.sound_file = None          # 修复：显式初始化为 None
+        self.play_thread = None
+        self.stop_flag = False
+        self.volume = 1.0
+        self.current_sound = None
+        self.lock = threading.Lock()
+        self.loop_enabled = True
+        self._load_sound()
+        if PYGAME_AVAILABLE:
+            try:
+                pygame.mixer.init()
+                self.mixer_ready = True
+            except:
+                self.mixer_ready = False
+        else:
+            self.mixer_ready = False
+
+    def set_loop(self, enabled):
+        self.loop_enabled = enabled
+
+    def _load_sound(self):
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        sound_path = os.path.join(script_dir, "警报声.mp3")
+        if os.path.exists(sound_path):
+            self.sound_file = sound_path
+            return
+        if getattr(sys, 'frozen', False):
+            exe_dir = os.path.dirname(sys.executable)
+            sound_path = os.path.join(exe_dir, "警报声.mp3")
+            if os.path.exists(sound_path):
+                self.sound_file = sound_path
+
+    def play(self):
+        if not self.sound_file or not os.path.exists(self.sound_file):
+            self._play_beep()
+            return
+        if self.is_playing:
+            return
+        with self.lock:
+            self.stop_flag = False
+            self.is_playing = True
+        if PYGAME_AVAILABLE and self.mixer_ready:
+            self._play_with_pygame()
+        else:
+            self._play_beep()
+
+    def _play_with_pygame(self):
+        def play_loop():
+            try:
+                sound = pygame.mixer.Sound(self.sound_file)
+                self.current_sound = sound
+                sound.set_volume(self.volume)
+                if self.loop_enabled:
+                    while not self.stop_flag:
+                        sound.play()
+                        while pygame.mixer.get_busy() and not self.stop_flag:
+                            pygame.time.wait(50)
+                        if self.stop_flag:
+                            break
+                        time.sleep(0.05)
+                else:
+                    sound.play()
+                    while pygame.mixer.get_busy() and not self.stop_flag:
+                        pygame.time.wait(50)
+            except Exception as e:
+                print(f"播放失败: {e}")
+            finally:
+                with self.lock:
+                    self.is_playing = False
+                    self.current_sound = None
+        self.play_thread = threading.Thread(target=play_loop, daemon=True)
+        self.play_thread.start()
+
+    def _play_beep(self):
+        def beep_loop():
+            try:
+                import winsound
+                if self.loop_enabled:
+                    while not self.stop_flag:
+                        winsound.Beep(800, 200)
+                        time.sleep(0.1)
+                        if self.stop_flag:
+                            break
+                        winsound.Beep(1000, 200)
+                        time.sleep(0.1)
+                else:
+                    winsound.Beep(800, 200)
+                    time.sleep(0.1)
+                    winsound.Beep(1000, 200)
+            except:
+                pass
+            finally:
+                with self.lock:
+                    self.is_playing = False
+        self.play_thread = threading.Thread(target=beep_loop, daemon=True)
+        self.play_thread.start()
+
+    def stop(self):
+        with self.lock:
+            self.stop_flag = True
+            self.is_playing = False
+            self.current_sound = None
+        if PYGAME_AVAILABLE and self.mixer_ready:
+            try:
+                pygame.mixer.stop()
+            except:
+                pass
+
+    def set_volume(self, volume):
+        self.volume = max(0.0, min(1.0, volume))
+        if self.current_sound is not None:
+            try:
+                self.current_sound.set_volume(self.volume)
+            except:
+                pass
+
+    def is_loaded(self):
+        return self.sound_file is not None and os.path.exists(self.sound_file)
 
 
-class CoordinatePicker:
-    # ...（完整实现）
-    pass
+class CoordinatePicker(QWidget):
+    coord_selected = Signal(int, int, int, int)
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("选择监控区域")
+        self.setWindowFlags(Qt.WindowStaysOnTopHint | Qt.FramelessWindowHint | Qt.Tool)
+        self.setMouseTracking(True)
+        from PySide6.QtWidgets import QApplication
+        screens = QApplication.screens()
+        total_rect = screens[0].geometry()
+        for s in screens[1:]:
+            total_rect = total_rect.united(s.geometry())
+        self.total_rect = total_rect
+        self.setGeometry(total_rect)
+        self.screen_pixmap = QPixmap(total_rect.size())
+        self.screen_pixmap.fill(Qt.black)
+        painter = QPainter(self.screen_pixmap)
+        for screen in screens:
+            screen_pix = screen.grabWindow(0)
+            painter.drawPixmap(screen.geometry().topLeft(), screen_pix)
+        painter.end()
+        self.showFullScreen()
+        self.raise_()
+        self.activateWindow()
+        self.state = 0
+        self.start_pos = QPoint()
+        self.end_pos = QPoint()
+
+        self.magnifier_size = 120
+        self.magnifier_scale = 2
+        self.magnifier_pos = QPoint(10, 10)
+
+        self.label = QLabel("🖱 点击左上角确定起点", self)
+        self.label.setAlignment(Qt.AlignCenter)
+        self.label.setStyleSheet("QLabel { color: white; background: rgba(0,0,0,220); padding: 14px 28px; border-radius: 14px; font-size: 18px; font-weight: bold; border: 1px solid rgba(255,255,255,0.2); }")
+        self.label.adjustSize()
+        self.label.move((self.width() - self.label.width()) // 2, self.height() - self.label.height() - 80)
+
+        self.coord_label = QLabel("坐标信息", self)
+        self.coord_label.setAlignment(Qt.AlignCenter)
+        self.coord_label.setStyleSheet("QLabel { color: #5aa9ff; background: rgba(0,0,0,220); padding: 10px 22px; border-radius: 10px; font-size: 17px; font-weight: bold; border: 1px solid #5aa9ff; }")
+        self.coord_label.adjustSize()
+        self.coord_label.move((self.width() - self.coord_label.width()) // 2, 60)
+
+        self.setFocus(Qt.OtherFocusReason)
+        self.update()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.drawPixmap(self.rect(), self.screen_pixmap)
+        painter.fillRect(self.rect(), QColor(0, 0, 0, 120))
+
+        if self.state >= 1 and not self.start_pos.isNull() and not self.end_pos.isNull():
+            rect = self._get_current_rect()
+            if rect.width() > 1 and rect.height() > 1:
+                pen = QPen(QColor(0, 255, 140), 2)
+                pen.setStyle(Qt.DashLine)
+                painter.setPen(pen)
+                painter.drawRect(rect)
+                painter.setPen(QPen(QColor(0, 255, 140), 2))
+                size = 14
+                painter.drawLine(rect.topLeft(), rect.topLeft() + QPoint(size, 0))
+                painter.drawLine(rect.topLeft(), rect.topLeft() + QPoint(0, size))
+                painter.drawLine(rect.topRight(), rect.topRight() + QPoint(-size, 0))
+                painter.drawLine(rect.topRight(), rect.topRight() + QPoint(0, size))
+                painter.drawLine(rect.bottomLeft(), rect.bottomLeft() + QPoint(size, 0))
+                painter.drawLine(rect.bottomLeft(), rect.bottomLeft() + QPoint(0, -size))
+                painter.drawLine(rect.bottomRight(), rect.bottomRight() + QPoint(-size, 0))
+                painter.drawLine(rect.bottomRight(), rect.bottomRight() + QPoint(0, -size))
+                painter.setPen(Qt.white)
+                painter.setFont(QFont("Arial", 12, QFont.Bold))
+                text_y = rect.y() - 12 if rect.y() > 30 else rect.y() + rect.height() + 25
+                painter.drawText(rect.x() + 10, text_y, f"{rect.width()} × {rect.height()}")
+
+        self._draw_fixed_magnifier(painter)
+
+    def _draw_fixed_magnifier(self, painter):
+        pos = self.end_pos
+        if pos.isNull() or not self.rect().contains(pos):
+            return
+        size = self.magnifier_size
+        scale = self.magnifier_scale
+        crop_size = size // scale
+        half = crop_size // 2
+        crop_rect = QRect(pos.x() - half, pos.y() - half, crop_size, crop_size)
+        crop_rect = crop_rect.intersected(self.total_rect)
+        if crop_rect.width() <= 0 or crop_rect.height() <= 0:
+            return
+        pixmap = self.screen_pixmap.copy(crop_rect)
+        scaled = pixmap.scaled(size, size, Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
+        painter.save()
+        painter.setPen(QPen(Qt.white, 2))
+        painter.setBrush(QColor(0, 0, 0, 200))
+        painter.drawRect(self.magnifier_pos.x(), self.magnifier_pos.y(), size, size)
+        painter.drawPixmap(self.magnifier_pos.x(), self.magnifier_pos.y(), scaled)
+        center = self.magnifier_pos + QPoint(size//2, size//2)
+        painter.setPen(QPen(QColor(255, 0, 0), 1))
+        painter.setBrush(Qt.NoBrush)
+        painter.drawPoint(center)
+        painter.restore()
+
+    def _get_current_rect(self):
+        if self.start_pos.isNull():
+            return QRect()
+        x = min(self.start_pos.x(), self.end_pos.x())
+        y = min(self.start_pos.y(), self.end_pos.y())
+        w = abs(self.end_pos.x() - self.start_pos.x())
+        h = abs(self.end_pos.y() - self.start_pos.y())
+        return QRect(x, y, w, h)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            if self.state == 0:
+                self.start_pos = event.position().toPoint()
+                self.end_pos = self.start_pos
+                self.state = 1
+                self.label.setText("🖱 点击右下角确定终点")
+                self.label.adjustSize()
+                self.label.move((self.width() - self.label.width()) // 2, self.height() - self.label.height() - 80)
+                self.update()
+            elif self.state == 1:
+                self.end_pos = event.position().toPoint()
+                rect = self._get_current_rect()
+                if rect.width() > 20 and rect.height() > 20:
+                    self.coord_selected.emit(rect.x(), rect.y(), rect.width(), rect.height())
+                    self.close()
+                else:
+                    self.label.setText("⚠️ 区域太小，请重新点击左上角")
+                    self.label.adjustSize()
+                    self.label.move((self.width() - self.label.width()) // 2, self.height() - self.label.height() - 80)
+                    self.state = 0
+                    self.start_pos = QPoint()
+                    self.end_pos = QPoint()
+                    self.update()
+
+    def mouseMoveEvent(self, event):
+        self.end_pos = event.position().toPoint()
+        if self.state >= 1:
+            rect = self._get_current_rect()
+            self.coord_label.setText(f"起点: ({self.start_pos.x()}, {self.start_pos.y()})  大小: {rect.width()} × {rect.height()}")
+            self.coord_label.adjustSize()
+            self.coord_label.move((self.width() - self.coord_label.width()) // 2, 60)
+        self.update()
+
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key_Escape:
+            self.coord_selected.emit(0, 0, 0, 0)
+            self.close()
+
+    def closeEvent(self, event):
+        self.setCursor(Qt.ArrowCursor)
+        event.accept()
 
 
-class MiniWindow:
-    # ...（完整实现）
-    pass
+class MiniWindow(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.parent_window = parent
+        self.setWindowTitle("报警监控")
+        self.setWindowFlags(Qt.WindowStaysOnTopHint | Qt.FramelessWindowHint | Qt.Tool)
+        self.setFixedSize(200, 40)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setStyleSheet("QWidget { background-color: rgba(30, 30, 46, 0.96); border: 2px solid #4a9eff; border-radius: 12px; } QLabel { color: #e0e0f0; font-family: 'Microsoft YaHei'; font-size: 13px; font-weight: bold; } QPushButton { background-color: #3a5a7a; color: #e0e0f0; border: none; border-radius: 6px; padding: 4px 12px; font-weight: bold; font-family: 'Microsoft YaHei'; font-size: 12px; min-height: 20px; } QPushButton:hover { background-color: #4a6a8a; }")
+        layout = QHBoxLayout(self)
+        layout.setSpacing(6)
+        layout.setContentsMargins(8, 4, 8, 4)
+        self.alarm_label = QLabel("✅ 正常")
+        self.alarm_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        self.alarm_label.setStyleSheet("color: #4ade80; padding: 0px;")
+        layout.addWidget(self.alarm_label, 1)
+        self.btn_restore = QPushButton("切换")
+        self.btn_restore.clicked.connect(self.restore_window)
+        layout.addWidget(self.btn_restore)
+        self.drag_pos = None
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self.drag_pos = event.globalPosition().toPoint()
+
+    def mouseMoveEvent(self, event):
+        if self.drag_pos is not None:
+            delta = event.globalPosition().toPoint() - self.drag_pos
+            self.move(self.pos() + delta)
+            self.drag_pos = event.globalPosition().toPoint()
+
+    def mouseReleaseEvent(self, event):
+        self.drag_pos = None
+
+    def set_alarm(self, name):
+        if len(name) > 10:
+            name = name[:10] + "..."
+        self.alarm_label.setText(f"⚠️ {name}")
+        self.alarm_label.setStyleSheet("color: #ff6b6b; padding: 0px;")
+
+    def clear_alarm(self):
+        self.alarm_label.setText("✅ 正常")
+        self.alarm_label.setStyleSheet("color: #4ade80; padding: 0px;")
+
+    def restore_window(self):
+        self.parent_window.show_normal_mode()
+
+    def closeEvent(self, event):
+        self.parent_window.mini_window = None
+        event.accept()
 
 
-class TrendChartWidget:
-    # ...（完整实现，支持显示时间戳）
-    pass
+class TrendChartWidget(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setMinimumHeight(190)
+        self.data = []          # [(timestamp, value), ...]
+        self.max_points = 15
+        self.title = "数值趋势"
+
+    def set_data(self, data_list, title="数值趋势"):
+        self.data = data_list[-self.max_points:]
+        self.title = title
+        self.update()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        rect = self.rect()
+        padding_left = 20
+        padding_right = 20
+        padding_top = 32
+        padding_bottom = 40
+
+        painter.setBrush(QColor("#252538"))
+        painter.setPen(Qt.NoPen)
+        painter.drawRoundedRect(rect, 8, 8)
+
+        painter.setPen(QColor("#e8e8f0"))
+        painter.setFont(QFont("Microsoft YaHei", 10, QFont.Bold))
+        painter.drawText(padding_left, 22, self.title)
+
+        chart_rect = QRect(
+            padding_left, padding_top,
+            rect.width() - padding_left - padding_right,
+            rect.height() - padding_top - padding_bottom
+        )
+
+        painter.setPen(QColor("#36364a"))
+        grid_rows = 5
+        for i in range(grid_rows + 1):
+            y = chart_rect.top() + chart_rect.height() * i / grid_rows
+            painter.drawLine(chart_rect.left(), y, chart_rect.right(), y)
+
+        if len(self.data) < 2:
+            painter.setPen(QColor("#7a7a9a"))
+            painter.setFont(QFont("Microsoft YaHei", 10))
+            painter.drawText(chart_rect, Qt.AlignCenter, "选中监控行后显示数值趋势")
+            return
+
+        timestamps, values = zip(*self.data)
+        min_val = min(values)
+        max_val = max(values)
+        if min_val == max_val:
+            min_val -= 1
+            max_val += 1
+        val_range = max_val - min_val
+        margin = val_range * 0.1
+        min_val -= margin
+        max_val += margin
+        val_range = max_val - min_val
+
+        points = []
+        step_x = chart_rect.width() / (len(values) - 1)
+        for i, val in enumerate(values):
+            x = chart_rect.left() + i * step_x
+            y = chart_rect.bottom() - (val - min_val) / val_range * chart_rect.height()
+            points.append(QPoint(x, y))
+
+        if len(points) > 2:
+            gradient = QLinearGradient(0, chart_rect.top(), 0, chart_rect.bottom())
+            gradient.setColorAt(0, QColor(74, 158, 255, 90))
+            gradient.setColorAt(1, QColor(74, 158, 255, 10))
+            painter.setBrush(gradient)
+            painter.setPen(Qt.NoPen)
+            path = QPainterPath()
+            path.moveTo(points[0].x(), chart_rect.bottom())
+            for p in points:
+                path.lineTo(p)
+            path.lineTo(points[-1].x(), chart_rect.bottom())
+            path.closeSubpath()
+            painter.drawPath(path)
+
+        pen = QPen(QColor("#4a9eff"), 2)
+        painter.setPen(pen)
+        painter.setBrush(Qt.NoBrush)
+        for i in range(len(points) - 1):
+            painter.drawLine(points[i], points[i+1])
+
+        if points:
+            painter.setPen(QColor("#aaccff"))
+            painter.setFont(QFont("Arial", 8))
+            for i, (p, val, ts) in enumerate(zip(points, values, timestamps)):
+                text_val = f"{val:.2f}"
+                text_w = painter.fontMetrics().horizontalAdvance(text_val)
+                painter.drawText(p.x() - text_w / 2, p.y() - 8, text_val)
+                time_str = datetime.fromtimestamp(ts).strftime("%H:%M:%S")
+                painter.setPen(QColor("#88aacc"))
+                painter.drawText(p.x() - 30, p.y() + 18, time_str)
+                painter.setPen(QColor("#aaccff"))
+
+            last_p = points[-1]
+            painter.setPen(QPen(QColor("#ff6b6b"), 3))
+            painter.setBrush(QColor("#ff6b6b"))
+            painter.drawEllipse(last_p, 4, 4)
+
+            painter.setPen(QColor("#7a7a9a"))
+            painter.setFont(QFont("Arial", 8))
+            painter.drawText(chart_rect.left(), chart_rect.bottom() + 18, f"{datetime.fromtimestamp(timestamps[0]).strftime('%H:%M')}")
+            painter.drawText(chart_rect.right() - 60, chart_rect.bottom() + 18, f"{datetime.fromtimestamp(timestamps[-1]).strftime('%H:%M')}")
 
 
 class MainWindow(QMainWindow):
@@ -64,18 +479,16 @@ class MainWindow(QMainWindow):
         self.test_reader = None
         self.reader_loading = False
 
-        # ---------- 两种记录模式的数据存储 ----------
-        self.value_history_interval = {}   # 定时记录
-        self.value_history_change = {}    # 变化记录
-        self.last_value = {}              # 用于检测变化
+        # 两种记录数据
+        self.value_history_interval = {}
+        self.value_history_change = {}
+        self.last_recorded_value = {}
 
-        # 当前显示模式
-        self.display_mode = 'interval'    # 'interval' 或 'change'
-
-        # 记录定时器
         self.record_timer = QTimer()
         self.record_timer.timeout.connect(self.record_interval_value)
         self.record_interval_minutes = 60
+
+        self.display_mode = 'interval'   # 'interval' 或 'change'
 
         self.setStyleSheet("""
             QMainWindow { background-color: #1e1e2e; }
@@ -128,6 +541,10 @@ class MainWindow(QMainWindow):
             QPushButton#btn_mini:hover { background-color: #5a7a9a; }
             QPushButton#btn_chart_toggle { background-color: #4a4a6a; }
             QPushButton#btn_chart_toggle:hover { background-color: #5a5a7a; }
+            QPushButton#btn_clear_history {
+                background-color: #7a5a4a;
+            }
+            QPushButton#btn_clear_history:hover { background-color: #9a6a5a; }
             QSlider::groove:horizontal {
                 height: 6px;
                 background: #363650;
@@ -339,7 +756,6 @@ class MainWindow(QMainWindow):
         self.download_progress.setValue(0)
         main_layout.addWidget(self.download_progress)
 
-        # ---------- 表格 ----------
         self.table = QTableWidget()
         self.table.setColumnCount(11)
         self.table.setHorizontalHeaderLabels(["启用", "名称", "备注", "当前值", "下限", "上限", "坐标", "状态", "报警时间", "静音", "灵敏度"])
@@ -362,7 +778,6 @@ class MainWindow(QMainWindow):
 
         main_layout.addWidget(self.table, 3)
 
-        # ---------- 趋势曲线 ----------
         self.chart_group = QGroupBox("📈 数值趋势曲线")
         chart_layout = QVBoxLayout(self.chart_group)
         chart_layout.setContentsMargins(12, 18, 12, 12)
@@ -382,10 +797,10 @@ class MainWindow(QMainWindow):
         self.record_interval_spin.valueChanged.connect(self.set_record_interval)
         settings_layout.addWidget(self.record_interval_spin)
 
-        settings_layout.addWidget(QLabel("显示模式:"))
+        settings_layout.addWidget(QLabel("趋势显示:"))
         self.display_mode_combo = QComboBox()
-        self.display_mode_combo.addItem("定时记录", "interval")
-        self.display_mode_combo.addItem("变化记录", "change")
+        self.display_mode_combo.addItem("定时趋势", "interval")
+        self.display_mode_combo.addItem("变化趋势", "change")
         self.display_mode_combo.setFixedWidth(120)
         self.display_mode_combo.currentIndexChanged.connect(self._on_display_mode_changed)
         settings_layout.addWidget(self.display_mode_combo)
@@ -404,7 +819,6 @@ class MainWindow(QMainWindow):
         chart_layout.addLayout(settings_layout)
         main_layout.addWidget(self.chart_group, 2)
 
-        # ---------- 第一排按钮 ----------
         btn_layout_top = QHBoxLayout()
         btn_layout_top.setSpacing(10)
         btn_layout_top.setAlignment(Qt.AlignLeft)
@@ -437,7 +851,6 @@ class MainWindow(QMainWindow):
 
         main_layout.addLayout(btn_layout_top)
 
-        # ---------- 第二排按钮 ----------
         btn_layout_bottom = QHBoxLayout()
         btn_layout_bottom.setSpacing(10)
         btn_layout_bottom.setAlignment(Qt.AlignLeft)
@@ -456,6 +869,11 @@ class MainWindow(QMainWindow):
         self.btn_clear_time.clicked.connect(self.clear_alarm_time)
         btn_layout_bottom.addWidget(self.btn_clear_time)
 
+        self.btn_clear_history = QPushButton("🗑 清空历史")
+        self.btn_clear_history.setObjectName("btn_clear_history")
+        self.btn_clear_history.clicked.connect(self.clear_history)
+        btn_layout_bottom.addWidget(self.btn_clear_history)
+
         self.btn_save = QPushButton("💾 保存配置")
         self.btn_save.setObjectName("btn_save")
         self.btn_save.clicked.connect(self.save_config)
@@ -467,7 +885,6 @@ class MainWindow(QMainWindow):
 
         main_layout.addLayout(btn_layout_bottom)
 
-        # ---------- 状态栏 ----------
         status_layout = QHBoxLayout()
         status_layout.setSpacing(10)
         self.status_label = QLabel("状态: 就绪")
@@ -481,24 +898,19 @@ class MainWindow(QMainWindow):
         self.table.model().rowsInserted.connect(self._on_rows_inserted)
         self.table.model().rowsRemoved.connect(self._on_rows_removed)
 
+    # ---------- 趋势显示切换 ----------
     def _on_display_mode_changed(self, index):
         self.display_mode = self.display_mode_combo.currentData()
-        self._update_trend_chart()
+        self._update_trend_chart_for_current_row()
 
-    def _update_trend_chart(self):
-        """根据当前显示模式更新趋势图"""
-        row = self.table.currentRow()
-        if row < 0:
-            return
-        if self.display_mode == 'interval':
-            data = self.value_history_interval.get(row, [])
-            mode_name = "定时记录"
-        else:
-            data = self.value_history_change.get(row, [])
-            mode_name = "变化记录"
-        name_item = self.table.item(row, 1)
-        name = name_item.text() if name_item else f"区域{row+1}"
-        self.trend_chart.set_data(data, f"{name} ({mode_name})")
+    def clear_history(self):
+        reply = QMessageBox.question(self, "确认清空", "确定要清空所有历史趋势数据吗？")
+        if reply == QMessageBox.Yes:
+            self.value_history_interval.clear()
+            self.value_history_change.clear()
+            self.last_recorded_value.clear()
+            self.trend_chart.set_data([], "数值趋势")
+            self.status_label.setText("状态: 历史数据已清空")
 
     # ---------- 键盘上下移动行 ----------
     def keyPressEvent(self, event):
@@ -536,10 +948,10 @@ class MainWindow(QMainWindow):
         self.row_enabled[row1], self.row_enabled[row2] = self.row_enabled.get(row2, True), self.row_enabled.get(row1, True)
         self.row_muted[row1], self.row_muted[row2] = self.row_muted.get(row2, False), self.row_muted.get(row1, False)
         self.row_sensitivity[row1], self.row_sensitivity[row2] = self.row_sensitivity.get(row2, 5), self.row_sensitivity.get(row1, 5)
-        # 清空历史（行号变化，数据无法对应，简单清空）
-        self.value_history_interval.clear()
-        self.value_history_change.clear()
-        self.last_value.clear()
+        if row1 in self.value_history_interval and row2 in self.value_history_interval:
+            self.value_history_interval[row1], self.value_history_interval[row2] = self.value_history_interval[row2], self.value_history_interval[row1]
+        if row1 in self.value_history_change and row2 in self.value_history_change:
+            self.value_history_change[row1], self.value_history_change[row2] = self.value_history_change[row2], self.value_history_change[row1]
         self.status_label.setText("状态: 行顺序已改变，历史趋势数据已重置")
         if self.monitoring:
             self.stop_monitor()
@@ -578,7 +990,7 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "错误", f"加载模型失败: {str(e)}")
             self.set_ocr_status("加载失败", False)
 
-    # ---------- 合并的监控切换 ----------
+    # ---------- 监控切换 ----------
     def toggle_monitor(self):
         if self.monitoring:
             self.stop_monitor()
@@ -648,12 +1060,6 @@ class MainWindow(QMainWindow):
         self.btn_start_stop.setText("⏹ 停止监控")
         self.status_label.setText("状态: 监控运行中")
 
-        # 清空历史
-        self.value_history_interval.clear()
-        self.value_history_change.clear()
-        self.last_value.clear()
-
-        # 启动定时记录
         self.record_timer.start(self.record_interval_minutes * 60 * 1000)
 
     def stop_monitor(self):
@@ -672,13 +1078,13 @@ class MainWindow(QMainWindow):
             self.row_alarm[row] = False
             self._reset_row_colors(row)
 
-    # ---------- 记录间隔设置 ----------
+    # ---------- 记录间隔 ----------
     def set_record_interval(self, value):
         self.record_interval_minutes = value
         if self.monitoring and self.record_timer.isActive():
             self.record_timer.start(value * 60 * 1000)
 
-    # ---------- 定时记录（间隔记录） ----------
+    # ---------- 定时记录 ----------
     def record_interval_value(self):
         row = self.table.currentRow()
         if row < 0:
@@ -690,29 +1096,36 @@ class MainWindow(QMainWindow):
             value = float(val_item.text())
         except:
             return
-        # 添加到定时记录
-        if row not in self.value_history_interval:
-            self.value_history_interval[row] = []
-        self.value_history_interval[row].append((time.time(), value))
-        if len(self.value_history_interval[row]) > 15:
-            self.value_history_interval[row].pop(0)
-        # 如果当前显示模式是间隔记录，更新趋势图
-        if self.display_mode == 'interval':
-            self._update_trend_chart()
+        self._add_record(row, value, 'interval')
 
-    # ---------- 变化记录（在数值更新时触发） ----------
-    def record_change_value(self, row, value):
-        if row not in self.value_history_change:
-            self.value_history_change[row] = []
-        # 检查是否变化
-        if row in self.last_value and abs(self.last_value[row] - value) < 1e-9:
+    # ---------- 通用记录添加 ----------
+    def _add_record(self, row, value, record_type):
+        if record_type == 'interval':
+            history = self.value_history_interval
+        else:
+            history = self.value_history_change
+        if row not in history:
+            history[row] = []
+        history[row].append((time.time(), value))
+        if len(history[row]) > 15:
+            history[row].pop(0)
+        if self.table.currentRow() == row:
+            self._update_trend_chart_for_current_row()
+
+    # ---------- 更新趋势图 ----------
+    def _update_trend_chart_for_current_row(self):
+        row = self.table.currentRow()
+        if row < 0:
             return
-        self.last_value[row] = value
-        self.value_history_change[row].append((time.time(), value))
-        if len(self.value_history_change[row]) > 15:
-            self.value_history_change[row].pop(0)
-        if self.display_mode == 'change':
-            self._update_trend_chart()
+        if self.display_mode == 'interval':
+            data = self.value_history_interval.get(row, [])
+            title = "定时趋势"
+        else:
+            data = self.value_history_change.get(row, [])
+            title = "变化趋势"
+        name_item = self.table.item(row, 1)
+        name = name_item.text() if name_item else f"区域{row+1}"
+        self.trend_chart.set_data(data, f"{name} ({title})")
 
     # ---------- 以下为原功能方法 ----------
     def clear_alarm_time(self):
@@ -775,7 +1188,7 @@ class MainWindow(QMainWindow):
             self.mini_window.clear_alarm()
 
     def _on_selection_changed(self):
-        self._update_trend_chart()
+        self._update_trend_chart_for_current_row()
 
     def _on_table_item_changed(self, item):
         if not self.monitoring or self.monitor_thread is None:
@@ -819,8 +1232,8 @@ class MainWindow(QMainWindow):
                 del self.value_history_interval[row]
             if row in self.value_history_change:
                 del self.value_history_change[row]
-            if row in self.last_value:
-                del self.last_value[row]
+            if row in self.last_recorded_value:
+                del self.last_recorded_value[row]
 
     def _get_row_enabled(self, row):
         return self.row_enabled.get(row, True)
@@ -891,7 +1304,6 @@ class MainWindow(QMainWindow):
             return
         row = self.table.rowCount()
         self.table.insertRow(row)
-        # 初始化历史
         self.value_history_interval[row] = []
         self.value_history_change[row] = []
 
@@ -1061,14 +1473,16 @@ class MainWindow(QMainWindow):
                 status_item.setBackground(QBrush(QColor(74, 158, 255)))
                 status_item.setForeground(QBrush(QColor(255, 255, 255)))
 
-    # ---------- 数值更新（变化记录在此触发） ----------
     def on_value_updated(self, row, value):
         item = self.table.item(row, 3)
         if item:
             item.setText(f"{value:.2f}")
             item.setTextAlignment(Qt.AlignCenter)
         # 变化记录
-        self.record_change_value(row, value)
+        if row in self.last_recorded_value and abs(self.last_recorded_value[row] - value) < 1e-9:
+            return
+        self.last_recorded_value[row] = value
+        self._add_record(row, value, 'change')
 
     def on_alarm_triggered(self, row, name, value, lower, upper):
         self.row_alarm[row] = True
@@ -1178,7 +1592,7 @@ class MainWindow(QMainWindow):
             self.row_sensitivity.clear()
             self.value_history_interval.clear()
             self.value_history_change.clear()
-            self.last_value.clear()
+            self.last_recorded_value.clear()
 
             for item in config.get('monitors', []):
                 row = self.table.rowCount()
