@@ -25,13 +25,13 @@ jobs:
           pip install -r requirements.txt
           pip install pyinstaller
 
-      # 使用英文名称生成 spec 文件，避免编码问题
+      # ----- 关键修改：使用英文名生成 spec 文件，避免编码问题 -----
       - name: Generate spec file (English name)
         run: |
           pyi-makespec --onefile --windowed --name "ScreenMonitor" --icon favicon.ico --add-data "警报声.mp3;." --add-data "favicon.ico;." 屏幕数值监控报警.py
 
-      # 修改 spec 文件，添加 OpenCV 和 NumPy 收集
-      - name: Modify spec to include OpenCV and NumPy
+      # ----- 修改 spec 文件：添加 OpenCV/NumPy 收集，并改回中文名 -----
+      - name: Modify spec to include OpenCV/NumPy and rename to Chinese
         shell: powershell
         run: |
           $spec = Get-Content 'ScreenMonitor.spec' -Raw
@@ -46,16 +46,19 @@ jobs:
           a.binaries.extend(numpy_binaries)
           a.hiddenimports.extend(numpy_hiddenimports)
           "@
-          # 在 Analysis 部分之后插入
+          # 在 Analysis 部分之后插入收集代码
           $spec = $spec -replace '(?<=a = Analysis\([\s\S]*?\))', "`n`n$insert"
-          # 修改 EXE 名称为中文
+          # 将 EXE 名称改回中文
           $spec = $spec -replace "name='ScreenMonitor'", "name='屏幕数值监控报警'"
+          # 写入新文件（保留原英文 spec 不变，但我们用新文件）
           Set-Content -Path '屏幕数值监控报警.spec' -Value $spec
 
+      # ----- 使用修改后的 spec 打包 -----
       - name: Build EXE
         run: |
           pyinstaller 屏幕数值监控报警.spec
 
+      # ----- 上传产物 -----
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
