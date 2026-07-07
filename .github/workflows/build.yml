@@ -25,14 +25,16 @@ jobs:
           pip install -r requirements.txt
           pip install pyinstaller
 
-      - name: Generate spec file
+      # 使用英文名称生成 spec 文件，避免编码问题
+      - name: Generate spec file (English name)
         run: |
-          pyi-makespec --onefile --windowed --name "屏幕数值监控报警" --icon favicon.ico --add-data "警报声.mp3;." --add-data "favicon.ico;." 屏幕数值监控报警.py
+          pyi-makespec --onefile --windowed --name "ScreenMonitor" --icon favicon.ico --add-data "警报声.mp3;." --add-data "favicon.ico;." 屏幕数值监控报警.py
 
-      - name: Modify spec to include OpenCV
+      # 修改 spec 文件，添加 OpenCV 和 NumPy 收集
+      - name: Modify spec to include OpenCV and NumPy
         shell: powershell
         run: |
-          $spec = Get-Content '屏幕数值监控报警.spec' -Raw
+          $spec = Get-Content 'ScreenMonitor.spec' -Raw
           $insert = @"
           from PyInstaller.utils.hooks import collect_all
           cv2_datas, cv2_binaries, cv2_hiddenimports = collect_all('cv2')
@@ -44,7 +46,10 @@ jobs:
           a.binaries.extend(numpy_binaries)
           a.hiddenimports.extend(numpy_hiddenimports)
           "@
+          # 在 Analysis 部分之后插入
           $spec = $spec -replace '(?<=a = Analysis\([\s\S]*?\))', "`n`n$insert"
+          # 修改 EXE 名称为中文
+          $spec = $spec -replace "name='ScreenMonitor'", "name='屏幕数值监控报警'"
           Set-Content -Path '屏幕数值监控报警.spec' -Value $spec
 
       - name: Build EXE
