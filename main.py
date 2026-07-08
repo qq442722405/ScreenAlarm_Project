@@ -29,7 +29,7 @@ class AlarmSoundPlayer:
     """报警声音播放器"""
     def __init__(self):
         self.is_playing = False
-        self.sound_file = None          # 修复：显式初始化为 None
+        self.sound_file = None
         self.play_thread = None
         self.stop_flag = False
         self.volume = 1.0
