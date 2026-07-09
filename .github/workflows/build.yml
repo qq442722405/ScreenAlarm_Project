@@ -25,39 +25,64 @@ jobs:
           pip install -r requirements.txt
           pip install pyinstaller
 
-      - name: Generate spec file (English name)
+      # ---------- 直接写入正确的 .spec 文件 ----------
+      - name: Create spec file with OpenCV/NumPy support
+        shell: bash
         run: |
-          pyi-makespec --onefile --windowed --name "MonitorApp" --icon favicon.ico --add-data "警报声.mp3;." --add-data "favicon.ico;." main.py
+          cat > 屏幕数值监控报警.spec << 'EOF'
+          # -*- mode: python ; coding: utf-8 -*-
 
-      - name: Modify spec to include OpenCV/NumPy (avoid Chinese in PowerShell)
-        shell: powershell
-        run: |
-          $spec = Get-Content 'MonitorApp.spec' -Raw
-          $insert = @"
+          block_cipher = None
+
+          a = Analysis(
+              ['main.py'],
+              pathex=[],
+              binaries=[],
+              datas=[('警报声.mp3', '.'), ('favicon.ico', '.')],
+              hiddenimports=['cv2', 'numpy'],
+              hookspath=[],
+              hooksconfig={},
+              runtime_hooks=[],
+              excludes=[],
+              noarchive=False,
+          )
+
+          # 强制收集 OpenCV 和 NumPy
           from PyInstaller.utils.hooks import collect_all
+
           cv2_datas, cv2_binaries, cv2_hiddenimports = collect_all('cv2')
           a.datas.extend(cv2_datas)
           a.binaries.extend(cv2_binaries)
           a.hiddenimports.extend(cv2_hiddenimports)
+
           numpy_datas, numpy_binaries, numpy_hiddenimports = collect_all('numpy')
           a.datas.extend(numpy_datas)
           a.binaries.extend(numpy_binaries)
           a.hiddenimports.extend(numpy_hiddenimports)
-          "@
-          $spec = $spec -replace '(?<=a = Analysis\([\s\S]*?\))', "`n`n$insert"
-          # 保持英文名，避免编码问题
-          Set-Content -Path 'MonitorApp.spec' -Value $spec
+
+          pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
+
+          exe = EXE(
+              pyz,
+              a.scripts,
+              a.binaries,
+              a.datas,
+              [],
+              name='屏幕数值监控报警',
+              debug=False,
+              bootloader_ignore_signals=False,
+              strip=False,
+              upx=True,
+              upx_exclude=[],
+              runtime_tmpdir=None,
+              console=False,
+              icon='favicon.ico',
+          )
+          EOF
 
       - name: Build EXE
         run: |
-          pyinstaller MonitorApp.spec
-
-      - name: Rename EXE to Chinese name
-        shell: powershell
-        run: |
-          if (Test-Path "dist\MonitorApp.exe") {
-              Rename-Item -Path "dist\MonitorApp.exe" -NewName "屏幕数值监控报警.exe"
-          }
+          pyinstaller 屏幕数值监控报警.spec
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
