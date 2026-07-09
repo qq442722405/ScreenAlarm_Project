@@ -25,11 +25,11 @@ jobs:
           pip install -r requirements.txt
           pip install pyinstaller
 
-      - name: Generate spec file (English name to avoid encoding issues)
+      - name: Generate spec file (English name)
         run: |
           pyi-makespec --onefile --windowed --name "MonitorApp" --icon favicon.ico --add-data "警报声.mp3;." --add-data "favicon.ico;." main.py
 
-      - name: Modify spec to include OpenCV/NumPy and rename to Chinese
+      - name: Modify spec to include OpenCV/NumPy (avoid Chinese in PowerShell)
         shell: powershell
         run: |
           $spec = Get-Content 'MonitorApp.spec' -Raw
@@ -45,12 +45,19 @@ jobs:
           a.hiddenimports.extend(numpy_hiddenimports)
           "@
           $spec = $spec -replace '(?<=a = Analysis\([\s\S]*?\))', "`n`n$insert"
-          $spec = $spec -replace "name='MonitorApp'", "name='屏幕数值监控报警'"
-          Set-Content -Path '屏幕数值监控报警.spec' -Value $spec
+          # 保持英文名，避免编码问题
+          Set-Content -Path 'MonitorApp.spec' -Value $spec
 
       - name: Build EXE
         run: |
-          pyinstaller 屏幕数值监控报警.spec
+          pyinstaller MonitorApp.spec
+
+      - name: Rename EXE to Chinese name
+        shell: powershell
+        run: |
+          if (Test-Path "dist\MonitorApp.exe") {
+              Rename-Item -Path "dist\MonitorApp.exe" -NewName "屏幕数值监控报警.exe"
+          }
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
