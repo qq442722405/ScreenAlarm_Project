@@ -153,7 +153,7 @@ class ActivationDialog(QDialog):
         form.addRow("激活码：", self.code_input)
         layout.addLayout(form)
 
-        info = QLabel("本软件由 XXX 开发，激活码请通过正规渠道获取\n如有问题请联系：support@example.com")
+        info = QLabel("闲鱼小尾巴")
         info.setStyleSheet("color: #ffaa00; font-size: 11px;")
         info.setWordWrap(True)
         layout.addWidget(info)
