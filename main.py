@@ -40,10 +40,8 @@ except ImportError:
 
 # ---------- 授权相关常量 ----------
 LICENSE_FILE = "license.dat"
-# 【重要】请将此密钥改为您自己的 32 字节字符串（32个字符）
-# 必须与 activation_generator.html 和 test.py 中的 SECRET_KEY 完全一致！
-SECRET_KEY = b"your-32-byte-secret-key-here!!"  # 请修改此处
-
+# 请将下面密钥改为您的 32 字节密钥（例如 b"abcd1234efgh5678ijkl9012mnop3456"）
+SECRET_KEY = b"abcd1234efgh5678ijkl9012mnop3456"  # 示例密钥，请修改！
 
 class LicenseManager:
     def __init__(self):
@@ -85,22 +83,18 @@ class LicenseManager:
             return None
 
     def save_license(self, activation_code):
-        """保存许可（永久有效），但激活时必须与激活码中的小时匹配"""
         decrypted = self._decrypt_data(activation_code)
         if decrypted is None:
             raise ValueError("激活码无效")
         data = json.loads(decrypted)
-        # 验证机器码
         if data.get("machine_code") != self.machine_code:
             raise ValueError("机器码不匹配")
-        # 验证小时（激活时的小时必须与激活码中记录的小时一致）
         hour = data.get("hour")
         if hour is None:
             raise ValueError("激活码缺少小时信息")
         current_hour = datetime.now().hour
         if hour != current_hour:
-            raise ValueError("激活码与当前小时不匹配，请在生成激活码的小时内激活")
-        # 保存许可，永久有效，后续不再检查小时
+            raise ValueError(f"激活码与当前小时不匹配，请在 {hour} 点激活")
         license_data = {
             "machine_code": self.machine_code,
             "activated_at": datetime.now().isoformat(),
@@ -111,7 +105,6 @@ class LicenseManager:
             f.write(encrypted)
 
     def load_license(self):
-        """加载许可，只检查机器码和永久标志"""
         if not os.path.exists(LICENSE_FILE):
             return None
         try:
@@ -158,7 +151,6 @@ class ActivationDialog(QDialog):
         form.addRow("激活码：", self.code_input)
         layout.addLayout(form)
 
-        # ---------- 小尾巴 ----------
         info = QLabel("小尾巴")
         info.setStyleSheet("color: #ffaa00; font-size: 11px;")
         info.setAlignment(Qt.AlignCenter)
