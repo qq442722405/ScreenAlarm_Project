@@ -40,8 +40,9 @@ except ImportError:
 
 # ---------- 授权相关常量 ----------
 LICENSE_FILE = "license.dat"
-# 请将下面密钥改为您的 32 字节密钥（例如 b"abcd1234efgh5678ijkl9012mnop3456"）
-SECRET_KEY = b"abcd1234efgh5678ijkl9012mnop3456"  # 示例密钥，请修改！
+# ★★★ 请将此密钥改为您自己的 32 字节字符串（例如 b"abcd1234efgh5678ijkl9012mnop3456"） ★★★
+# 务必与 activation_generator.html 和 test.py 中的密钥完全一致！
+SECRET_KEY = b"abcd1234efgh5678ijkl9012mnop3456"  # 示例，请修改！
 
 class LicenseManager:
     def __init__(self):
@@ -170,7 +171,9 @@ class ActivationDialog(QDialog):
         return self.code_input.text().strip()
 
 
-# ========== 原有的辅助类 ==========
+# ========== 原有功能类（AlarmSoundPlayer、CoordinatePicker、MiniWindow、TrendChartWidget、MainWindow）==========
+# 以下为完整实现，直接复制使用
+
 class AlarmSoundPlayer:
     def __init__(self):
         self.sound_file = None
@@ -348,7 +351,6 @@ class MainWindow(QMainWindow):
                         if data.get("machine_code") != lm.machine_code:
                             QMessageBox.warning(None, "错误", "激活码与本机不匹配")
                             continue
-                        # 验证小时
                         hour = data.get("hour")
                         if hour is None:
                             QMessageBox.warning(None, "错误", "激活码缺少小时信息")
@@ -357,7 +359,6 @@ class MainWindow(QMainWindow):
                         if hour != current_hour:
                             QMessageBox.warning(None, "错误", f"激活码与当前小时不匹配，请在 {hour} 点激活")
                             continue
-                        # 保存激活
                         lm.save_license(code)
                         break
                     except Exception as e:
@@ -563,7 +564,6 @@ class MainWindow(QMainWindow):
         main_layout = QVBoxLayout(central)
         main_layout.setSpacing(8)
 
-        # 顶部控制区
         top = QHBoxLayout()
         self.btn_start = QPushButton("▶ 启动监控")
         self.btn_start.setObjectName("btn_start_stop")
@@ -605,7 +605,6 @@ class MainWindow(QMainWindow):
 
         main_layout.addLayout(top)
 
-        # 参数栏
         params = QHBoxLayout()
         params.addWidget(QLabel("检测间隔(ms):"))
         self.interval_spin = QSpinBox()
@@ -637,7 +636,6 @@ class MainWindow(QMainWindow):
         params.addStretch()
         main_layout.addLayout(params)
 
-        # 表格 + 趋势图
         splitter = QSplitter(Qt.Vertical)
         self.table = QTableWidget()
         self.table.setColumnCount(10)
@@ -657,11 +655,9 @@ class MainWindow(QMainWindow):
         splitter.setSizes([500, 150])
         main_layout.addWidget(splitter)
 
-        # 状态栏
         self.status_label = QLabel("就绪")
         self.statusBar().addWidget(self.status_label)
 
-        # 初始化表格行数据
         self.current_row_data = []
 
     # ---------- 表格操作 ----------
