@@ -153,9 +153,10 @@ class ActivationDialog(QDialog):
         form.addRow("激活码：", self.code_input)
         layout.addLayout(form)
 
-        info = QLabel("闲鱼小尾巴")
+        # ---------- 小尾巴 ----------
+        info = QLabel("小尾巴")
         info.setStyleSheet("color: #ffaa00; font-size: 11px;")
-        info.setWordWrap(True)
+        info.setAlignment(Qt.AlignCenter)
         layout.addWidget(info)
 
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
@@ -169,7 +170,7 @@ class ActivationDialog(QDialog):
         QMessageBox.information(self, "复制成功", "机器码已复制到剪贴板")
 
     def get_activation_code(self):
-        return self.code_input.text().strip()
+        return self.code_input.text().strip()   # 自动去除空格
 
 
 # ========== 原有的辅助类 ==========
