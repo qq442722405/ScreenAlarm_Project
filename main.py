@@ -40,16 +40,13 @@ except ImportError:
 
 # ---------- 授权相关常量 ----------
 LICENSE_FILE = "license.dat"
-# 【重要】请将此密钥改为您自己的 32 字节字符串（32个字符）
-SECRET_KEY = b"your-32-byte-secret-key-here!!"  # 必须替换！
-
+SECRET_KEY = b"your-32-byte-secret-key-here!!"  # 请修改为您的32字节密钥
 
 class LicenseManager:
     def __init__(self):
         self.machine_code = self._get_machine_code()
 
     def _get_machine_code(self):
-        """生成唯一机器码（基于硬件信息）"""
         mac = uuid.getnode()
         mac_str = ':'.join(('%012X' % mac)[i:i+2] for i in range(0, 12, 2))
         try:
@@ -93,7 +90,7 @@ class LicenseManager:
             "machine_code": self.machine_code,
             "activation_code": activation_code,
             "activated_at": datetime.now().isoformat(),
-            "expiry": data.get("expiry", "")
+            "hour": data.get("hour", "")   # 存储生成时的小时标记
         }
         encrypted = self._encrypt_data(json.dumps(license_data))
         with open(LICENSE_FILE, "w") as f:
@@ -111,13 +108,18 @@ class LicenseManager:
             data = json.loads(decrypted)
             if data.get("machine_code") != self.machine_code:
                 return None
-            expiry_str = data.get("expiry", "")
-            if expiry_str:
-                today = datetime.now().date()
+            # 验证小时有效性
+            hour_str = data.get("hour", "")
+            if hour_str:
                 try:
-                    expiry_date = datetime.strptime(expiry_str, "%Y-%m-%d").date()
-                    if today > expiry_date:
-                        return None
+                    # 格式: "YYYY-MM-DD HH" 例如 "2026-07-10 07"
+                    valid_dt = datetime.strptime(hour_str, "%Y-%m-%d %H")
+                    now = datetime.now()
+                    # 比较日期和小时是否相同
+                    if now.year == valid_dt.year and now.month == valid_dt.month and now.day == valid_dt.day and now.hour == valid_dt.hour:
+                        pass  # 有效
+                    else:
+                        return None  # 不在有效小时内
                 except:
                     return None
             return data
@@ -153,7 +155,7 @@ class ActivationDialog(QDialog):
         form.addRow("激活码：", self.code_input)
         layout.addLayout(form)
 
-        # ---------- 小尾巴 ----------
+        # 小尾巴
         info = QLabel("小尾巴")
         info.setStyleSheet("color: #ffaa00; font-size: 11px;")
         info.setAlignment(Qt.AlignCenter)
@@ -170,7 +172,7 @@ class ActivationDialog(QDialog):
         QMessageBox.information(self, "复制成功", "机器码已复制到剪贴板")
 
     def get_activation_code(self):
-        return self.code_input.text().strip()   # 自动去除空格
+        return self.code_input.text().strip()
 
 
 # ========== 原有的辅助类 ==========
