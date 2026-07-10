@@ -40,7 +40,10 @@ except ImportError:
 
 # ---------- 授权相关常量 ----------
 LICENSE_FILE = "license.dat"
-SECRET_KEY = b"your-32-byte-secret-key-here!!"  # 请修改为您的32字节密钥
+# 【重要】请将此密钥改为您自己的 32 字节字符串（32个字符）
+# 必须与 activation_generator.html 和 test.py 中的 SECRET_KEY 完全一致！
+SECRET_KEY = b"your-32-byte-secret-key-here!!"  # 请修改此处
+
 
 class LicenseManager:
     def __init__(self):
@@ -82,21 +85,33 @@ class LicenseManager:
             return None
 
     def save_license(self, activation_code):
+        """保存许可（永久有效），但激活时必须与激活码中的小时匹配"""
         decrypted = self._decrypt_data(activation_code)
         if decrypted is None:
             raise ValueError("激活码无效")
         data = json.loads(decrypted)
+        # 验证机器码
+        if data.get("machine_code") != self.machine_code:
+            raise ValueError("机器码不匹配")
+        # 验证小时（激活时的小时必须与激活码中记录的小时一致）
+        hour = data.get("hour")
+        if hour is None:
+            raise ValueError("激活码缺少小时信息")
+        current_hour = datetime.now().hour
+        if hour != current_hour:
+            raise ValueError("激活码与当前小时不匹配，请在生成激活码的小时内激活")
+        # 保存许可，永久有效，后续不再检查小时
         license_data = {
             "machine_code": self.machine_code,
-            "activation_code": activation_code,
             "activated_at": datetime.now().isoformat(),
-            "hour": data.get("hour", "")   # 存储生成时的小时标记
+            "permanent": True
         }
         encrypted = self._encrypt_data(json.dumps(license_data))
         with open(LICENSE_FILE, "w") as f:
             f.write(encrypted)
 
     def load_license(self):
+        """加载许可，只检查机器码和永久标志"""
         if not os.path.exists(LICENSE_FILE):
             return None
         try:
@@ -108,20 +123,8 @@ class LicenseManager:
             data = json.loads(decrypted)
             if data.get("machine_code") != self.machine_code:
                 return None
-            # 验证小时有效性
-            hour_str = data.get("hour", "")
-            if hour_str:
-                try:
-                    # 格式: "YYYY-MM-DD HH" 例如 "2026-07-10 07"
-                    valid_dt = datetime.strptime(hour_str, "%Y-%m-%d %H")
-                    now = datetime.now()
-                    # 比较日期和小时是否相同
-                    if now.year == valid_dt.year and now.month == valid_dt.month and now.day == valid_dt.day and now.hour == valid_dt.hour:
-                        pass  # 有效
-                    else:
-                        return None  # 不在有效小时内
-                except:
-                    return None
+            if not data.get("permanent", False):
+                return None
             return data
         except:
             return None
@@ -155,7 +158,7 @@ class ActivationDialog(QDialog):
         form.addRow("激活码：", self.code_input)
         layout.addLayout(form)
 
-        # 小尾巴
+        # ---------- 小尾巴 ----------
         info = QLabel("小尾巴")
         info.setStyleSheet("color: #ffaa00; font-size: 11px;")
         info.setAlignment(Qt.AlignCenter)
@@ -182,7 +185,7 @@ class AlarmSoundPlayer:
         if PYGAME_AVAILABLE:
             try:
                 pygame.mixer.init()
-                self.sound_file = "alarm.wav"  # 默认
+                self.sound_file = "alarm.wav"
             except:
                 pass
         self.playing = False
@@ -328,7 +331,6 @@ class TrendChartWidget(QWidget):
                              int(points[i+1][0]), int(points[i+1][1]))
 
 
-# ========== 主窗口 ==========
 class MainWindow(QMainWindow):
     def __init__(self):
         # ---------- 授权验证 ----------
@@ -354,26 +356,25 @@ class MainWindow(QMainWindow):
                         if data.get("machine_code") != lm.machine_code:
                             QMessageBox.warning(None, "错误", "激活码与本机不匹配")
                             continue
-                        expiry_str = data.get("expiry", "")
-                        if expiry_str:
-                            today = datetime.now().date()
-                            try:
-                                expiry_date = datetime.strptime(expiry_str, "%Y-%m-%d").date()
-                                if today > expiry_date:
-                                    QMessageBox.warning(None, "错误", "激活码已过期")
-                                    continue
-                            except:
-                                QMessageBox.warning(None, "错误", "激活码日期格式错误")
-                                continue
+                        # 验证小时
+                        hour = data.get("hour")
+                        if hour is None:
+                            QMessageBox.warning(None, "错误", "激活码缺少小时信息")
+                            continue
+                        current_hour = datetime.now().hour
+                        if hour != current_hour:
+                            QMessageBox.warning(None, "错误", f"激活码与当前小时不匹配，请在 {hour} 点激活")
+                            continue
+                        # 保存激活
                         lm.save_license(code)
                         break
-                    except:
-                        QMessageBox.warning(None, "错误", "激活码格式错误")
+                    except Exception as e:
+                        QMessageBox.warning(None, "错误", f"激活失败: {str(e)}")
                         continue
                 else:
                     sys.exit(0)
 
-        # ---------- 初始化UI ----------
+        # ---------- 原有UI初始化 ----------
         super().__init__()
         self.setWindowTitle("屏幕数字监控报警系统")
         self.setWindowFlags(self.windowFlags() | Qt.WindowStaysOnTopHint)
@@ -392,7 +393,6 @@ class MainWindow(QMainWindow):
         self.record_interval_minutes = 60
         self.display_mode = 'interval'
 
-        # 监控状态
         self.monitoring = False
         self.monitor_thread = None
         self.config_file = "monitor_config.json"
@@ -421,7 +421,6 @@ class MainWindow(QMainWindow):
 
         QTimer.singleShot(200, self._init_ocr_reader)
 
-        # 设置样式
         self.setStyleSheet("""
             QMainWindow { background-color: #1e1e2e; }
             QLabel { color: #e0e0f0; font-family: "Microsoft YaHei"; }
@@ -681,27 +680,21 @@ class MainWindow(QMainWindow):
     def set_coordinates(self, x, y, w, h):
         row = self.table.rowCount()
         self.table.insertRow(row)
-        # 启用（复选框）
         chk = QCheckBox()
         chk.setChecked(True)
         chk.stateChanged.connect(lambda state, r=row: self._on_enable_changed(r, state))
         self.table.setCellWidget(row, 0, chk)
-        # 名称
         self.table.setItem(row, 1, QTableWidgetItem(f"区域{row+1}"))
-        # 坐标
         self.table.setItem(row, 2, QTableWidgetItem(str(x)))
         self.table.setItem(row, 3, QTableWidgetItem(str(y)))
         self.table.setItem(row, 4, QTableWidgetItem(str(w)))
         self.table.setItem(row, 5, QTableWidgetItem(str(h)))
-        # 下限/上限
         self.table.setItem(row, 6, QTableWidgetItem("0"))
         self.table.setItem(row, 7, QTableWidgetItem("100"))
-        # 灵敏度
         sens_spin = QSpinBox()
         sens_spin.setRange(1, 10)
         sens_spin.setValue(5)
         self.table.setCellWidget(row, 8, sens_spin)
-        # 状态
         status_item = QTableWidgetItem("待启动")
         status_item.setForeground(QBrush(QColor(200, 200, 200)))
         self.table.setItem(row, 9, status_item)
@@ -718,16 +711,13 @@ class MainWindow(QMainWindow):
             return
         for r in rows:
             self.table.removeRow(r)
-            # 清理相关数据
             self.row_enabled.pop(r, None)
             self.row_alarm.pop(r, None)
             self.row_muted.pop(r, None)
             self.row_sensitivity.pop(r, None)
-        # 重建映射（因为删除后行号变化，简单重建）
         self._rebuild_row_maps()
 
     def _rebuild_row_maps(self):
-        # 根据当前表格重建映射
         self.row_enabled.clear()
         self.row_alarm.clear()
         self.row_muted.clear()
@@ -752,17 +742,14 @@ class MainWindow(QMainWindow):
     def _on_table_item_changed(self, item):
         row = item.row()
         col = item.column()
-        if col in (6, 7):  # 下限/上限
+        if col in (6, 7):
             try:
                 float(item.text())
             except:
                 QMessageBox.warning(self, "错误", "请输入有效数字")
                 item.setText("0")
-        if col == 1:  # 名称
-            pass
 
     def _on_selection_changed(self):
-        # 选中行时更新趋势图显示
         selected = self.table.selectedItems()
         if selected:
             row = selected[0].row()
@@ -784,7 +771,6 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "错误", "请先添加监控区域")
             return
 
-        # 构建监控列表
         monitors = []
         for r in range(self.table.rowCount()):
             try:
@@ -815,18 +801,15 @@ class MainWindow(QMainWindow):
         self.monitor_thread = MonitorThread(monitors)
         self.monitor_thread.set_interval(self.detect_interval)
         self.monitor_thread.set_alarm_loop(self.loop_enabled)
-        # 传递共享的OCR reader (如果已加载)
         if hasattr(self, 'reader') and self.reader:
             self.monitor_thread.set_reader(self.reader)
 
-        # 连接信号
         self.monitor_thread.value_updated.connect(self.on_value_updated)
         self.monitor_thread.alarm_triggered.connect(self.on_alarm_triggered)
         self.monitor_thread.status_updated.connect(self.on_status_updated)
         self.monitor_thread.ocr_status.connect(self.on_ocr_status)
         self.monitor_thread.download_progress.connect(self.on_download_progress)
 
-        # 设置获取启用状态的函数
         self.monitor_thread.get_row_enabled = lambda r: self.row_enabled.get(r, True)
 
         self.monitor_thread.start()
@@ -835,8 +818,6 @@ class MainWindow(QMainWindow):
         self.btn_start.setObjectName("")
         self.btn_start.setStyleSheet("background: #b03a3a; color: white;")
         self.status_label.setText("监控运行中...")
-
-        # 开启记录定时器
         self.record_timer.start(self.record_interval_minutes * 60 * 1000)
 
     def stop_monitor(self):
@@ -850,33 +831,27 @@ class MainWindow(QMainWindow):
         self.btn_start.setStyleSheet("")
         self.status_label.setText("已停止")
         self.record_timer.stop()
-        # 清空报警状态
         for r in range(self.table.rowCount()):
             self.row_alarm[r] = False
             self._set_status_text(r, "已停止", QColor(200, 200, 200))
 
     # ---------- 信号处理 ----------
     def on_value_updated(self, row, value):
-        # 更新表格显示当前值
         status_item = self.table.item(row, 9)
         if not status_item:
             return
-        # 在状态栏显示值
         status_text = f"当前值: {value:.2f}"
         status_item.setText(status_text)
         status_item.setForeground(QBrush(QColor(100, 200, 255)))
-        # 记录历史
         if row not in self.value_history_interval:
             self.value_history_interval[row] = []
         self.value_history_interval[row].append(value)
         if len(self.value_history_interval[row]) > 200:
             self.value_history_interval[row].pop(0)
-        # 更新趋势图（如果选中该行）
         selected = self.table.selectedItems()
         if selected and selected[0].row() == row:
             self.chart_widget.add_point(value)
 
-        # 记录变化量（与上次值比较）
         if row not in self.last_recorded_value:
             self.last_recorded_value[row] = value
         else:
@@ -891,14 +866,11 @@ class MainWindow(QMainWindow):
     def on_alarm_triggered(self, row, name, value, lower, upper):
         if self.row_muted.get(row, False):
             return
-        # 播放报警音
         if not self.alarm_playing:
             self.alarm_player.play()
             self.alarm_playing = True
-        # 更新状态
         self.row_alarm[row] = True
         self._set_status_text(row, f"⚠ 报警! 值={value:.2f}", QColor(255, 80, 80))
-        # 可选：弹出提示
         if not self.mini_window:
             QMessageBox.information(self, "报警", f"区域 '{name}' 数值 {value:.2f} 超出范围 [{lower}, {upper}]")
 
@@ -923,10 +895,9 @@ class MainWindow(QMainWindow):
         self.status_label.setText(msg)
 
     def on_download_progress(self, progress):
-        pass  # 可选显示进度
+        pass
 
     def _update_status_display(self):
-        # 更新报警状态显示（如闪烁等）
         pass
 
     # ---------- 配置加载/保存 ----------
@@ -935,34 +906,27 @@ class MainWindow(QMainWindow):
             try:
                 with open(self.config_file, 'r') as f:
                     data = json.load(f)
-                # 清空表格
                 self.table.setRowCount(0)
                 for mon in data.get('monitors', []):
                     row = self.table.rowCount()
                     self.table.insertRow(row)
-                    # 启用
                     chk = QCheckBox()
                     chk.setChecked(mon.get('enabled', True))
                     chk.stateChanged.connect(lambda state, r=row: self._on_enable_changed(r, state))
                     self.table.setCellWidget(row, 0, chk)
-                    # 名称
                     self.table.setItem(row, 1, QTableWidgetItem(mon.get('name', f"区域{row+1}")))
-                    # 坐标
                     self.table.setItem(row, 2, QTableWidgetItem(str(mon.get('x', 0))))
                     self.table.setItem(row, 3, QTableWidgetItem(str(mon.get('y', 0))))
                     self.table.setItem(row, 4, QTableWidgetItem(str(mon.get('width', 100))))
                     self.table.setItem(row, 5, QTableWidgetItem(str(mon.get('height', 100))))
                     self.table.setItem(row, 6, QTableWidgetItem(str(mon.get('lower', 0))))
                     self.table.setItem(row, 7, QTableWidgetItem(str(mon.get('upper', 100))))
-                    # 灵敏度
                     sens_spin = QSpinBox()
                     sens_spin.setRange(1, 10)
                     sens_spin.setValue(mon.get('sensitivity', 5))
                     self.table.setCellWidget(row, 8, sens_spin)
-                    # 状态
                     self.table.setItem(row, 9, QTableWidgetItem("待启动"))
                 self._rebuild_row_maps()
-                # 其他设置
                 self.interval_spin.setValue(data.get('interval', 1000))
                 self.loop_check.setChecked(data.get('loop', True))
                 self.record_spin.setValue(data.get('record_interval', 60))
@@ -1039,7 +1003,6 @@ class MainWindow(QMainWindow):
 
     def on_mode_changed(self, idx):
         self.display_mode = 'interval' if idx == 0 else 'change'
-        # 更新趋势图显示
         selected = self.table.selectedItems()
         if selected:
             row = selected[0].row()
@@ -1056,12 +1019,6 @@ class MainWindow(QMainWindow):
             self.mini_window = None
         else:
             self.mini_window = MiniWindow(self)
-            # 连接更新信号
-            def update_mini(value):
-                if self.mini_window:
-                    self.mini_window.update_value(f"最新值: {value:.2f}")
-            # 这里简单起见，每次更新时调用
-            # 可以用一个槽函数
 
     def toggle_chart(self):
         self.chart_visible = not self.chart_visible
@@ -1075,11 +1032,9 @@ class MainWindow(QMainWindow):
         QMessageBox.information(self, "提示", "历史数据已清除")
 
     def record_interval_value(self):
-        # 定期记录当前值（可用于日志）
         pass
 
     def _init_ocr_reader(self):
-        # 初始化OCR（可与monitor共享）
         try:
             import easyocr
             self.reader = easyocr.Reader(['en'], gpu=False, verbose=False)
@@ -1088,7 +1043,6 @@ class MainWindow(QMainWindow):
             self.reader = None
             self.status_label.setText(f"OCR加载失败: {e}")
 
-    # 键盘事件
     def keyPressEvent(self, event):
         if event.key() == Qt.Key_Escape:
             self.close()
