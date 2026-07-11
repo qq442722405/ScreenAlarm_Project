@@ -39,7 +39,7 @@ except ImportError:
 
 # ---------- 授权相关常量 ----------
 LICENSE_FILE = "license.dat"
-SECRET_KEY = b"your-32-byte-secret-key-here!!"  # 请替换为您的32字节密钥
+SECRET_KEY = b"1a2w3e9r8t5g2s1k8u4g5f3x2c1v5f8d"  # 请替换为您的32字节密钥
 # 激活码有效期（天），设为0表示永不过期
 VALIDITY_DAYS = 365  # 1年
 
