@@ -1,2 +1,9 @@
-429: Too Many Requests
-For more on scraping GitHub and how it may affect your rights, please review our Terms of Service (https://docs.github.com/en/site-policy/github-terms/github-terms-of-service).
+PySide6>=6.4.0
+easyocr>=1.7.0
+opencv-python>=4.7.0
+mss>=9.0.0
+numpy>=1.24.0
+Pillow>=9.5.0
+pygame>=2.5.0
+pycryptodome>=3.15.0
+flask>=2.2.0
