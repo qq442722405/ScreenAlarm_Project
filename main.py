@@ -626,7 +626,10 @@ class TrendChartWidget(QWidget):
             painter.setFont(QFont("Arial", 8))
             painter.drawText(chart_rect.left(), chart_rect.bottom() + 18, f"{datetime.fromtimestamp(timestamps[0]).strftime('%H:%M')}")
             painter.drawText(chart_rect.right() - 60, chart_rect.bottom() + 18, f"{datetime.fromtimestamp(timestamps[-1]).strftime('%H:%M')}")
-            class MainWindow(QMainWindow):
+
+
+# ---------- 主窗口类 ----------
+class MainWindow(QMainWindow):
     def __init__(self):
         # ---------- 授权验证 ----------
         if not CRYPTO_AVAILABLE:
