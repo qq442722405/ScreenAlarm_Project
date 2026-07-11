@@ -39,10 +39,8 @@ except ImportError:
 
 # ---------- 授权相关常量 ----------
 LICENSE_FILE = "license.dat"
-SECRET_KEY = b"1a2w3e9r8t5g2s1k8u4g5f3x2c1v5f8d"  # 请替换为您的32字节密钥
-# 激活码有效期（天），设为0表示永不过期
-VALIDITY_DAYS = 365  # 1年
-
+# 请使用 generate_key.py 生成的密钥替换下面这行
+SECRET_KEY = b"your-32-byte-secret-key-here!!"  # 必须32字节
 
 class LicenseManager:
     def __init__(self):
@@ -84,12 +82,20 @@ class LicenseManager:
             return None
 
     def save_license(self, activation_code):
-        data = {
+        # 解密激活码获取有效期
+        decrypted = self._decrypt_data(activation_code)
+        if decrypted:
+            data = json.loads(decrypted)
+            expire_date = data.get("expire_date")
+        else:
+            expire_date = (datetime.now() + timedelta(days=365)).strftime("%Y-%m-%d")
+        save_data = {
             "machine_code": self.machine_code,
             "activation_code": activation_code,
+            "expire_date": expire_date,
             "activated_at": datetime.now().isoformat()
         }
-        encrypted = self._encrypt_data(json.dumps(data))
+        encrypted = self._encrypt_data(json.dumps(save_data))
         with open(LICENSE_FILE, "w") as f:
             f.write(encrypted)
 
@@ -105,18 +111,11 @@ class LicenseManager:
             data = json.loads(decrypted)
             if data.get("machine_code") != self.machine_code:
                 return None
-            # 检查激活码中的有效期
-            activation_code = data.get("activation_code", "")
-            # 从激活码中提取时间戳（前8位数字）
-            match = re.match(r'(\d{8})', activation_code)
-            if match:
-                code_date_str = match.group(1)
-                try:
-                    code_date = datetime.strptime(code_date_str, "%Y%m%d")
-                    if VALIDITY_DAYS > 0 and (datetime.now() - code_date).days > VALIDITY_DAYS:
-                        return None  # 已过期
-                except:
-                    pass
+            expire_date = data.get("expire_date")
+            if expire_date:
+                expire_dt = datetime.strptime(expire_date, "%Y-%m-%d")
+                if expire_dt < datetime.now():
+                    return None
             return data
         except:
             return None
@@ -124,19 +123,17 @@ class LicenseManager:
     def check(self):
         return self.load_license() is not None
 
-
 class ActivationDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("软件激活")
         self.setModal(True)
-        self.setFixedSize(450, 290)
+        self.setFixedSize(480, 300)
         layout = QVBoxLayout(self)
 
         lm = LicenseManager()
         self.machine_code_full = lm.machine_code
 
-        # 机器码 + 复制按钮
         machine_layout = QHBoxLayout()
         self.machine_label = QLabel(f"机器码：{self.machine_code_full[:16]}...")
         self.machine_label.setWordWrap(True)
@@ -148,9 +145,9 @@ class ActivationDialog(QDialog):
         machine_layout.addWidget(self.copy_btn)
         layout.addLayout(machine_layout)
 
-        # 小尾巴
-        self.note_label = QLabel("📌 小尾巴：软件仅限购买者个人使用，未经授权不得传播。")
-        self.note_label.setStyleSheet("color: #88aacc; font-size: 11px;")
+        # 小尾巴备注
+        self.note_label = QLabel("📌 小尾巴：本软件仅限购买者个人使用，未经授权不得传播。")
+        self.note_label.setStyleSheet("color: #88aacc; font-size: 11px; margin-top: 5px;")
         layout.addWidget(self.note_label)
 
         form = QFormLayout()
