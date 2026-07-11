@@ -42,9 +42,11 @@ LICENSE_FILE = "license.dat"
 # 请使用 generate_key.py 生成的密钥替换下面这行
 SECRET_KEY = b"your-32-byte-secret-key-here!!"  # 必须32字节
 
+
 class LicenseManager:
     def __init__(self):
         self.machine_code = self._get_machine_code()
+        self.license_data = None
 
     def _get_machine_code(self):
         mac = uuid.getnode()
@@ -81,24 +83,6 @@ class LicenseManager:
         except:
             return None
 
-    def save_license(self, activation_code):
-        # 解密激活码获取有效期
-        decrypted = self._decrypt_data(activation_code)
-        if decrypted:
-            data = json.loads(decrypted)
-            expire_date = data.get("expire_date")
-        else:
-            expire_date = (datetime.now() + timedelta(days=365)).strftime("%Y-%m-%d")
-        save_data = {
-            "machine_code": self.machine_code,
-            "activation_code": activation_code,
-            "expire_date": expire_date,
-            "activated_at": datetime.now().isoformat()
-        }
-        encrypted = self._encrypt_data(json.dumps(save_data))
-        with open(LICENSE_FILE, "w") as f:
-            f.write(encrypted)
-
     def load_license(self):
         if not os.path.exists(LICENSE_FILE):
             return None
@@ -120,20 +104,36 @@ class LicenseManager:
         except:
             return None
 
+    def save_license(self, activation_code, expire_date):
+        data = {
+            "machine_code": self.machine_code,
+            "activation_code": activation_code,
+            "expire_date": expire_date,
+            "activated_at": datetime.now().isoformat()
+        }
+        encrypted = self._encrypt_data(json.dumps(data))
+        with open(LICENSE_FILE, "w") as f:
+            f.write(encrypted)
+
     def check(self):
-        return self.load_license() is not None
+        self.license_data = self.load_license()
+        return self.license_data is not None
+
 
 class ActivationDialog(QDialog):
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, forced=False):
         super().__init__(parent)
         self.setWindowTitle("软件激活")
         self.setModal(True)
-        self.setFixedSize(480, 300)
+        self.setFixedSize(450, 320)
         layout = QVBoxLayout(self)
 
         lm = LicenseManager()
         self.machine_code_full = lm.machine_code
+        self.is_activated = lm.check()
+        self.lm = lm
 
+        # 机器码 + 复制按钮
         machine_layout = QHBoxLayout()
         self.machine_label = QLabel(f"机器码：{self.machine_code_full[:16]}...")
         self.machine_label.setWordWrap(True)
@@ -146,21 +146,37 @@ class ActivationDialog(QDialog):
         layout.addLayout(machine_layout)
 
         # 小尾巴备注
-        self.note_label = QLabel("📌 小尾巴：本软件仅限购买者个人使用，未经授权不得传播。")
-        self.note_label.setStyleSheet("color: #88aacc; font-size: 11px; margin-top: 5px;")
+        self.note_label = QLabel("📌 小尾巴：软件仅限购买者个人使用，未经授权不得传播。")
+        self.note_label.setStyleSheet("color: #88aacc; font-size: 11px;")
         layout.addWidget(self.note_label)
+
+        # 状态显示
+        self.status_label = QLabel()
+        if self.is_activated:
+            self.status_label.setText("✅ 当前设备已激活，有效期至：{}".format(lm.license_data.get("expire_date", "未知")))
+            self.status_label.setStyleSheet("color: #4ade80;")
+        else:
+            self.status_label.setText("❌ 未激活，请输入激活码")
+            self.status_label.setStyleSheet("color: #ff6b6b;")
+        layout.addWidget(self.status_label)
 
         form = QFormLayout()
         self.code_input = QLineEdit()
-        self.code_input.setPlaceholderText("请输入激活码")
+        self.code_input.setPlaceholderText("请输入激活码" if not self.is_activated else "输入新激活码重新激活")
         form.addRow("激活码：", self.code_input)
         layout.addLayout(form)
 
-        self.info_label = QLabel("请联系开发者获取激活码")
+        self.info_label = QLabel("请联系开发者获取激活码" if not self.is_activated else "如需重新激活，请输入新激活码")
         self.info_label.setStyleSheet("color: #ffaa00;")
         layout.addWidget(self.info_label)
 
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        if self.is_activated:
+            buttons.button(QDialogButtonBox.Ok).setText("重新激活")
+            buttons.button(QDialogButtonBox.Cancel).setText("退出")
+        else:
+            buttons.button(QDialogButtonBox.Ok).setText("激活")
+            buttons.button(QDialogButtonBox.Cancel).setText("退出")
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
@@ -603,6 +619,48 @@ class TrendChartWidget(QWidget):
 
 class MainWindow(QMainWindow):
     def __init__(self):
+        # ---------- 授权验证（强制显示激活窗口） ----------
+        if not CRYPTO_AVAILABLE:
+            QMessageBox.critical(None, "错误", "加密库未安装，请安装 pycryptodome")
+            sys.exit(1)
+
+        lm = LicenseManager()
+        # 无论是否已激活，都弹出激活对话框
+        dialog = ActivationDialog(None, forced=True)
+        while True:
+            if dialog.exec() == QDialog.Accepted:
+                code = dialog.get_activation_code()
+                if not code:
+                    QMessageBox.warning(None, "错误", "激活码不能为空")
+                    continue
+                decrypted = lm._decrypt_data(code)
+                if decrypted is None:
+                    QMessageBox.warning(None, "错误", "激活码无效")
+                    continue
+                try:
+                    data = json.loads(decrypted)
+                    machine = data.get("machine_code")
+                    expire = data.get("expire_date")
+                    if machine == lm.machine_code:
+                        lm.save_license(code, expire)
+                        QMessageBox.information(None, "成功", "激活成功！有效期至：" + expire)
+                        break
+                    else:
+                        QMessageBox.warning(None, "错误", "激活码与本机不匹配")
+                        continue
+                except:
+                    QMessageBox.warning(None, "错误", "激活码格式错误")
+                    continue
+            else:
+                # 用户取消
+                if lm.check():
+                    # 如果已经激活，取消则正常启动
+                    break
+                else:
+                    # 未激活且取消，退出程序
+                    sys.exit(0)
+
+        # ---------- 原有初始化 ----------
         super().__init__()
         self.setWindowTitle("屏幕数字监控报警系统")
         self.setWindowFlags(self.windowFlags() | Qt.WindowStaysOnTopHint)
@@ -613,6 +671,17 @@ class MainWindow(QMainWindow):
 
         self.test_reader = None
         self.reader_loading = False
+
+        # 两种记录数据
+        self.value_history_interval = {}
+        self.value_history_change = {}
+        self.last_recorded_value = {}
+
+        self.record_timer = QTimer()
+        self.record_timer.timeout.connect(self.record_interval_value)
+        self.record_interval_minutes = 60
+
+        self.display_mode = 'interval'
 
         self.setStyleSheet("""
             QMainWindow { background-color: #1e1e2e; }
@@ -665,6 +734,10 @@ class MainWindow(QMainWindow):
             QPushButton#btn_mini:hover { background-color: #5a7a9a; }
             QPushButton#btn_chart_toggle { background-color: #4a4a6a; }
             QPushButton#btn_chart_toggle:hover { background-color: #5a5a7a; }
+            QPushButton#btn_clear_history {
+                background-color: #7a5a4a;
+            }
+            QPushButton#btn_clear_history:hover { background-color: #9a6a5a; }
             QSlider::groove:horizontal {
                 height: 6px;
                 background: #363650;
@@ -690,6 +763,20 @@ class MainWindow(QMainWindow):
                 min-height: 20px;
             }
             QSpinBox:hover { border-color: #4a9eff; }
+            QComboBox {
+                background-color: #363650;
+                color: #e0e0f0;
+                border: 1px solid #4a4a6a;
+                border-radius: 6px;
+                padding: 4px 8px;
+                min-height: 20px;
+            }
+            QComboBox:hover { border-color: #4a9eff; }
+            QComboBox QAbstractItemView {
+                background-color: #2a2a42;
+                color: #e0e0f0;
+                selection-background-color: #4a9eff;
+            }
             QProgressBar {
                 background-color: #27273d;
                 border: 1px solid #33334a;
@@ -744,7 +831,6 @@ class MainWindow(QMainWindow):
         self.config_file = "monitor_config.json"
         self.loop_enabled = True
         self.detect_interval = 1000
-        self.value_history = {}
         self.current_row_data = []
 
         self.alarm_player = AlarmSoundPlayer()
@@ -766,6 +852,7 @@ class MainWindow(QMainWindow):
         self.table.itemChanged.connect(self._on_table_item_changed)
         self.table.itemSelectionChanged.connect(self._on_selection_changed)
 
+        # 延迟加载 OCR 模型（增加错误处理）
         QTimer.singleShot(200, self._init_ocr_reader)
 
     def _init_ocr_reader(self):
@@ -776,26 +863,34 @@ class MainWindow(QMainWindow):
 
         class LoaderThread(QThread):
             finished = Signal(object)
+
             def run(self):
                 try:
                     import easyocr
+                    # 尝试加载，如果网络不通会抛出异常
                     reader = easyocr.Reader(['en'], gpu=False, verbose=False)
                     self.finished.emit(reader)
                 except Exception as e:
-                    print(f"OCR加载异常: {e}")
-                    self.finished.emit(None)
+                    # 捕获所有异常，返回错误信息
+                    self.finished.emit(e)
 
         self.loader_thread = LoaderThread()
         self.loader_thread.finished.connect(self._on_reader_loaded)
         self.loader_thread.start()
 
-    def _on_reader_loaded(self, reader):
+    def _on_reader_loaded(self, result):
         self.reader_loading = False
-        if reader is not None:
-            self.test_reader = reader
-            self.set_ocr_status("就绪 ✅", True)
+        if isinstance(result, Exception):
+            # 加载失败，显示详细错误信息
+            error_msg = str(result)
+            self.set_ocr_status(f"加载失败: {error_msg[:100]}", False)
+            QMessageBox.warning(self, "OCR引擎加载失败",
+                                f"无法加载 OCR 模型，请检查网络连接。\n\n错误详情：{error_msg}\n\n"
+                                "首次使用需要联网下载模型文件（约200MB），请确保网络畅通。\n"
+                                "如果网络正常，请尝试重启程序。")
         else:
-            self.set_ocr_status("加载失败，请检查网络后重启", False)
+            self.test_reader = result
+            self.set_ocr_status("就绪 ✅", True)
 
     # ---------- 灵敏度控件 ----------
     def create_sensitivity_widget(self, row, value=5):
