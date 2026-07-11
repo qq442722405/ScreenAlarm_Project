@@ -124,7 +124,7 @@ class ActivationDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("软件激活")
         self.setModal(True)
-        self.setFixedSize(450, 320)
+        self.setFixedSize(450, 360)
         layout = QVBoxLayout(self)
 
         lm = LicenseManager()
@@ -148,12 +148,7 @@ class ActivationDialog(QDialog):
         layout.addWidget(self.note_label)
 
         self.status_label = QLabel()
-        if self.is_activated:
-            self.status_label.setText(f"✅ 当前设备已激活，有效期至：{lm.license_data.get('expire_date', '未知')}")
-            self.status_label.setStyleSheet("color: #4ade80;")
-        else:
-            self.status_label.setText("❌ 未激活，请输入激活码")
-            self.status_label.setStyleSheet("color: #ff6b6b;")
+        self._update_status_label()
         layout.addWidget(self.status_label)
 
         form = QFormLayout()
@@ -166,16 +161,38 @@ class ActivationDialog(QDialog):
         self.info_label.setStyleSheet("color: #ffaa00;")
         layout.addWidget(self.info_label)
 
-        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        # 按钮区域
+        button_box = QDialogButtonBox()
         if self.is_activated:
-            buttons.button(QDialogButtonBox.Ok).setText("重新激活")
-            buttons.button(QDialogButtonBox.Cancel).setText("退出")
+            self.ok_btn = button_box.addButton("重新激活", QDialogButtonBox.AcceptRole)
+            self.cancel_btn = button_box.addButton("退出", QDialogButtonBox.RejectRole)
         else:
-            buttons.button(QDialogButtonBox.Ok).setText("激活")
-            buttons.button(QDialogButtonBox.Cancel).setText("退出")
-        buttons.accepted.connect(self.accept)
-        buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)
+            self.ok_btn = button_box.addButton("激活", QDialogButtonBox.AcceptRole)
+            self.cancel_btn = button_box.addButton("退出", QDialogButtonBox.RejectRole)
+
+        self.btn_deactivate = QPushButton("🔓 反激活")
+        self.btn_deactivate.setStyleSheet("color: #ff6b6b;")
+        self.btn_deactivate.clicked.connect(self.deactivate)
+        if not self.is_activated:
+            self.btn_deactivate.setEnabled(False)
+
+        btn_layout = QHBoxLayout()
+        btn_layout.addWidget(self.btn_deactivate)
+        btn_layout.addStretch()
+        btn_layout.addWidget(button_box)
+        layout.addLayout(btn_layout)
+
+        button_box.accepted.connect(self.accept)
+        button_box.rejected.connect(self.reject)
+
+    def _update_status_label(self):
+        if self.is_activated:
+            expire = self.lm.license_data.get('expire_date', '未知') if self.lm.license_data else '未知'
+            self.status_label.setText(f"✅ 当前设备已激活，有效期至：{expire}")
+            self.status_label.setStyleSheet("color: #4ade80;")
+        else:
+            self.status_label.setText("❌ 未激活，请输入激活码")
+            self.status_label.setStyleSheet("color: #ff6b6b;")
 
     def copy_machine_code(self):
         clipboard = QApplication.clipboard()
@@ -185,6 +202,32 @@ class ActivationDialog(QDialog):
 
     def get_activation_code(self):
         return self.code_input.text().strip()
+
+    def deactivate(self):
+        reply = QMessageBox.question(
+            self,
+            "确认反激活",
+            "确定要反激活吗？反激活后将删除本地授权文件，下次启动需要重新激活。",
+            QMessageBox.Yes | QMessageBox.No
+        )
+        if reply == QMessageBox.Yes:
+            if os.path.exists(LICENSE_FILE):
+                try:
+                    os.remove(LICENSE_FILE)
+                except Exception as e:
+                    QMessageBox.warning(self, "错误", f"删除授权文件失败：{e}")
+                    return
+            self.is_activated = False
+            self.lm.license_data = None
+            self._update_status_label()
+            self.code_input.clear()
+            self.code_input.setPlaceholderText("请输入激活码")
+            self.info_label.setText("请联系开发者获取激活码")
+            self.info_label.setStyleSheet("color: #ffaa00;")
+            self.ok_btn.setText("激活")
+            self.cancel_btn.setText("退出")
+            self.btn_deactivate.setEnabled(False)
+            QMessageBox.information(self, "反激活成功", "已删除授权文件。\n您可以输入新的激活码重新激活，或关闭程序。")
 
 
 class AlarmSoundPlayer:
@@ -628,7 +671,6 @@ class TrendChartWidget(QWidget):
             painter.drawText(chart_rect.right() - 60, chart_rect.bottom() + 18, f"{datetime.fromtimestamp(timestamps[-1]).strftime('%H:%M')}")
 
 
-# ---------- 主窗口类 ----------
 class MainWindow(QMainWindow):
     def __init__(self):
         # ---------- 授权验证 ----------
@@ -637,39 +679,42 @@ class MainWindow(QMainWindow):
             sys.exit(1)
 
         lm = LicenseManager()
-        dialog = ActivationDialog()
-        while True:
-            if dialog.exec() == QDialog.Accepted:
-                code = dialog.get_activation_code()
-                if not code:
-                    QMessageBox.warning(None, "错误", "激活码不能为空")
-                    continue
-                decrypted = lm._decrypt_data(code)
-                if decrypted is None:
-                    QMessageBox.warning(None, "错误", "激活码无效")
-                    continue
-                try:
-                    data = json.loads(decrypted)
-                    machine = data.get("machine_code")
-                    expire = data.get("expire_date")
-                    if machine == lm.machine_code:
-                        lm.save_license(code, expire)
-                        QMessageBox.information(None, "成功", f"激活成功！有效期至：{expire}")
-                        break
-                    else:
-                        QMessageBox.warning(None, "错误", "激活码与本机不匹配")
+        # 先检查是否已激活且有效
+        if lm.check():
+            # 已激活，直接进入主界面
+            pass
+        else:
+            # 未激活，显示激活对话框
+            dialog = ActivationDialog()
+            while True:
+                if dialog.exec() == QDialog.Accepted:
+                    code = dialog.get_activation_code()
+                    if not code:
+                        QMessageBox.warning(None, "错误", "激活码不能为空")
                         continue
-                except:
-                    QMessageBox.warning(None, "错误", "激活码格式错误")
-                    continue
-            else:
-                # 用户取消
-                if lm.check():
-                    break  # 已激活，允许跳过
+                    decrypted = lm._decrypt_data(code)
+                    if decrypted is None:
+                        QMessageBox.warning(None, "错误", "激活码无效")
+                        continue
+                    try:
+                        data = json.loads(decrypted)
+                        machine = data.get("machine_code")
+                        expire = data.get("expire_date")
+                        if machine == lm.machine_code:
+                            lm.save_license(code, expire)
+                            QMessageBox.information(None, "成功", f"激活成功！有效期至：{expire}")
+                            break
+                        else:
+                            QMessageBox.warning(None, "错误", "激活码与本机不匹配")
+                            continue
+                    except:
+                        QMessageBox.warning(None, "错误", "激活码格式错误")
+                        continue
                 else:
+                    # 用户取消
                     sys.exit(0)
 
-        # ---------- 原有初始化 ----------
+        # ---------- 主窗口初始化 ----------
         super().__init__()
         self.setWindowTitle("屏幕数字监控报警系统")
         self.setWindowFlags(self.windowFlags() | Qt.WindowStaysOnTopHint)
@@ -681,7 +726,6 @@ class MainWindow(QMainWindow):
         self.test_reader = None
         self.reader_loading = False
 
-        # 两种记录数据
         self.value_history_interval = {}
         self.value_history_change = {}
         self.last_recorded_value = {}
@@ -892,7 +936,9 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "OCR引擎加载失败",
                                 f"无法加载 OCR 模型，请检查网络连接。\n\n错误详情：{error_msg}\n\n"
                                 "首次使用需要联网下载模型文件（约200MB），请确保网络畅通。\n"
-                                "如果网络正常，请尝试重启程序。")
+                                "如果网络正常，请尝试重启程序。\n"
+                                "您也可以手动下载模型文件并放到 ocr_models 目录，或使用「选择模型」按钮指定本地模型目录。\n"
+                                "下载地址：https://github.com/jaidedai/easyocr/releases")
         else:
             self.test_reader = result
             self.set_ocr_status("就绪 ✅", True)
