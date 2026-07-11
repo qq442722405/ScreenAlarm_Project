@@ -39,8 +39,7 @@ except ImportError:
 
 # ---------- 授权相关常量 ----------
 LICENSE_FILE = "license.dat"
-# 请使用您生成的密钥
-SECRET_KEY = b"yTf8K9nB2xQwE5rLpM7sZcV1uA3jH4dF"  # 32字节
+SECRET_KEY = b"yTf8K9nB2xQwE5rLpM7sZcV1uA3jH4dF"  # 请确保长度32字节
 
 
 class LicenseManager:
@@ -685,7 +684,6 @@ class TrendChartWidget(QWidget):
         self.last_recorded_value = {}
 
         self.record_timer = QTimer()
-        # 修复：调用正确的方法名
         self.record_timer.timeout.connect(self.record_current_value)
         self.record_interval_minutes = 60
 
@@ -862,7 +860,7 @@ class TrendChartWidget(QWidget):
 
         QTimer.singleShot(200, self._init_ocr_reader)
 
-    # ---------- 以下为所有功能方法 ----------
+    # ---------- OCR 加载 ----------
     def _init_ocr_reader(self):
         if self.reader_loading or self.test_reader is not None:
             return
@@ -896,6 +894,7 @@ class TrendChartWidget(QWidget):
             self.test_reader = result
             self.set_ocr_status("就绪 ✅", True)
 
+    # ---------- 灵敏度控件 ----------
     def create_sensitivity_widget(self, row, value=5):
         widget = QWidget()
         layout = QHBoxLayout(widget)
@@ -930,6 +929,7 @@ class TrendChartWidget(QWidget):
     def get_row_sensitivity(self, row):
         return self.row_sensitivity.get(row, 5)
 
+    # ---------- UI 构建 ----------
     def _setup_ui(self):
         central = QWidget()
         self.setCentralWidget(central)
@@ -1101,8 +1101,7 @@ class TrendChartWidget(QWidget):
 
         self.table.model().rowsInserted.connect(self._on_rows_inserted)
         self.table.model().rowsRemoved.connect(self._on_rows_removed)
-
-    # ---------- 所有功能方法（从原来完整版本复制，确保存在） ----------
+            # ---------- 趋势显示切换 ----------
     def _on_display_mode_changed(self, index):
         self.display_mode = self.display_mode_combo.currentData()
         self._update_trend_chart_for_current_row()
@@ -1284,7 +1283,6 @@ class TrendChartWidget(QWidget):
         if self.monitoring and self.record_timer.isActive():
             self.record_timer.start(value * 60 * 1000)
 
-    # 定时记录方法（正确命名）
     def record_current_value(self):
         row = self.table.currentRow()
         if row < 0:
@@ -1675,7 +1673,6 @@ class TrendChartWidget(QWidget):
         if item:
             item.setText(f"{value:.2f}")
             item.setTextAlignment(Qt.AlignCenter)
-        # 变化记录
         if row in self.last_recorded_value and abs(self.last_recorded_value[row] - value) < 1e-9:
             return
         self.last_recorded_value[row] = value
