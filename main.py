@@ -119,21 +119,26 @@ class LicenseManager:
         return self.license_data is not None
 
 
-# ---------- 重新设计的激活对话框 ----------
+# ---------- 重新设计的激活对话框（共享 LicenseManager） ----------
 class ActivationDialog(QDialog):
-    def __init__(self, parent=None):
+    def __init__(self, license_manager=None, parent=None):
         super().__init__(parent)
         self.setWindowTitle("软件激活")
         self.setModal(True)
-        self.setFixedSize(480, 260)  # 更紧凑
+        self.setFixedSize(480, 280)
         layout = QVBoxLayout(self)
         layout.setSpacing(12)
         layout.setContentsMargins(20, 20, 20, 20)
 
-        lm = LicenseManager()
-        self.machine_code_full = lm.machine_code
-        self.is_activated = lm.check()
-        self.lm = lm
+        # 如果传入了 license_manager 则使用，否则新建
+        if license_manager is not None:
+            self.lm = license_manager
+        else:
+            self.lm = LicenseManager()
+
+        self.machine_code_full = self.lm.machine_code
+        self.is_activated = self.lm.check()
+        self.parent_window = parent  # 用于刷新主界面状态
 
         # 机器码行
         machine_layout = QHBoxLayout()
@@ -148,7 +153,7 @@ class ActivationDialog(QDialog):
         machine_layout.addWidget(self.copy_btn)
         layout.addLayout(machine_layout)
 
-        # 状态标签
+        # 状态标签（显示激活时间 + 到期时间）
         self.status_label = QLabel()
         self._update_status_label()
         self.status_label.setWordWrap(True)
@@ -188,8 +193,19 @@ class ActivationDialog(QDialog):
 
     def _update_status_label(self):
         if self.is_activated:
-            expire = self.lm.license_data.get('expire_date', '未知') if self.lm.license_data else '未知'
-            self.status_label.setText(f"✅ 当前设备已激活，有效期至：{expire}")
+            data = self.lm.license_data
+            expire = data.get('expire_date', '未知')
+            activated = data.get('activated_at', '未知')
+            # 格式化激活时间
+            if activated != '未知':
+                try:
+                    dt = datetime.fromisoformat(activated)
+                    activated = dt.strftime("%Y-%m-%d %H:%M:%S")
+                except:
+                    pass
+            self.status_label.setText(
+                f"✅ 已激活\n激活时间：{activated}\n到期时间：{expire}"
+            )
             self.status_label.setStyleSheet("color: #4ade80; font-weight: bold;")
         else:
             self.status_label.setText("❌ 未激活，请输入激活码")
@@ -218,6 +234,7 @@ class ActivationDialog(QDialog):
                 except Exception as e:
                     QMessageBox.warning(self, "错误", f"删除授权文件失败：{e}")
                     return
+            # 更新本地状态
             self.is_activated = False
             self.lm.license_data = None
             self._update_status_label()
@@ -227,6 +244,39 @@ class ActivationDialog(QDialog):
             self.cancel_btn.setText("退出")
             self.btn_deactivate.setEnabled(False)
             QMessageBox.information(self, "反激活成功", "已删除授权文件。\n您可以输入新的激活码重新激活，或关闭程序。")
+            # 如果主窗口有引用，可通知其刷新（但此处无需额外操作）
+
+    def accept(self):
+        # 重写 accept 以执行激活逻辑
+        code = self.get_activation_code()
+        if not code:
+            QMessageBox.warning(self, "错误", "激活码不能为空")
+            return
+        decrypted = self.lm._decrypt_data(code)
+        if decrypted is None:
+            QMessageBox.warning(self, "错误", "激活码无效")
+            return
+        try:
+            data = json.loads(decrypted)
+            machine = data.get("machine_code")
+            expire = data.get("expire_date")
+            if machine == self.lm.machine_code:
+                self.lm.save_license(code, expire)
+                # 更新状态
+                self.is_activated = True
+                self.lm.license_data = self.lm.load_license()  # 重新加载
+                self._update_status_label()
+                self.code_input.clear()
+                self.code_input.setPlaceholderText("输入新激活码重新激活")
+                self.ok_btn.setText("重新激活")
+                self.cancel_btn.setText("关闭")
+                self.btn_deactivate.setEnabled(True)
+                QMessageBox.information(self, "成功", f"激活成功！有效期至：{expire}")
+                # 不关闭对话框，让用户查看状态
+            else:
+                QMessageBox.warning(self, "错误", "激活码与本机不匹配")
+        except:
+            QMessageBox.warning(self, "错误", "激活码格式错误")
 
 
 class AlarmSoundPlayer:
@@ -677,38 +727,18 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(None, "错误", "加密库未安装，请安装 pycryptodome")
             sys.exit(1)
 
-        lm = LicenseManager()
-        # 先检查是否已激活且有效
-        if lm.check():
+        self.lm = LicenseManager()  # 保存为实例变量，供对话框共享
+        # 检查是否已激活
+        if self.lm.check():
             # 已激活，直接进入主界面
             pass
         else:
-            # 未激活，显示激活对话框
-            dialog = ActivationDialog()
+            # 未激活，显示激活对话框（传入 self.lm）
+            dialog = ActivationDialog(license_manager=self.lm, parent=None)
             while True:
                 if dialog.exec() == QDialog.Accepted:
-                    code = dialog.get_activation_code()
-                    if not code:
-                        QMessageBox.warning(None, "错误", "激活码不能为空")
-                        continue
-                    decrypted = lm._decrypt_data(code)
-                    if decrypted is None:
-                        QMessageBox.warning(None, "错误", "激活码无效")
-                        continue
-                    try:
-                        data = json.loads(decrypted)
-                        machine = data.get("machine_code")
-                        expire = data.get("expire_date")
-                        if machine == lm.machine_code:
-                            lm.save_license(code, expire)
-                            QMessageBox.information(None, "成功", f"激活成功！有效期至：{expire}")
-                            break
-                        else:
-                            QMessageBox.warning(None, "错误", "激活码与本机不匹配")
-                            continue
-                    except:
-                        QMessageBox.warning(None, "错误", "激活码格式错误")
-                        continue
+                    # 激活成功，退出循环
+                    break
                 else:
                     # 用户取消
                     sys.exit(0)
@@ -1101,7 +1131,7 @@ class MainWindow(QMainWindow):
         self.btn_start_stop.clicked.connect(self.toggle_monitor)
         btn_layout_top.addWidget(self.btn_start_stop)
 
-        # ---------- 新增“激活”按钮（放在停止监控按钮右侧） ----------
+        # ---------- 新增“激活”按钮 ----------
         self.btn_activation = QPushButton("🔑 激活")
         self.btn_activation.setObjectName("btn_activation")
         self.btn_activation.setStyleSheet("background-color: #4a6a8a;")
@@ -1157,9 +1187,9 @@ class MainWindow(QMainWindow):
         self.table.model().rowsInserted.connect(self._on_rows_inserted)
         self.table.model().rowsRemoved.connect(self._on_rows_removed)
 
-    # ---------- 弹出激活窗口的方法 ----------
+    # ---------- 弹出激活窗口（共享 self.lm） ----------
     def show_activation_dialog(self):
-        dialog = ActivationDialog(self)
+        dialog = ActivationDialog(license_manager=self.lm, parent=self)
         dialog.exec()
 
     # ---------- 其余方法保持不变 ----------
