@@ -40,7 +40,7 @@ except ImportError:
 # ---------- 授权相关常量 ----------
 LICENSE_FILE = "license.dat"
 # 请使用 generate_key.py 生成的密钥替换下面这行
-SECRET_KEY = b"your-32-byte-secret-key-here!!"  # 必须32字节
+SECRET_KEY = b"yTf8K9nB2xQwE5rLpM7sZcV1uA3jH4dF"  # 必须32字节
 
 
 class LicenseManager:
