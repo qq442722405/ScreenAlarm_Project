@@ -1101,7 +1101,8 @@ class TrendChartWidget(QWidget):
 
         self.table.model().rowsInserted.connect(self._on_rows_inserted)
         self.table.model().rowsRemoved.connect(self._on_rows_removed)
-            # ---------- 趋势显示切换 ----------
+
+    # ---------- 趋势显示切换 ----------
     def _on_display_mode_changed(self, index):
         self.display_mode = self.display_mode_combo.currentData()
         self._update_trend_chart_for_current_row()
