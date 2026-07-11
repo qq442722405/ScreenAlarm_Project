@@ -119,23 +119,28 @@ class LicenseManager:
         return self.license_data is not None
 
 
+# ---------- 重新设计的激活对话框 ----------
 class ActivationDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("软件激活")
         self.setModal(True)
-        self.setFixedSize(450, 360)
+        self.setFixedSize(480, 260)  # 更紧凑
         layout = QVBoxLayout(self)
+        layout.setSpacing(12)
+        layout.setContentsMargins(20, 20, 20, 20)
 
         lm = LicenseManager()
         self.machine_code_full = lm.machine_code
         self.is_activated = lm.check()
         self.lm = lm
 
+        # 机器码行
         machine_layout = QHBoxLayout()
+        machine_layout.setSpacing(8)
         self.machine_label = QLabel(f"机器码：{self.machine_code_full[:16]}...")
         self.machine_label.setWordWrap(True)
-        machine_layout.addWidget(self.machine_label)
+        machine_layout.addWidget(self.machine_label, 1)
 
         self.copy_btn = QPushButton("📋 复制")
         self.copy_btn.setFixedWidth(80)
@@ -143,29 +148,25 @@ class ActivationDialog(QDialog):
         machine_layout.addWidget(self.copy_btn)
         layout.addLayout(machine_layout)
 
-        self.note_label = QLabel("📌 小尾巴：软件仅限购买者个人使用，未经授权不得传播。")
-        self.note_label.setStyleSheet("color: #88aacc; font-size: 11px;")
-        layout.addWidget(self.note_label)
-
+        # 状态标签
         self.status_label = QLabel()
         self._update_status_label()
+        self.status_label.setWordWrap(True)
         layout.addWidget(self.status_label)
 
-        form = QFormLayout()
+        # 激活码输入
+        form_layout = QFormLayout()
+        form_layout.setSpacing(8)
         self.code_input = QLineEdit()
         self.code_input.setPlaceholderText("请输入激活码" if not self.is_activated else "输入新激活码重新激活")
-        form.addRow("激活码：", self.code_input)
-        layout.addLayout(form)
+        form_layout.addRow("激活码：", self.code_input)
+        layout.addLayout(form_layout)
 
-        self.info_label = QLabel("请联系开发者获取激活码" if not self.is_activated else "如需重新激活，请输入新激活码")
-        self.info_label.setStyleSheet("color: #ffaa00;")
-        layout.addWidget(self.info_label)
-
-        # 按钮区域
+        # 底部按钮
         button_box = QDialogButtonBox()
         if self.is_activated:
             self.ok_btn = button_box.addButton("重新激活", QDialogButtonBox.AcceptRole)
-            self.cancel_btn = button_box.addButton("退出", QDialogButtonBox.RejectRole)
+            self.cancel_btn = button_box.addButton("关闭", QDialogButtonBox.RejectRole)
         else:
             self.ok_btn = button_box.addButton("激活", QDialogButtonBox.AcceptRole)
             self.cancel_btn = button_box.addButton("退出", QDialogButtonBox.RejectRole)
@@ -176,11 +177,11 @@ class ActivationDialog(QDialog):
         if not self.is_activated:
             self.btn_deactivate.setEnabled(False)
 
-        btn_layout = QHBoxLayout()
-        btn_layout.addWidget(self.btn_deactivate)
-        btn_layout.addStretch()
-        btn_layout.addWidget(button_box)
-        layout.addLayout(btn_layout)
+        bottom_layout = QHBoxLayout()
+        bottom_layout.addWidget(self.btn_deactivate)
+        bottom_layout.addStretch()
+        bottom_layout.addWidget(button_box)
+        layout.addLayout(bottom_layout)
 
         button_box.accepted.connect(self.accept)
         button_box.rejected.connect(self.reject)
@@ -189,10 +190,10 @@ class ActivationDialog(QDialog):
         if self.is_activated:
             expire = self.lm.license_data.get('expire_date', '未知') if self.lm.license_data else '未知'
             self.status_label.setText(f"✅ 当前设备已激活，有效期至：{expire}")
-            self.status_label.setStyleSheet("color: #4ade80;")
+            self.status_label.setStyleSheet("color: #4ade80; font-weight: bold;")
         else:
             self.status_label.setText("❌ 未激活，请输入激活码")
-            self.status_label.setStyleSheet("color: #ff6b6b;")
+            self.status_label.setStyleSheet("color: #ff6b6b; font-weight: bold;")
 
     def copy_machine_code(self):
         clipboard = QApplication.clipboard()
@@ -222,8 +223,6 @@ class ActivationDialog(QDialog):
             self._update_status_label()
             self.code_input.clear()
             self.code_input.setPlaceholderText("请输入激活码")
-            self.info_label.setText("请联系开发者获取激活码")
-            self.info_label.setStyleSheet("color: #ffaa00;")
             self.ok_btn.setText("激活")
             self.cancel_btn.setText("退出")
             self.btn_deactivate.setEnabled(False)
@@ -1102,6 +1101,13 @@ class MainWindow(QMainWindow):
         self.btn_start_stop.clicked.connect(self.toggle_monitor)
         btn_layout_top.addWidget(self.btn_start_stop)
 
+        # ---------- 新增“激活”按钮（放在停止监控按钮右侧） ----------
+        self.btn_activation = QPushButton("🔑 激活")
+        self.btn_activation.setObjectName("btn_activation")
+        self.btn_activation.setStyleSheet("background-color: #4a6a8a;")
+        self.btn_activation.clicked.connect(self.show_activation_dialog)
+        btn_layout_top.addWidget(self.btn_activation)
+
         main_layout.addLayout(btn_layout_top)
 
         btn_layout_bottom = QHBoxLayout()
@@ -1151,7 +1157,12 @@ class MainWindow(QMainWindow):
         self.table.model().rowsInserted.connect(self._on_rows_inserted)
         self.table.model().rowsRemoved.connect(self._on_rows_removed)
 
-    # ---------- 趋势显示切换 ----------
+    # ---------- 弹出激活窗口的方法 ----------
+    def show_activation_dialog(self):
+        dialog = ActivationDialog(self)
+        dialog.exec()
+
+    # ---------- 其余方法保持不变 ----------
     def _on_display_mode_changed(self, index):
         self.display_mode = self.display_mode_combo.currentData()
         self._update_trend_chart_for_current_row()
