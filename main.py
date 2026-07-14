@@ -1007,7 +1007,7 @@ class MainWindow(QMainWindow):
         title.setFont(title_font)
         title_layout.addWidget(title)
         title_layout.addStretch()
-        subtitle = QLabel("---天长污水陈诚")
+        subtitle = QLabel("---Acc")
         subtitle.setStyleSheet("color: #7a7a9a; font-size: 14px; font-weight: bold;")
         title_layout.addWidget(subtitle)
         main_layout.addLayout(title_layout)
