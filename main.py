@@ -9,7 +9,7 @@ from datetime import datetime
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QTableWidget, QTableWidgetItem, QLabel, QMessageBox,
-    QAbstractItemView, QHeaderView, QCheckBox, QDoubleSpinBox, QGroupBox, QFrame
+    QAbstractItemView, QHeaderView, QCheckBox, QDoubleSpinBox, QGroupBox
 )
 from PySide6.QtCore import Qt, QTimer, QThread, Signal, QPoint, QRect
 from PySide6.QtGui import (
@@ -77,7 +77,7 @@ class MonitorThread(QThread):
                         sct_img = sct.grab(bbox)
                         img_np = np.array(sct_img)
 
-                        # 图像处理与识别
+                        # 图像预处理与识别
                         h_img, w_img = img_np.shape[:2]
                         scaled = cv2.resize(img_np, (w_img * 3, h_img * 3), interpolation=cv2.INTER_LINEAR)
                         gray = cv2.cvtColor(scaled, cv2.COLOR_RGBA2GRAY) if scaled.shape[2] == 4 else cv2.cvtColor(scaled, cv2.COLOR_RGB2GRAY)
@@ -125,13 +125,12 @@ class MonitorThread(QThread):
                     except Exception:
                         pass
 
-                # 计算休眠时间以匹配设定的识别间隔
                 elapsed = time.time() - start_time
                 sleep_needed = max(0.01, self.interval - elapsed)
                 self.msleep(int(sleep_needed * 1000))
 
 
-# ==================== 2. 独立悬浮选框（按钮移至选框上方） ====================
+# ==================== 2. 独立悬浮选框（无内部结果，按钮居右） ====================
 class OverlayRegionWidget(QWidget):
     rect_changed = Signal(int, int, int, int, int)      # row, x, y, w, h
     clear_alarm_requested = Signal(int)                 # row
@@ -155,12 +154,11 @@ class OverlayRegionWidget(QWidget):
         self._drag_pos = QPoint()
         self._resize_edge = None
 
-        # 布局定义
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
 
-        # 顶部工具栏（位于捕捉框上方，不占用捕获区域）
+        # 顶部控制栏
         self.top_bar = QWidget()
         self.top_bar.setFixedHeight(self.top_bar_height)
         self.top_bar.setStyleSheet("background-color: rgba(20, 20, 30, 0.9); border-top-left-radius: 4px; border-top-right-radius: 4px;")
@@ -184,39 +182,26 @@ class OverlayRegionWidget(QWidget):
         """)
         self.btn_gear.clicked.connect(self.toggle_edit_mode)
 
+        # 按钮全部在右边
         top_layout.addStretch()
         top_layout.addWidget(self.btn_clear_alarm)
         top_layout.addWidget(self.btn_gear)
 
         main_layout.addWidget(self.top_bar)
+        main_layout.addStretch()  # 选框内部留空，不显示识别结果
 
-        # 主选框区域 (纯数值展示)
-        self.box_widget = QWidget()
-        box_layout = QVBoxLayout(self.box_widget)
-        box_layout.setContentsMargins(0, 0, 0, 0)
-
-        self.lbl_val = QLabel("--")
-        self.lbl_val.setAlignment(Qt.AlignCenter)
-        self.lbl_val.setStyleSheet("color: #00ff8c; font-size: 16px; font-weight: bold; background: transparent;")
-        box_layout.addWidget(self.lbl_val)
-
-        main_layout.addWidget(self.box_widget)
         self.setMouseTracking(True)
 
     def _update_geometry(self):
-        # 窗口总高度包括顶部工具栏
         self.setGeometry(self.capture_x, self.capture_y - self.top_bar_height, self.capture_w, self.capture_h + self.top_bar_height)
 
     def set_value(self, val_str):
-        self.lbl_val.setText(val_str)
+        # 选框内部不显示任何文字结果
+        pass
 
     def set_alarm_state(self, is_alarm):
         self.is_alarm = is_alarm
         self.btn_clear_alarm.setVisible(is_alarm)
-        if is_alarm:
-            self.lbl_val.setStyleSheet("color: #ff4d4d; font-size: 18px; font-weight: bold; background: transparent;")
-        else:
-            self.lbl_val.setStyleSheet("color: #00ff8c; font-size: 16px; font-weight: bold; background: transparent;")
         self.update()
 
     def _on_clear_alarm(self):
@@ -281,7 +266,6 @@ class OverlayRegionWidget(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
 
-        # 绘制捕捉框本体区域 (去掉顶部控制条的偏移)
         box_rect = QRect(0, self.top_bar_height, self.width(), self.height() - self.top_bar_height)
 
         if self.is_editing:
@@ -442,7 +426,7 @@ class TrendChartWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setMinimumHeight(180)
-        self.data = []  # 存 (time_str, value)
+        self.data = []
 
     def add_data_point(self, time_str, val):
         self.data.append((time_str, val))
@@ -482,20 +466,17 @@ class TrendChartWidget(QWidget):
             y = chart_rect.bottom() - (val - min_v) / rng * chart_rect.height()
             points.append((x, y, t_str, val))
 
-        # 绘制趋势折线
         pen = QPen(QColor("#00ff8c"), 2)
         painter.setPen(pen)
         for i in range(len(points) - 1):
             painter.drawLine(QPoint(points[i][0], points[i][1]), QPoint(points[i+1][0], points[i+1][1]))
 
-        # 绘制数据点与时间标签
         painter.setFont(QFont("Microsoft YaHei", 8))
         for i, (x, y, t_str, val) in enumerate(points):
             painter.setPen(Qt.NoPen)
             painter.setBrush(QColor("#ffffff"))
             painter.drawEllipse(QPoint(x, y), 3, 3)
 
-            # 只打印首尾及部分中间时间点避免拥挤
             if i == 0 or i == len(points) - 1 or i % 4 == 0:
                 painter.setPen(QColor("#8888aa"))
                 painter.drawText(x - 20, chart_rect.bottom() + 18, 40, 15, Qt.AlignCenter, t_str)
@@ -508,7 +489,6 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("屏幕数值监控报警")
         self.resize(1000, 680)
 
-        # 设置 App 图标
         icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "favicon.ico")
         if os.path.exists(icon_path):
             self.setWindowIcon(QIcon(icon_path))
@@ -563,7 +543,7 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(central)
         main_layout = QVBoxLayout(central)
 
-        # 头部区域
+        # 头部
         header_layout = QHBoxLayout()
         title = QLabel("📊 屏幕数值监控报警")
         title.setFont(QFont("Microsoft YaHei", 16, QFont.Bold))
@@ -571,7 +551,6 @@ class MainWindow(QMainWindow):
 
         header_layout.addStretch()
 
-        # 识别间隔控制
         lbl_interval = QLabel("⏱ 识别间隔(秒):")
         self.spin_interval = QDoubleSpinBox()
         self.spin_interval.setRange(0.1, 10.0)
@@ -587,7 +566,7 @@ class MainWindow(QMainWindow):
         self.ocr_status_label.setStyleSheet("padding: 4px 10px; background-color: #2a2a42; border-radius: 4px; color: #e6b84d;")
         main_layout.addWidget(self.ocr_status_label)
 
-        # 精简后的表格 (已删除 灵敏度、坐标 列)
+        # 表格
         self.table = QTableWidget()
         self.table.setColumnCount(9)
         self.table.setHorizontalHeaderLabels(["启用", "名称", "备注", "当前值", "下限", "上限", "状态", "报警时间", "静音"])
@@ -595,14 +574,14 @@ class MainWindow(QMainWindow):
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         main_layout.addWidget(self.table, 3)
 
-        # 带时间戳的趋势图
+        # 趋势图
         self.chart_group = QGroupBox("📈 实时数值变动趋势")
         chart_layout = QVBoxLayout(self.chart_group)
         self.trend_chart = TrendChartWidget()
         chart_layout.addWidget(self.trend_chart)
         main_layout.addWidget(self.chart_group, 2)
 
-        # 底部控制按钮
+        # 底部按钮组（统一按键样式）
         btn_layout = QHBoxLayout()
         self.btn_add = QPushButton("➕ 添加监控区域")
         self.btn_add.clicked.connect(self.add_monitor_row)
@@ -613,7 +592,7 @@ class MainWindow(QMainWindow):
         btn_layout.addWidget(self.btn_delete)
 
         self.btn_start_stop = QPushButton("▶ 开始监控")
-        self.btn_start_stop.setStyleSheet("background-color: #2e9a58; color: white; font-weight: bold; padding: 6px 16px;")
+        self.btn_start_stop.setStyleSheet("background-color: #2e9a58; color: white;")
         self.btn_start_stop.clicked.connect(self.toggle_monitor)
         btn_layout.addWidget(self.btn_start_stop)
 
@@ -737,7 +716,7 @@ class MainWindow(QMainWindow):
 
         self.monitoring = True
         self.btn_start_stop.setText("⏹ 停止监控")
-        self.btn_start_stop.setStyleSheet("background-color: #b03a3a; color: white; font-weight: bold; padding: 6px 16px;")
+        self.btn_start_stop.setStyleSheet("background-color: #b03a3a; color: white;")
 
     def stop_monitor(self):
         if self.monitor_thread:
@@ -745,17 +724,15 @@ class MainWindow(QMainWindow):
             self.monitor_thread.wait()
         self.monitoring = False
         self.btn_start_stop.setText("▶ 开始监控")
-        self.btn_start_stop.setStyleSheet("background-color: #2e9a58; color: white; font-weight: bold; padding: 6px 16px;")
+        self.btn_start_stop.setStyleSheet("background-color: #2e9a58; color: white;")
         self.stop_alarm()
 
     def on_value_updated(self, row, value, time_str):
         item = self.table.item(row, 3)
         if item:
             item.setText(f"{value:.2f}")
-        if row in self.overlay_widgets:
-            self.overlay_widgets[row].set_value(f"{value:.2f}")
 
-        # 记录到数值变动趋势图（带时间戳）
+        # 记录到数值变动趋势图
         self.trend_chart.add_data_point(time_str, value)
 
     def on_alarm_triggered(self, row, name, value, lower, upper):
@@ -781,7 +758,6 @@ class MainWindow(QMainWindow):
             self._check_alarms()
 
     def _check_alarms(self):
-        # 检查是否有未静音且处于报警状态的区域
         should_sound = False
         for r, is_alm in self.row_alarm.items():
             if is_alm:
