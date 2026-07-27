@@ -1,14 +1,12 @@
-name: Build PyInstaller Windows App
+name: 屏幕数值监控报警
 
 on:
   push:
     branches: [ "main", "master" ]
-  # 允许在 GitHub 网页上手动触发打包
   workflow_dispatch: 
 
 jobs:
   build:
-    # 强制指定 Windows 环境，因为我们要打包出 .exe
     runs-on: windows-latest
 
     steps:
@@ -18,7 +16,7 @@ jobs:
     - name: Set up Python 3.10
       uses: actions/setup-python@v5
       with:
-        python-version: '3.10' # 建议使用 3.10 确保 ddddocr 的兼容性
+        python-version: '3.10'
 
     - name: Install Dependencies
       run: |
@@ -26,13 +24,11 @@ jobs:
         pip install -r requirements.txt
 
     - name: Build with PyInstaller
-      # 执行上一条回复中提到的文件夹打包命令
       run: |
-        pyinstaller -D -w --collect-data ddddocr main.py
+        pyinstaller -D -w -n "屏幕数值监控报警" --icon=favicon.ico --add-data "favicon.ico;." --collect-data ddddocr main.py
 
     - name: Upload Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: MonitorApp-Windows
-        # 打包完成后，只提取生成的 dist/main 文件夹供下载
-        path: dist/main/
+        name: 屏幕数值监控报警
+        path: dist/屏幕数值监控报警/
