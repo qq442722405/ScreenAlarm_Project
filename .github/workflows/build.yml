@@ -1,74 +1,38 @@
-name: Build EXE
+name: Build PyInstaller Windows App
 
 on:
   push:
-    tags:
-      - 'v*'
-  workflow_dispatch:
+    branches: [ "main", "master" ]
+  # 允许在 GitHub 网页上手动触发打包
+  workflow_dispatch: 
 
 jobs:
   build:
+    # 强制指定 Windows 环境，因为我们要打包出 .exe
     runs-on: windows-latest
+
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+    - name: Checkout Code
+      uses: actions/checkout@v4
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.10'
-          cache: 'pip'
+    - name: Set up Python 3.10
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10' # 建议使用 3.10 确保 ddddocr 的兼容性
 
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install pyinstaller
+    - name: Install Dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
 
-      - name: Create spec file directly
-        shell: bash
-        run: |
-          cat > 屏幕数值监控报警.spec << 'EOF'
-          # -*- mode: python ; coding: utf-8 -*-
-          block_cipher = None
-          a = Analysis(
-              ['main.py'],
-              pathex=[],
-              binaries=[],
-              datas=[('警报声.mp3', '.'), ('favicon.ico', '.')],
-              hiddenimports=['cv2', 'numpy'],
-              hookspath=[],
-              hooksconfig={},
-              runtime_hooks=[],
-              excludes=[],
-              noarchive=False,
-          )
-          pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
-          exe = EXE(
-              pyz,
-              a.scripts,
-              a.binaries,
-              a.datas,
-              [],
-              name='屏幕数值监控报警',
-              debug=False,
-              bootloader_ignore_signals=False,
-              strip=False,
-              upx=True,
-              upx_exclude=[],
-              runtime_tmpdir=None,
-              console=False,
-              icon='favicon.ico',
-          )
-          EOF
+    - name: Build with PyInstaller
+      # 执行上一条回复中提到的文件夹打包命令
+      run: |
+        pyinstaller -D -w --collect-data ddddocr main.py
 
-      - name: Build EXE
-        run: |
-          pyinstaller 屏幕数值监控报警.spec
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: 屏幕数值监控报警
-          path: dist/*.exe
-          retention-days: 30
+    - name: Upload Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: MonitorApp-Windows
+        # 打包完成后，只提取生成的 dist/main 文件夹供下载
+        path: dist/main/
