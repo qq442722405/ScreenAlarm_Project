@@ -9,7 +9,8 @@ from datetime import datetime
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QTableWidget, QTableWidgetItem, QLabel, QMessageBox,
-    QAbstractItemView, QHeaderView, QCheckBox, QDoubleSpinBox, QGroupBox
+    QAbstractItemView, QHeaderView, QCheckBox, QDoubleSpinBox, QGroupBox,
+    QDialog, QFormLayout, QDialogButtonBox
 )
 from PySide6.QtCore import Qt, QTimer, QThread, Signal, QPoint, QRect
 from PySide6.QtGui import (
@@ -130,26 +131,62 @@ class MonitorThread(QThread):
                 self.msleep(int(sleep_needed * 1000))
 
 
-# ==================== 2. 独立悬浮选框（支持极小尺寸，顶部显示名称） ====================
+# ==================== 2. 独立上下限设置弹窗 ====================
+class RegionSettingsDialog(QDialog):
+    def __init__(self, name, lower, upper, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(f"报警设置 - {name}")
+        self.setWindowFlags(self.windowFlags() | Qt.WindowStaysOnTopHint)
+        self.setFixedSize(240, 130)
+
+        layout = QVBoxLayout(self)
+
+        form = QFormLayout()
+        self.spin_lower = QDoubleSpinBox()
+        self.spin_lower.setRange(-999999.0, 999999.0)
+        self.spin_lower.setDecimals(2)
+        self.spin_lower.setValue(lower)
+
+        self.spin_upper = QDoubleSpinBox()
+        self.spin_upper.setRange(-999999.0, 999999.0)
+        self.spin_upper.setDecimals(2)
+        self.spin_upper.setValue(upper)
+
+        form.addRow("报警下限:", self.spin_lower)
+        form.addRow("报警上限:", self.spin_upper)
+        layout.addLayout(form)
+
+        btn_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        btn_box.accepted.connect(self.accept)
+        btn_box.rejected.connect(self.reject)
+        layout.addWidget(btn_box)
+
+    def get_values(self):
+        return self.spin_lower.value(), self.spin_upper.value()
+
+
+# ==================== 3. 独立悬浮选框 ====================
 class OverlayRegionWidget(QWidget):
     rect_changed = Signal(int, int, int, int, int)      # row, x, y, w, h
     clear_alarm_requested = Signal(int)                 # row
+    settings_requested = Signal(int)                    # row
+    mute_toggled = Signal(int, bool)                    # row, is_muted
 
     def __init__(self, row, x, y, w, h, name="区域", parent=None):
         super().__init__(None)
         self.row = row
         self.capture_x = x
         self.capture_y = y
-        self.capture_w = max(20, w)   # 放开限制，最小支持 20px
-        self.capture_h = max(15, h)   # 放开限制，最小支持 15px
+        self.capture_w = max(20, w)   # 支持极小 20px
+        self.capture_h = max(15, h)   # 支持极小 15px
         self.top_bar_height = 24
 
         self.is_alarm = False
         self.is_editing = False
+        self.is_muted = False
 
         self.setWindowFlags(Qt.WindowStaysOnTopHint | Qt.FramelessWindowHint | Qt.Tool)
         self.setAttribute(Qt.WA_TranslucentBackground, True)
-        self._update_geometry()
 
         self._drag_pos = QPoint()
         self._resize_edge = None
@@ -164,7 +201,7 @@ class OverlayRegionWidget(QWidget):
         self.top_bar.setStyleSheet("background-color: rgba(20, 20, 30, 0.9); border-top-left-radius: 4px; border-top-right-radius: 4px;")
         top_layout = QHBoxLayout(self.top_bar)
         top_layout.setContentsMargins(4, 1, 4, 1)
-        top_layout.setSpacing(4)
+        top_layout.setSpacing(3)
 
         # 左侧显示区域名称
         self.lbl_title = QLabel(name)
@@ -173,7 +210,7 @@ class OverlayRegionWidget(QWidget):
 
         top_layout.addStretch()
 
-        # 右侧操作按钮
+        # 报警消除按钮
         self.btn_clear_alarm = QPushButton("🚨 消除")
         self.btn_clear_alarm.setStyleSheet("""
             QPushButton { background-color: #ff4d4d; color: white; border: none; border-radius: 3px; padding: 1px 4px; font-size: 10px; font-weight: bold; }
@@ -181,61 +218,96 @@ class OverlayRegionWidget(QWidget):
         """)
         self.btn_clear_alarm.setVisible(False)
         self.btn_clear_alarm.clicked.connect(self._on_clear_alarm)
+        top_layout.addWidget(self.btn_clear_alarm)
 
-        self.btn_gear = QPushButton("⚙️")
-        self.btn_gear.setFixedSize(22, 18)
-        self.btn_gear.setStyleSheet("""
+        # 静音按钮
+        self.btn_mute = QPushButton("🔊")
+        self.btn_mute.setFixedSize(22, 18)
+        self.btn_mute.setToolTip("屏蔽/开启此区域声音报警")
+        self.btn_mute.setStyleSheet("""
             QPushButton { background-color: rgba(255,255,255,0.2); color: white; border: none; border-radius: 3px; font-size: 10px; }
             QPushButton:hover { background-color: rgba(255,255,255,0.4); }
         """)
-        self.btn_gear.clicked.connect(self.toggle_edit_mode)
+        self.btn_mute.clicked.connect(self._on_toggle_mute)
+        top_layout.addWidget(self.btn_mute)
 
-        top_layout.addWidget(self.btn_clear_alarm)
-        top_layout.addWidget(self.btn_gear)
+        # 设置按钮（设置上下限）
+        self.btn_settings = QPushButton("⚙️")
+        self.btn_settings.setFixedSize(22, 18)
+        self.btn_settings.setToolTip("设置报警上下限")
+        self.btn_settings.setStyleSheet("""
+            QPushButton { background-color: rgba(255,255,255,0.2); color: white; border: none; border-radius: 3px; font-size: 10px; }
+            QPushButton:hover { background-color: rgba(255,255,255,0.4); }
+        """)
+        self.btn_settings.clicked.connect(lambda: self.settings_requested.emit(self.row))
+        top_layout.addWidget(self.btn_settings)
 
         main_layout.addWidget(self.top_bar)
         main_layout.addStretch()
 
+        self._update_geometry()
         self.setMouseTracking(True)
 
     def set_title(self, name):
         self.lbl_title.setText(name)
 
     def _update_geometry(self):
-        self.setGeometry(self.capture_x, self.capture_y - self.top_bar_height, self.capture_w, self.capture_h + self.top_bar_height)
+        # 保证顶部控制栏至少宽 130px，防极小框造成控件挤压
+        total_w = max(self.capture_w, 130)
+        self.setGeometry(self.capture_x, self.capture_y - self.top_bar_height, total_w, self.capture_h + self.top_bar_height)
 
     def set_alarm_state(self, is_alarm):
         self.is_alarm = is_alarm
         self.btn_clear_alarm.setVisible(is_alarm)
         self.update()
 
+    def set_edit_mode(self, enabled):
+        self.is_editing = enabled
+        if not enabled:
+            self.rect_changed.emit(self.row, self.capture_x, self.capture_y, self.capture_w, self.capture_h)
+        self.update()
+
     def _on_clear_alarm(self):
         self.set_alarm_state(False)
         self.clear_alarm_requested.emit(self.row)
 
-    def toggle_edit_mode(self):
-        self.is_editing = not self.is_editing
-        if self.is_editing:
-            self.btn_gear.setText("✅")
-            self.btn_gear.setFixedWidth(22)
+    def _on_toggle_mute(self):
+        self.is_muted = not self.is_muted
+        self.update_mute_ui(self.is_muted)
+        self.mute_toggled.emit(self.row, self.is_muted)
+
+    def update_mute_ui(self, is_muted):
+        self.is_muted = is_muted
+        if self.is_muted:
+            self.btn_mute.setText("🔇")
+            self.btn_mute.setStyleSheet("""
+                QPushButton { background-color: #e65100; color: white; border: none; border-radius: 3px; font-size: 10px; }
+                QPushButton:hover { background-color: #f57c00; }
+            """)
         else:
-            self.btn_gear.setText("⚙️")
-            self.btn_gear.setFixedWidth(22)
-            self.rect_changed.emit(self.row, self.capture_x, self.capture_y, self.capture_w, self.capture_h)
-        self.update()
+            self.btn_mute.setText("🔊")
+            self.btn_mute.setStyleSheet("""
+                QPushButton { background-color: rgba(255,255,255,0.2); color: white; border: none; border-radius: 3px; font-size: 10px; }
+                QPushButton:hover { background-color: rgba(255,255,255,0.4); }
+            """)
 
     def _get_edge(self, pos):
-        m = 5  # 减小边缘触发边界，便于小框微调
-        w, h = self.width(), self.height()
+        m = 5
+        x = pos.x()
+        y = pos.y() - self.top_bar_height
+        w = self.capture_w
+        h = self.capture_h
+
+        if y < 0: return None
         edge = ""
-        if pos.y() > h - m: edge += "B"
-        if pos.x() < m: edge += "L"
-        elif pos.x() > w - m: edge += "R"
+        if y > h - m: edge += "B"
+        if x < m: edge += "L"
+        elif x > w - m and x < w + m: edge += "R"
         return edge if edge else None
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton and self.is_editing:
-            self._drag_pos = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+            self._drag_pos = event.globalPosition().toPoint() - QPoint(self.capture_x, self.capture_y)
             self._resize_edge = self._get_edge(event.position().toPoint())
             event.accept()
 
@@ -254,29 +326,30 @@ class OverlayRegionWidget(QWidget):
             g_pos = event.globalPosition().toPoint()
             if self._resize_edge:
                 if "R" in self._resize_edge: self.capture_w = max(20, g_pos.x() - self.capture_x)
-                if "B" in self._resize_edge: self.capture_h = max(15, g_pos.y() - (self.capture_y - self.top_bar_height) - self.top_bar_height)
+                if "B" in self._resize_edge: self.capture_h = max(15, g_pos.y() - self.capture_y)
                 if "L" in self._resize_edge:
                     diff = self.capture_x - g_pos.x()
                     if self.capture_w + diff >= 20:
                         self.capture_x = g_pos.x()
                         self.capture_w += diff
             else:
-                new_top_left = g_pos - self._drag_pos
-                self.capture_x = new_top_left.x()
-                self.capture_y = new_top_left.y() + self.top_bar_height
+                new_pos = g_pos - self._drag_pos
+                self.capture_x = new_pos.x()
+                self.capture_y = new_pos.y()
 
             self._update_geometry()
+            self.update()
 
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
 
-        box_rect = QRect(0, self.top_bar_height, self.width(), self.height() - self.top_bar_height)
+        box_rect = QRect(0, self.top_bar_height, self.capture_w, self.capture_h)
 
         if self.is_editing:
             pen = QPen(QColor(255, 200, 0), 2, Qt.DashLine)
             painter.setPen(pen)
-            painter.setBrush(QColor(255, 200, 0, 20))
+            painter.setBrush(QColor(255, 200, 0, 25))
         elif self.is_alarm:
             pen = QPen(QColor(255, 40, 40), 3, Qt.SolidLine)
             painter.setPen(pen)
@@ -289,7 +362,77 @@ class OverlayRegionWidget(QWidget):
         painter.drawRect(box_rect.adjusted(1, 1, -1, -1))
 
 
-# ==================== 3. 报警声音播放器 ====================
+# ==================== 4. 屏幕右上角全局悬浮控制条 ====================
+class GlobalControlBar(QWidget):
+    toggle_edit_signal = Signal(bool)
+    toggle_main_signal = Signal()
+    toggle_monitor_signal = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(None)
+        self.setWindowFlags(Qt.WindowStaysOnTopHint | Qt.FramelessWindowHint | Qt.Tool)
+        self.setAttribute(Qt.WA_TranslucentBackground, True)
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(8, 6, 8, 6)
+        layout.setSpacing(6)
+
+        self.setStyleSheet("""
+            QWidget { background-color: rgba(25, 25, 35, 0.92); border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.2); }
+            QPushButton { background-color: rgba(255, 255, 255, 0.15); color: white; border: none; border-radius: 4px; padding: 4px 8px; font-size: 12px; font-weight: bold; }
+            QPushButton:hover { background-color: rgba(255, 255, 255, 0.3); }
+        """)
+
+        # 调整选框按钮
+        self.btn_edit = QPushButton("⚙️ 调整选框")
+        self.is_editing = False
+        self.btn_edit.clicked.connect(self._on_toggle_edit)
+
+        # 显隐主界面按钮
+        self.btn_main = QPushButton("👁️ 隐藏主界面")
+        self.main_visible = True
+        self.btn_main.clicked.connect(lambda: self.toggle_main_signal.emit())
+
+        # 开始/停止监控按钮
+        self.btn_monitor = QPushButton("▶ 开始监控")
+        self.btn_monitor.setStyleSheet("background-color: #2e9a58; color: white;")
+        self.btn_monitor.clicked.connect(lambda: self.toggle_monitor_signal.emit())
+
+        layout.addWidget(self.btn_edit)
+        layout.addWidget(self.btn_main)
+        layout.addWidget(self.btn_monitor)
+
+        self.adjustSize()
+        self._position_at_top_right()
+
+    def _position_at_top_right(self):
+        screen_geo = QApplication.primaryScreen().geometry()
+        self.move(screen_geo.width() - self.width() - 20, 20)
+
+    def _on_toggle_edit(self):
+        self.is_editing = not self.is_editing
+        if self.is_editing:
+            self.btn_edit.setText("✅ 完成调整")
+            self.btn_edit.setStyleSheet("background-color: #e6b84d; color: black; font-weight: bold;")
+        else:
+            self.btn_edit.setText("⚙️ 调整选框")
+            self.btn_edit.setStyleSheet("background-color: rgba(255, 255, 255, 0.15); color: white; font-weight: bold;")
+        self.toggle_edit_signal.emit(self.is_editing)
+
+    def set_main_visible_state(self, visible):
+        self.main_visible = visible
+        self.btn_main.setText("👁️ 隐藏主界面" if visible else "👁️ 显示主界面")
+
+    def set_monitor_state(self, is_monitoring):
+        if is_monitoring:
+            self.btn_monitor.setText("⏹ 停止监控")
+            self.btn_monitor.setStyleSheet("background-color: #b03a3a; color: white;")
+        else:
+            self.btn_monitor.setText("▶ 开始监控")
+            self.btn_monitor.setStyleSheet("background-color: #2e9a58; color: white;")
+
+
+# ==================== 5. 报警声音播放器 ====================
 class AlarmSoundPlayer:
     def __init__(self):
         self.is_playing = False
@@ -358,7 +501,7 @@ class AlarmSoundPlayer:
             except: pass
 
 
-# ==================== 4. 屏幕选区拾取器 ====================
+# ==================== 6. 屏幕选区拾取器 ====================
 class CoordinatePicker(QWidget):
     coord_selected = Signal(int, int, int, int)
     def __init__(self, parent=None):
@@ -426,7 +569,7 @@ class CoordinatePicker(QWidget):
             self.close()
 
 
-# ==================== 5. 带时间的趋势图表 ====================
+# ==================== 7. 趋势图表 ====================
 class TrendChartWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -487,7 +630,7 @@ class TrendChartWidget(QWidget):
                 painter.drawText(x - 20, chart_rect.bottom() + 18, 40, 15, Qt.AlignCenter, t_str)
 
 
-# ==================== 6. 主窗口逻辑 ====================
+# ==================== 8. 主窗口逻辑 ====================
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -513,6 +656,14 @@ class MainWindow(QMainWindow):
         self.overlay_widgets = {}
 
         self._setup_ui()
+
+        # 初始化全局悬浮控制条（屏幕右上角）
+        self.global_bar = GlobalControlBar()
+        self.global_bar.toggle_edit_signal.connect(self._on_global_toggle_edit)
+        self.global_bar.toggle_main_signal.connect(self._on_global_toggle_main)
+        self.global_bar.toggle_monitor_signal.connect(self.toggle_monitor)
+        self.global_bar.show()
+
         self.load_config()
         QTimer.singleShot(200, self._init_ocr_reader)
 
@@ -613,11 +764,55 @@ class MainWindow(QMainWindow):
             self.monitor_thread.update_interval(val)
 
     def _on_table_item_changed(self, item):
-        # 表格中的“名称”列修改时，同步更新选框顶部的显示名称
         if item.column() == 1:
             row = item.row()
             if row in self.overlay_widgets:
                 self.overlay_widgets[row].set_title(item.text())
+
+    def _on_global_toggle_edit(self, is_editing):
+        for ov in self.overlay_widgets.values():
+            ov.set_edit_mode(is_editing)
+
+    def _on_global_toggle_main(self):
+        if self.isVisible():
+            self.hide()
+            self.global_bar.set_main_visible_state(False)
+        else:
+            self.show()
+            self.raise_()
+            self.activateWindow()
+            self.global_bar.set_main_visible_state(True)
+
+    def _open_region_settings(self, row):
+        name = self.table.item(row, 1).text() if self.table.item(row, 1) else f"区域{row+1}"
+        lower = float(self.table.item(row, 4).text()) if self.table.item(row, 4) else 0.0
+        upper = float(self.table.item(row, 5).text()) if self.table.item(row, 5) else 100.0
+
+        dlg = RegionSettingsDialog(name, lower, upper, self)
+        if dlg.exec() == QDialog.Accepted:
+            new_lower, new_upper = dlg.get_values()
+            self.table.setItem(row, 4, QTableWidgetItem(str(new_lower)))
+            self.table.setItem(row, 5, QTableWidgetItem(str(new_upper)))
+
+            if self.monitoring and self.monitor_thread:
+                for m in self.monitor_thread.monitors:
+                    if m['row'] == row:
+                        m['lower'] = new_lower
+                        m['upper'] = new_upper
+                        break
+
+    def _on_overlay_mute_toggled(self, row, is_muted):
+        chk = self.table.cellWidget(row, 8)
+        if chk:
+            chk.blockSignals(True)
+            chk.setChecked(is_muted)
+            chk.blockSignals(False)
+        self._check_alarms()
+
+    def _on_table_mute_changed(self, row, is_muted):
+        if row in self.overlay_widgets:
+            self.overlay_widgets[row].update_mute_ui(is_muted)
+        self._check_alarms()
 
     def _sync_overlays(self):
         existing_rows = set()
@@ -634,6 +829,14 @@ class MainWindow(QMainWindow):
                 ov = OverlayRegionWidget(row, x, y, w, h, name, self)
                 ov.rect_changed.connect(self._on_overlay_rect_changed)
                 ov.clear_alarm_requested.connect(self._on_overlay_clear_alarm)
+                ov.settings_requested.connect(self._open_region_settings)
+                ov.mute_toggled.connect(self._on_overlay_mute_toggled)
+
+                # 同步静音UI
+                chk = self.table.cellWidget(row, 8)
+                if chk:
+                    ov.update_mute_ui(chk.isChecked())
+
                 self.overlay_widgets[row] = ov
                 ov.show()
 
@@ -675,6 +878,7 @@ class MainWindow(QMainWindow):
         self.table.setCellWidget(row, 0, enable_check)
 
         mute_check = QCheckBox()
+        mute_check.stateChanged.connect(lambda state, r=row: self._on_table_mute_changed(r, state == Qt.Checked))
         self.table.setCellWidget(row, 8, mute_check)
 
         self.table.setItem(row, 1, QTableWidgetItem(f"区域{row+1}"))
@@ -731,6 +935,7 @@ class MainWindow(QMainWindow):
         self.monitoring = True
         self.btn_start_stop.setText("⏹ 停止监控")
         self.btn_start_stop.setStyleSheet("background-color: #b03a3a; color: white;")
+        self.global_bar.set_monitor_state(True)
 
     def stop_monitor(self):
         if self.monitor_thread:
@@ -739,6 +944,7 @@ class MainWindow(QMainWindow):
         self.monitoring = False
         self.btn_start_stop.setText("▶ 开始监控")
         self.btn_start_stop.setStyleSheet("background-color: #2e9a58; color: white;")
+        self.global_bar.set_monitor_state(False)
         self.stop_alarm()
 
     def on_value_updated(self, row, value, time_str):
@@ -746,7 +952,6 @@ class MainWindow(QMainWindow):
         if item:
             item.setText(f"{value:.2f}")
 
-        # 记录到数值变动趋势图
         self.trend_chart.add_data_point(time_str, value)
 
     def on_alarm_triggered(self, row, name, value, lower, upper):
@@ -827,6 +1032,7 @@ class MainWindow(QMainWindow):
                 self.table.setCellWidget(row, 0, chk)
 
                 mute_chk = QCheckBox()
+                mute_chk.stateChanged.connect(lambda state, r=row: self._on_table_mute_changed(r, state == Qt.Checked))
                 self.table.setCellWidget(row, 8, mute_chk)
 
                 self.table.setItem(row, 1, QTableWidgetItem(item['name']))
@@ -844,6 +1050,8 @@ class MainWindow(QMainWindow):
         self.stop_monitor()
         for ov in self.overlay_widgets.values():
             ov.close()
+        if hasattr(self, 'global_bar'):
+            self.global_bar.close()
         event.accept()
 
 
