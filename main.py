@@ -185,7 +185,6 @@ class StandaloneLogWindow(QWidget):
         layout.addWidget(self.lbl_title)
 
         self.list_widget = QListWidget()
-        # 【修改】黑色背景改为 50% 透明度黑色
         self.list_widget.setStyleSheet("""
             QListWidget {
                 background-color: rgba(0, 0, 0, 0.5);
@@ -277,7 +276,7 @@ class OverlayRegionWidget(QWidget):
         self.btn_clear_alarm.clicked.connect(self._on_clear_alarm)
         self.btn_clear_alarm.hide()
 
-        # 底部控制栏（【修改】黑色背景改为 50% 透明度黑色）
+        # 底部控制栏
         self.bottom_bar = QWidget()
         self.bottom_bar.setAttribute(Qt.WA_StyledBackground, True)
         self.bottom_bar.setStyleSheet("""
@@ -579,7 +578,8 @@ class OverlayRegionWidget(QWidget):
         else:
             pen = QPen(QColor(0, 255, 140), 2, Qt.SolidLine)
             painter.setPen(pen)
-            painter.setBrush(QColor(0, 255, 140, 15))
+            # 【修复】正常监控时背景不填充绿光，防止截图中带有遮罩干扰OCR
+            painter.setBrush(Qt.NoBrush)
 
         painter.drawRect(box_rect.adjusted(1, 1, -1, -1))
 
@@ -657,18 +657,19 @@ class CoordinatePicker(QWidget):
             self.close()
 
 
-# ==================== 7. 后台识别线程 (防死锁与全安全捕获) ====================
+# ==================== 7. 后台识别线程 (DPI缩放/多层容错OCR) ====================
 class MonitorThread(QThread):
     value_updated = Signal(object, str, float)
     alarm_triggered = Signal(object, str, float)
     result_updated = Signal(object, object)
     countdown_signal = Signal(float)
 
-    def __init__(self, boxes, interval=1.0, log_interval=1.0, parent=None):
+    def __init__(self, boxes, interval=1.0, log_interval=1.0, dpr=1.0, parent=None):
         super().__init__(parent)
         self.boxes = boxes
         self.interval = max(0.1, interval)
         self.log_interval = max(0.1, log_interval)
+        self.dpr = max(1.0, dpr) # 屏幕缩放比例
         self.running = True
         self.reader = None
 
@@ -682,72 +683,98 @@ class MonitorThread(QThread):
     def stop(self):
         self.running = False
 
+    # 替换将容易混淆字母转为数字的容错工具
+    def _clean_digit_text(self, text):
+        tr = str.maketrans({
+            'O': '0', 'o': '0', 'Q': '0', 'D': '0',
+            'I': '1', 'l': '1', 'i': '1', '|': '1', '!': '1',
+            'Z': '2', 'z': '2',
+            'S': '5', 's': '5',
+            'B': '8',
+            'G': '6', 'g': '9', 'q': '9'
+        })
+        return text.translate(tr)
+
     def _recognize_number(self, img_np):
         if not self.reader:
             return None
 
         try:
-            if img_np.shape[2] == 4:
-                gray = cv2.cvtColor(img_np, cv2.COLOR_RGBA2GRAY)
+            bgr = cv2.cvtColor(img_np, cv2.COLOR_BGRA2BGR)
+            h, w = bgr.shape[:2]
+            if h <= 0 or w <= 0: return None
+
+            # 小图平滑放大
+            if h < 40 or w < 40:
+                scale = max(2, int(80 / min(h, w)))
+                scaled_bgr = cv2.resize(bgr, (w * scale, h * scale), interpolation=cv2.INTER_CUBIC)
             else:
-                gray = cv2.cvtColor(img_np, cv2.COLOR_RGB2GRAY)
+                scaled_bgr = bgr
 
-            h_img, w_img = gray.shape[:2]
-            if h_img <= 0 or w_img <= 0: return None
+            nums = []
 
-            scaled = cv2.resize(gray, (w_img * 4, h_img * 4), interpolation=cv2.INTER_LANCZOS4)
-            clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
-            enhanced = clahe.apply(scaled)
-            kernel = np.array([[0, -1, 0], [-1, 5, -1], [0, -1, 0]], dtype=np.float32)
-            sharpened = cv2.filter2D(enhanced, -1, kernel)
+            # --- 方案 1: 原始彩色平滑图像直接识别 ---
+            ok1, buf1 = cv2.imencode(".png", scaled_bgr)
+            if ok1:
+                raw_text = str(self.reader.classification(buf1.tobytes()))
+                clean_t = self._clean_digit_text(raw_text).replace(' ', '')
+                clean_t = re.sub(r'(?<=\d)[\,\:\·\'\`\_\-\*\°\o\O\a\e\~]+(?=\d)', '.', clean_t)
+                nums = re.findall(r'-?\d+(?:\.\d+)?', clean_t)
 
-            is_success, buffer = cv2.imencode(".png", sharpened)
-            if not is_success: return None
+            # --- 方案 2: 降噪/灰度对比度强化 ---
+            if not nums:
+                gray = cv2.cvtColor(scaled_bgr, cv2.COLOR_BGR2GRAY)
+                norm_gray = cv2.normalize(gray, None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX)
+                ok2, buf2 = cv2.imencode(".png", norm_gray)
+                if ok2:
+                    raw_text2 = str(self.reader.classification(buf2.tobytes()))
+                    clean_t2 = self._clean_digit_text(raw_text2).replace(' ', '')
+                    clean_t2 = re.sub(r'(?<=\d)[\,\:\·\'\`\_\-\*\°\o\O\a\e\~]+(?=\d)', '.', clean_t2)
+                    nums = re.findall(r'-?\d+(?:\.\d+)?', clean_t2)
 
-            raw_text = self.reader.classification(buffer.tobytes())
-            if not raw_text: return None
+            # --- 方案 3: 二值化翻转 ---
+            if not nums:
+                gray = cv2.cvtColor(scaled_bgr, cv2.COLOR_BGR2GRAY)
+                _, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+                ok3, buf3 = cv2.imencode(".png", thresh)
+                if ok3:
+                    raw_text3 = str(self.reader.classification(buf3.tobytes()))
+                    clean_t3 = self._clean_digit_text(raw_text3).replace(' ', '')
+                    clean_t3 = re.sub(r'(?<=\d)[\,\:\·\'\`\_\-\*\°\o\O\a\e\~]+(?=\d)', '.', clean_t3)
+                    nums = re.findall(r'-?\d+(?:\.\d+)?', clean_t3)
 
-            t_clean = str(raw_text).replace(' ', '')
-            t_clean = re.sub(r'(?<=\d)[\,\:\·\'\`\_\-\*\°\o\O\a\e\~]+(?=\d)', '.', t_clean)
-
-            nums = re.findall(r'-?\d+(?:\.\d+)?', t_clean)
+            # 包含小数点的数值优先输出
             if nums and '.' in nums[0]:
                 try: return float(nums[0])
                 except ValueError: pass
 
-            # 轮廓判断分析补全小数点
-            _, thresh = cv2.threshold(sharpened, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-            if np.mean(thresh) > 127:
-                thresh = cv2.bitwise_not(thresh)
-
-            contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-            
-            boxes_c = []
-            for c in contours:
-                x, y, w, h = cv2.boundingRect(c)
-                if w * h >= 4:
-                    boxes_c.append((x, y, w, h))
-
-            if boxes_c and nums:
-                boxes_c.sort(key=lambda b: b[0])
-                max_h = max(b[3] for b in boxes_c) if boxes_c else 0
-                
-                if max_h > 0:
-                    digit_boxes = [b for b in boxes_c if b[3] >= 0.35 * max_h]
-                    dot_boxes = [b for b in boxes_c if b[3] < 0.35 * max_h and b[2] < 0.35 * max_h]
-
-                    raw_num_str = nums[0].replace('.', '')
-                    if len(raw_num_str) == len(digit_boxes) and len(digit_boxes) > 1:
-                        for dot in dot_boxes:
-                            dot_center_x = dot[0] + dot[2] / 2.0
-                            for i in range(len(digit_boxes) - 1):
-                                d1_right = digit_boxes[i][0] + digit_boxes[i][2]
-                                d2_left = digit_boxes[i+1][0]
-                                if d1_right - 8 <= dot_center_x <= d2_left + 8:
-                                    fixed_str = raw_num_str[:i+1] + '.' + raw_num_str[i+1:]
-                                    return float(fixed_str)
-
+            # 若仅识别为整数，则尝试通过轮廓寻找丢失的小数点
             if nums:
+                gray_c = cv2.cvtColor(scaled_bgr, cv2.COLOR_BGR2GRAY)
+                _, bin_img = cv2.threshold(gray_c, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+                if np.mean(bin_img) > 127: bin_img = cv2.bitwise_not(bin_img)
+
+                contours, _ = cv2.findContours(bin_img, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                boxes_c = [cv2.boundingRect(c) for c in contours if cv2.boundingRect(c)[2]*cv2.boundingRect(c)[3] >= 4]
+
+                if boxes_c:
+                    boxes_c.sort(key=lambda b: b[0])
+                    max_h = max(b[3] for b in boxes_c) if boxes_c else 0
+                    if max_h > 0:
+                        digit_boxes = [b for b in boxes_c if b[3] >= 0.35 * max_h]
+                        dot_boxes = [b for b in boxes_c if b[3] < 0.35 * max_h and b[2] < 0.35 * max_h]
+
+                        raw_num_str = nums[0].replace('.', '')
+                        if len(raw_num_str) == len(digit_boxes) and len(digit_boxes) > 1:
+                            for dot in dot_boxes:
+                                dot_center_x = dot[0] + dot[2] / 2.0
+                                for i in range(len(digit_boxes) - 1):
+                                    d1_right = digit_boxes[i][0] + digit_boxes[i][2]
+                                    d2_left = digit_boxes[i+1][0]
+                                    if d1_right - 10 <= dot_center_x <= d2_left + 10:
+                                        fixed_str = raw_num_str[:i+1] + '.' + raw_num_str[i+1:]
+                                        return float(fixed_str)
+
                 try: return float(nums[0])
                 except ValueError: pass
 
@@ -766,7 +793,12 @@ class MonitorThread(QThread):
                     for box in boxes_snapshot:
                         if not self.running: break
 
-                        x, y, w, h = box.capture_x, box.capture_y, box.capture_w, box.capture_h
+                        # 【核心修复】：应用高 DPI 缩放换算物理像素，向内裁切 2 像素避开边框
+                        x = int((box.capture_x + 2) * self.dpr)
+                        y = int((box.capture_y + 2) * self.dpr)
+                        w = int(max(10, box.capture_w - 4) * self.dpr)
+                        h = int(max(10, box.capture_h - 4) * self.dpr)
+
                         if w > 0 and h > 0:
                             try:
                                 bbox = {"top": y, "left": x, "width": w, "height": h}
@@ -790,9 +822,9 @@ class MonitorThread(QThread):
                                         box.set_alarm_state(False)
                             except Exception: pass
 
-                        self.msleep(150)
+                        self.msleep(100)
 
-                # 【问题二修复】保证倒计时平滑进行，不受识别阻塞或 OCR 是否准备就绪影响
+                # 倒计时逻辑
                 wait_sec = max(0.1, self.interval)
                 steps = max(1, int(wait_sec * 10))
                 for step in range(steps, 0, -1):
@@ -804,7 +836,7 @@ class MonitorThread(QThread):
                     self.countdown_signal.emit(0.0)
 
 
-# ==================== 8. 全局控制面板 (重新排版 & 50%黑色背景) ====================
+# ==================== 8. 全局控制面板 (添加文字按钮与识别排查) ====================
 class GlobalControlPanel(QWidget):
     def __init__(self):
         super().__init__(None)
@@ -820,6 +852,7 @@ class GlobalControlPanel(QWidget):
         self.sub_controls_visible = True
         self.reader = None
         self.ocr_loading = True
+        self.ocr_error_msg = ""
         self.config_file = "monitor_config.json"
         self.alarm_player = AlarmSoundPlayer()
         self.grille_thread = None
@@ -834,7 +867,7 @@ class GlobalControlPanel(QWidget):
         main_layout.setContentsMargins(6, 6, 6, 6)
         main_layout.setSpacing(6)
 
-        # 整体面板暗黑样式
+        # 样式定义
         self.setStyleSheet("""
             QWidget#MainPanel { 
                 background-color: rgba(13, 13, 13, 0.85); 
@@ -891,7 +924,7 @@ class GlobalControlPanel(QWidget):
             }
         """)
 
-        # 【修改】50%黑色背景卡片构造函数 (rgba(0,0,0,0.5))
+        # 50% 黑色卡片工厂
         def make_black_card(widgets):
             card = QFrame()
             card.setStyleSheet("""
@@ -924,16 +957,17 @@ class GlobalControlPanel(QWidget):
         self.lbl_countdown.setStyleSheet("color: #00ff8c; font-size: 12px; font-weight: bold; padding: 0 4px;")
         top_bar_layout.addWidget(self.lbl_countdown)
 
-        self.btn_toggle_sub = QPushButton("👁")
-        self.btn_toggle_sub.setFixedSize(26, 26)
-        self.btn_toggle_sub.setToolTip("显示/隐藏选框控制栏")
+        # 【需求一】：按钮增加文字 (控制栏显示/隐藏)
+        self.btn_toggle_sub = QPushButton("👁 隐藏控制栏")
+        self.btn_toggle_sub.setFixedHeight(26)
+        self.btn_toggle_sub.setToolTip("显示/隐藏所有选框下方的操作控制栏")
         self.btn_toggle_sub.clicked.connect(self._toggle_sub_controls)
         top_bar_layout.addWidget(self.btn_toggle_sub)
 
-        # 纯图标收起/展开
-        self.btn_collapse = QPushButton("▼")
-        self.btn_collapse.setFixedSize(26, 26)
-        self.btn_collapse.setToolTip("展开/收起参数面板")
+        # 【需求一】：按钮增加文字 (面板折叠/展开)
+        self.btn_collapse = QPushButton("▲ 收起面板")
+        self.btn_collapse.setFixedHeight(26)
+        self.btn_collapse.setToolTip("展开/收起下方参数设置面板")
         self.btn_collapse.clicked.connect(self._toggle_collapse)
         top_bar_layout.addWidget(self.btn_collapse)
 
@@ -951,7 +985,7 @@ class GlobalControlPanel(QWidget):
         config_panel_layout.setContentsMargins(0, 2, 0, 0)
         config_panel_layout.setSpacing(5)
 
-        # 第一排：【间隔】/【记录间隔】/【记录数】(50%黑色背景卡片)
+        # 第一排：【间隔】/【记录间隔】/【记录数】
         row1_layout = QHBoxLayout()
         row1_layout.setContentsMargins(0, 0, 0, 0)
         row1_layout.setSpacing(5)
@@ -1004,7 +1038,7 @@ class GlobalControlPanel(QWidget):
 
         config_panel_layout.addLayout(row1_layout)
 
-        # 第二排：【细格栅】/【执行间隔】(50%黑色背景卡片)
+        # 第二排：【细格栅】/【执行间隔】
         row2_layout = QHBoxLayout()
         row2_layout.setContentsMargins(0, 0, 0, 0)
         row2_layout.setSpacing(5)
@@ -1058,7 +1092,8 @@ class GlobalControlPanel(QWidget):
         self._drag_pos = None
 
     def _update_button_styles(self):
-        self.btn_collapse.setText("▲" if self.is_collapsed else "▼")
+        self.btn_collapse.setText("▼ 展开面板" if self.is_collapsed else "▲ 收起面板")
+        self.btn_toggle_sub.setText("👁 隐藏控制栏" if self.sub_controls_visible else "👁 显示控制栏")
         self.btn_monitor.setStyleSheet(f"background-color: {'#cc3333' if self.monitoring else '#008855'}; color: white; font-weight: bold; height: 26px;")
 
     def _toggle_collapse(self):
@@ -1071,6 +1106,7 @@ class GlobalControlPanel(QWidget):
         self.sub_controls_visible = not self.sub_controls_visible
         for box in self.boxes:
             box.set_sub_controls_visible(self.sub_controls_visible)
+        self._update_button_styles()
 
     def _on_f12_pressed(self):
         if self.grille_thread and self.grille_thread.isRunning():
@@ -1109,22 +1145,24 @@ class GlobalControlPanel(QWidget):
 
     def _init_ocr(self):
         class OCRLoader(QThread):
-            loaded = Signal(object)
+            loaded = Signal(object, str)
             def run(self):
                 try:
                     import ddddocr
-                    self.loaded.emit(ddddocr.DdddOcr(show_ad=False))
-                except Exception:
-                    self.loaded.emit(None)
+                    reader = ddddocr.DdddOcr(show_ad=False)
+                    self.loaded.emit(reader, "")
+                except Exception as e:
+                    self.loaded.emit(None, str(e))
 
         self.ocr_loading = True
         self.loader = OCRLoader()
         self.loader.loaded.connect(self._on_ocr_loaded)
         self.loader.start()
 
-    def _on_ocr_loaded(self, reader):
+    def _on_ocr_loaded(self, reader, err_msg):
         self.reader = reader
         self.ocr_loading = False
+        self.ocr_error_msg = err_msg
         if hasattr(self, 'monitor_thread') and self.monitor_thread and self.monitor_thread.isRunning():
             self.monitor_thread.set_reader(reader)
 
@@ -1176,7 +1214,6 @@ class GlobalControlPanel(QWidget):
             self.boxes.remove(box)
             box.close()
 
-    # 【问题二修复】保证点击【开始监控】绝无卡死，倒计时平滑开启
     def _toggle_monitor(self):
         if self.monitoring:
             self.stop_monitor()
@@ -1187,17 +1224,21 @@ class GlobalControlPanel(QWidget):
 
             if not self.reader:
                 if self.ocr_loading:
-                    QMessageBox.information(self, "提示", "OCR识别引擎正在初始化，监控与倒计时已开启，结果将在加载后显示。")
+                    QMessageBox.information(self, "提示", "OCR 识别引擎正在加载中，监控与倒计时已开启，加载完成后会自动显示结果。")
                 else:
-                    QMessageBox.warning(self, "提示", "未检测到 ddddocr 识别库。监控与倒计时将正常运行，但无法识别数字。")
+                    QMessageBox.critical(self, "OCR 引擎加载失败", f"无法使用识别功能！未检测到 ddddocr 库或依赖缺失。\n\n具体错误：{self.ocr_error_msg}\n\n解决办法：请打开 CMD 命令行执行 pip install ddddocr 重新安装。")
 
             self.start_monitor()
 
     def start_monitor(self):
+        # 获得主屏幕高 DPI 缩放比例，解决多倍缩放屏幕截图位置偏移
+        dpr = QApplication.primaryScreen().devicePixelRatio()
+        
         self.monitor_thread = MonitorThread(
             self.boxes, 
             interval=self.spin_interval.value(),
-            log_interval=self.spin_log_interval.value()
+            log_interval=self.spin_log_interval.value(),
+            dpr=dpr
         )
         if self.reader:
             self.monitor_thread.set_reader(self.reader)
