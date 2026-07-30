@@ -4,11 +4,12 @@ import os
 import time
 import re
 import threading
+import ctypes
 from datetime import datetime
 
 from PySide6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout,
-    QPushButton, QLabel, QLineEdit, QDoubleSpinBox, QSpinBox, QListWidget
+    QPushButton, QLabel, QLineEdit, QDoubleSpinBox, QSpinBox, QListWidget, QCheckBox
 )
 from PySide6.QtCore import Qt, QTimer, QThread, Signal, QPoint, QRect
 from PySide6.QtGui import (
@@ -95,7 +96,64 @@ class AlarmSoundPlayer:
             except: pass
 
 
-# ==================== 2. 独立日志悬浮窗口 ====================
+# ==================== 2. 细格栅自动点击线程 ====================
+class FineGrilleThread(QThread):
+    def __init__(self, cycle_interval_min=2.0, parent=None):
+        super().__init__(parent)
+        self.cycle_interval_min = cycle_interval_min
+        self.running = True
+
+    def set_interval(self, minutes):
+        self.cycle_interval_min = max(0.1, minutes)
+
+    def stop(self):
+        self.running = False
+
+    def _safe_sleep(self, seconds):
+        """分段休眠，防止停止时卡顿"""
+        steps = int(seconds * 10)
+        for _ in range(steps):
+            if not self.running:
+                return False
+            self.msleep(100)
+        return True
+
+    def _click_matrix(self, start_x, start_y):
+        """根据按键精灵逻辑执行单轮矩阵点击"""
+        rows = [(0, 5), (1, 5), (2, 4)]
+        for row_idx, click_count in rows:
+            curr_y = start_y + row_idx * 36
+            curr_x = start_x
+            for _ in range(click_count):
+                if not self.running:
+                    return False
+                # 移动并点击
+                ctypes.windll.user32.SetCursorPos(curr_x, curr_y)
+                ctypes.windll.user32.mouse_event(2, 0, 0, 0, 0) # 左键按下
+                ctypes.windll.user32.mouse_event(4, 0, 0, 0, 0) # 左键抬起
+                
+                if not self._safe_sleep(0.5): # 间隔500毫秒
+                    return False
+                curr_x += 68
+        return True
+
+    def run(self):
+        while self.running:
+            # 第一阶段：X=19, Y=955 起始
+            if not self._click_matrix(19, 955): break
+
+            # 延时2分钟 (120秒)
+            if not self._safe_sleep(120): break
+
+            # 第二阶段：X=51, Y=955 起始
+            if not self._click_matrix(51, 955): break
+
+            # 循环间隔等待（用户设定的间隔时间，单位分钟）
+            wait_sec = max(1.0, self.cycle_interval_min * 60)
+            if not self._safe_sleep(wait_sec): break
+
+
+# ==================== 3. 独立日志悬浮窗口 ====================
 class StandaloneLogWindow(QWidget):
     def __init__(self, name, parent=None):
         super().__init__(None)
@@ -143,7 +201,7 @@ class StandaloneLogWindow(QWidget):
             self.list_widget.takeItem(self.max_count)
 
 
-# ==================== 3. 悬浮选框窗口 ====================
+# ==================== 4. 悬浮选框窗口 ====================
 class OverlayRegionWidget(QWidget):
     delete_requested = Signal(object)
 
@@ -154,7 +212,7 @@ class OverlayRegionWidget(QWidget):
         self.capture_y = y
         self.capture_w = max(40, w)
         self.capture_h = max(20, h)
-        self.top_bar_height = 50  # 默认黑色背景高度，支持拖拽更改
+        self.top_bar_height = 50
 
         self.name = name
         self.lower = lower
@@ -170,14 +228,12 @@ class OverlayRegionWidget(QWidget):
         self._drag_pos = QPoint()
         self._resize_mode = None
 
-        # 独立日志窗口
         self.log_window = StandaloneLogWindow(self.name)
 
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
 
-        # 黑色控制背景栏
         self.top_bar = QWidget()
         self.top_bar.setStyleSheet("background-color: rgba(20, 20, 30, 0.95); border-top-left-radius: 4px; border-top-right-radius: 4px;")
         
@@ -185,7 +241,6 @@ class OverlayRegionWidget(QWidget):
         top_bar_layout.setContentsMargins(4, 2, 4, 2)
         top_bar_layout.setSpacing(2)
 
-        # 第一排：名称显示 / 名称编辑框 / 删除按钮
         row1_layout = QHBoxLayout()
         row1_layout.setContentsMargins(0, 0, 0, 0)
         
@@ -201,7 +256,6 @@ class OverlayRegionWidget(QWidget):
 
         row1_layout.addStretch()
 
-        # ➖ 删除按钮（编辑模式显示）
         self.btn_delete = QPushButton("➖")
         self.btn_delete.setFixedSize(18, 18)
         self.btn_delete.setStyleSheet("QPushButton { background-color: #ff3333; color: white; border: none; border-radius: 9px; font-weight: bold; font-size: 11px; } QPushButton:hover { background-color: #ff6666; }")
@@ -211,7 +265,6 @@ class OverlayRegionWidget(QWidget):
 
         top_bar_layout.addLayout(row1_layout)
 
-        # 第二排：操作按钮
         row2_layout = QHBoxLayout()
         row2_layout.setContentsMargins(0, 0, 0, 0)
         row2_layout.setSpacing(3)
@@ -238,7 +291,6 @@ class OverlayRegionWidget(QWidget):
 
         main_layout.addWidget(self.top_bar)
 
-        # 中间镂空识别区域
         self.capture_spacer = QWidget()
         self.capture_spacer.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         main_layout.addWidget(self.capture_spacer)
@@ -293,13 +345,8 @@ class OverlayRegionWidget(QWidget):
 
     def _get_hit_mode(self, pos):
         x, y = pos.x(), pos.y()
-        w, h = self.width(), self.height()
         m = 6
-
-        # 判断是否拖拽黑色背景底边（调整背景高度）
-        if abs(y - self.top_bar_height) <= m:
-            return "BAR_HEIGHT"
-        
+        if abs(y - self.top_bar_height) <= m: return "BAR_HEIGHT"
         if y >= self.top_bar_height:
             cy = y - self.top_bar_height
             ch = self.capture_h
@@ -354,7 +401,6 @@ class OverlayRegionWidget(QWidget):
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
-
         box_rect = QRect(0, self.top_bar_height, self.capture_w, self.capture_h)
 
         if self.is_editing:
@@ -378,7 +424,7 @@ class OverlayRegionWidget(QWidget):
         event.accept()
 
 
-# ==================== 4. 屏幕选区拾取器 ====================
+# ==================== 5. 屏幕选区拾取器 ====================
 class CoordinatePicker(QWidget):
     coord_selected = Signal(int, int, int, int)
     def __init__(self, parent=None):
@@ -446,7 +492,7 @@ class CoordinatePicker(QWidget):
             self.close()
 
 
-# ==================== 5. 后台识别线程 ====================
+# ==================== 6. 后台识别线程 ====================
 class MonitorThread(QThread):
     value_updated = Signal(object, str, float)
     alarm_triggered = Signal(object, str, float)
@@ -521,7 +567,7 @@ class MonitorThread(QThread):
                 self.msleep(int(sleep_needed * 1000))
 
 
-# ==================== 6. 右上角全局控制面板（无主界面模式） ====================
+# ==================== 7. 全局控制面板（完全可拖动 + 折叠 + 细格栅自动点击） ====================
 class GlobalControlPanel(QWidget):
     def __init__(self):
         super().__init__(None)
@@ -531,13 +577,17 @@ class GlobalControlPanel(QWidget):
         self.boxes = []
         self.monitoring = False
         self.is_editing = False
+        self.is_collapsed = False
         self.reader = None
         self.config_file = "monitor_config.json"
         self.alarm_player = AlarmSoundPlayer()
+        self.grille_thread = None
 
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(8, 6, 8, 6)
-        layout.setSpacing(6)
+        self._drag_pos = None
+
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(8, 6, 8, 6)
+        main_layout.setSpacing(6)
 
         self.setStyleSheet("""
             QWidget { background-color: rgba(20, 20, 30, 0.92); border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.2); }
@@ -545,53 +595,148 @@ class GlobalControlPanel(QWidget):
             QPushButton { background-color: rgba(255, 255, 255, 0.15); color: white; border: none; border-radius: 4px; padding: 4px 8px; font-size: 11px; font-weight: bold; }
             QPushButton:hover { background-color: rgba(255, 255, 255, 0.3); }
             QDoubleSpinBox, QSpinBox { background-color: #2a2a3c; color: #00ff8c; border: 1px solid rgba(255,255,255,0.2); border-radius: 3px; font-size: 11px; padding: 2px; }
+            QCheckBox { color: white; font-size: 11px; font-weight: bold; }
+            QCheckBox::indicator { width: 13px; height: 13px; }
         """)
 
-        # 识别间隔时间 (Req 6)
-        layout.addWidget(QLabel("⏱ 间隔(s):"))
+        # ---------- 第一排：主控制栏 ----------
+        row1_layout = QHBoxLayout()
+        row1_layout.setContentsMargins(0, 0, 0, 0)
+        row1_layout.setSpacing(6)
+
+        # 可收起/展开的设置容器（“开始监控”左边的所有内容）
+        self.left_container = QWidget()
+        left_layout = QHBoxLayout(self.left_container)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+        left_layout.setSpacing(6)
+
+        left_layout.addWidget(QLabel("⏱ 间隔(s):"))
         self.spin_interval = QDoubleSpinBox()
         self.spin_interval.setRange(0.1, 10.0)
         self.spin_interval.setValue(1.0)
         self.spin_interval.setSingleStep(0.5)
         self.spin_interval.valueChanged.connect(self._on_interval_changed)
-        layout.addWidget(self.spin_interval)
+        left_layout.addWidget(self.spin_interval)
 
-        # 显示数值数量 (Req 6)
-        layout.addWidget(QLabel("📊 记录数:"))
+        left_layout.addWidget(QLabel("📊 记录数:"))
         self.spin_count = QSpinBox()
         self.spin_count.setRange(5, 200)
         self.spin_count.setValue(30)
         self.spin_count.valueChanged.connect(self._on_count_changed)
-        layout.addWidget(self.spin_count)
+        left_layout.addWidget(self.spin_count)
 
-        # 调整选框按钮
         self.btn_edit = QPushButton("⚙️ 调整选框")
         self.btn_edit.clicked.connect(self._toggle_edit)
-        layout.addWidget(self.btn_edit)
+        left_layout.addWidget(self.btn_edit)
 
-        # ➕ 加 按钮（编辑模式显示 Req 2）
         self.btn_add = QPushButton("➕ 加")
         self.btn_add.setStyleSheet("background-color: #00a86b; color: white;")
         self.btn_add.setVisible(False)
         self.btn_add.clicked.connect(self._add_box_picker)
-        layout.addWidget(self.btn_add)
+        left_layout.addWidget(self.btn_add)
+
+        row1_layout.addWidget(self.left_container)
+
+        # 折叠/展开按钮
+        self.btn_collapse = QPushButton("◀ 收起")
+        self.btn_collapse.setStyleSheet("background-color: rgba(255,255,255,0.1); color: #00ff8c;")
+        self.btn_collapse.clicked.connect(self._toggle_collapse)
+        row1_layout.addWidget(self.btn_collapse)
 
         # 开始/停止监控
         self.btn_monitor = QPushButton("▶ 开始监控")
         self.btn_monitor.setStyleSheet("background-color: #2e9a58; color: white;")
         self.btn_monitor.clicked.connect(self._toggle_monitor)
-        layout.addWidget(self.btn_monitor)
+        row1_layout.addWidget(self.btn_monitor)
 
         # 退出程序按钮
         self.btn_exit = QPushButton("❌ 退出")
         self.btn_exit.clicked.connect(self.close_app)
-        layout.addWidget(self.btn_exit)
+        row1_layout.addWidget(self.btn_exit)
+
+        main_layout.addLayout(row1_layout)
+
+        # ---------- 第二排：细格栅自动点击 ----------
+        row2_layout = QHBoxLayout()
+        row2_layout.setContentsMargins(0, 0, 0, 0)
+        row2_layout.setSpacing(6)
+
+        self.chk_grille = QCheckBox("细格栅")
+        self.chk_grille.setStyleSheet("color: #00ff8c;")
+        row2_layout.addWidget(self.chk_grille)
+
+        row2_layout.addWidget(QLabel("循环间隔(分):"))
+        self.spin_grille_interval = QDoubleSpinBox()
+        self.spin_grille_interval.setRange(0.1, 1440.0)
+        self.spin_grille_interval.setValue(2.0)
+        self.spin_grille_interval.setSingleStep(0.5)
+        self.spin_grille_interval.valueChanged.connect(self._on_grille_interval_changed)
+        row2_layout.addWidget(self.spin_grille_interval)
+
+        self.btn_grille_start = QPushButton("▶ 开始操作")
+        self.btn_grille_start.setStyleSheet("background-color: #0088cc; color: white;")
+        self.btn_grille_start.clicked.connect(self._toggle_grille)
+        row2_layout.addWidget(self.btn_grille_start)
+
+        row2_layout.addStretch()
+        main_layout.addLayout(row2_layout)
 
         self.adjustSize()
         self._position_top_right()
 
         self._init_ocr()
         self.load_config()
+
+    # ---------- 拖动窗口逻辑 (Req 1) ----------
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self._drag_pos = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+            event.accept()
+
+    def mouseMoveEvent(self, event):
+        if event.buttons() & Qt.LeftButton and self._drag_pos is not None:
+            self.move(event.globalPosition().toPoint() - self._drag_pos)
+            event.accept()
+
+    def mouseReleaseEvent(self, event):
+        self._drag_pos = None
+
+    # ---------- 收起 / 展开逻辑 (Req 1) ----------
+    def _toggle_collapse(self):
+        self.is_collapsed = not self.is_collapsed
+        self.left_container.setVisible(not self.is_collapsed)
+        if self.is_collapsed:
+            self.btn_collapse.setText("▶ 展开")
+        else:
+            self.btn_collapse.setText("◀ 收起")
+        self.adjustSize()
+
+    # ---------- 细格栅自动点击控制 (Req 2) ----------
+    def _on_grille_interval_changed(self, val):
+        if self.grille_thread and self.grille_thread.isRunning():
+            self.grille_thread.set_interval(val)
+
+    def _toggle_grille(self):
+        if self.grille_thread and self.grille_thread.isRunning():
+            self.stop_grille()
+        else:
+            if not self.chk_grille.isChecked():
+                self.chk_grille.setChecked(True)
+            self.start_grille()
+
+    def start_grille(self):
+        self.grille_thread = FineGrilleThread(cycle_interval_min=self.spin_grille_interval.value())
+        self.grille_thread.start()
+        self.btn_grille_start.setText("⏹ 停止操作")
+        self.btn_grille_start.setStyleSheet("background-color: #cc3333; color: white;")
+
+    def stop_grille(self):
+        if self.grille_thread:
+            self.grille_thread.stop()
+            self.grille_thread.wait()
+            self.grille_thread = None
+        self.btn_grille_start.setText("▶ 开始操作")
+        self.btn_grille_start.setStyleSheet("background-color: #0088cc; color: white;")
 
     def _position_top_right(self):
         screen_geo = QApplication.primaryScreen().geometry()
@@ -696,6 +841,8 @@ class GlobalControlPanel(QWidget):
         data = {
             'interval': self.spin_interval.value(),
             'count': self.spin_count.value(),
+            'grille_interval': self.spin_grille_interval.value(),
+            'grille_checked': self.chk_grille.isChecked(),
             'boxes': []
         }
         for b in self.boxes:
@@ -716,6 +863,8 @@ class GlobalControlPanel(QWidget):
                 data = json.load(f)
             self.spin_interval.setValue(data.get('interval', 1.0))
             self.spin_count.setValue(data.get('count', 30))
+            self.spin_grille_interval.setValue(data.get('grille_interval', 2.0))
+            self.chk_grille.setChecked(data.get('grille_checked', False))
 
             for item in data.get('boxes', []):
                 box = OverlayRegionWidget(
@@ -736,6 +885,7 @@ class GlobalControlPanel(QWidget):
 
     def close_app(self):
         self.stop_monitor()
+        self.stop_grille()
         self.save_config()
         for b in self.boxes:
             b.close()
