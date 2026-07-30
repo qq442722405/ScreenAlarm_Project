@@ -10,7 +10,7 @@ from datetime import datetime
 from PySide6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel, QLineEdit, QDoubleSpinBox, QSpinBox,
-    QListWidget, QCheckBox, QAbstractSpinBox, QFrame
+    QListWidget, QCheckBox, QAbstractSpinBox, QFrame, QMessageBox
 )
 from PySide6.QtCore import Qt, QTimer, QThread, Signal, QPoint, QRect
 from PySide6.QtGui import (
@@ -187,16 +187,16 @@ class StandaloneLogWindow(QWidget):
         self.list_widget = QListWidget()
         self.list_widget.setStyleSheet("""
             QListWidget {
-                background-color: rgba(0, 0, 0, 0.85);
+                background-color: #000000;
                 color: #00ff8c;
-                border: 1px solid rgba(255, 255, 255, 0.2);
+                border: 1px solid #333333;
                 border-radius: 4px;
                 font-family: Consolas, "Courier New", monospace;
                 font-size: 11px;
             }
             QListWidget::item {
-                padding: 2px 4px;
-                border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+                padding: 3px 5px;
+                border-bottom: 1px solid #1a1a1a;
             }
         """)
         layout.addWidget(self.list_widget)
@@ -259,7 +259,7 @@ class OverlayRegionWidget(QWidget):
         self.capture_spacer.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         main_layout.addWidget(self.capture_spacer)
 
-        # 报警消除按钮置于识别框右上角
+        # 报警消除按钮
         self.btn_clear_alarm = QPushButton("🚨 消除", self)
         self.btn_clear_alarm.setStyleSheet("""
             QPushButton {
@@ -271,9 +271,7 @@ class OverlayRegionWidget(QWidget):
                 font-weight: bold;
                 padding: 1px 4px;
             }
-            QPushButton:hover {
-                background-color: #ff6666;
-            }
+            QPushButton:hover { background-color: #ff6666; }
         """)
         self.btn_clear_alarm.clicked.connect(self._on_clear_alarm)
         self.btn_clear_alarm.hide()
@@ -283,35 +281,29 @@ class OverlayRegionWidget(QWidget):
         self.bottom_bar.setAttribute(Qt.WA_StyledBackground, True)
         self.bottom_bar.setStyleSheet("""
             QWidget {
-                background-color: rgba(0, 0, 0, 0.85);
-                border: 1px solid rgba(255, 255, 255, 0.25);
+                background-color: #000000;
+                border: 1px solid #333333;
                 border-radius: 6px;
             }
-            QLabel {
-                color: #ffffff;
-                border: none;
-                background-color: transparent;
-            }
+            QLabel { color: #ffffff; border: none; background: transparent; }
             QPushButton {
-                background-color: rgba(255, 255, 255, 0.15);
+                background-color: #1a1a1a;
                 color: white;
-                border: none;
+                border: 1px solid #444;
                 border-radius: 3px;
                 padding: 2px 5px;
                 font-size: 10px;
             }
-            QPushButton:hover {
-                background-color: rgba(255, 255, 255, 0.3);
-            }
+            QPushButton:hover { background-color: #333; }
             QDoubleSpinBox {
-                background: rgba(0, 0, 0, 0.8);
+                background: #111111;
                 color: #00ff8c;
-                border: 1px solid #555;
+                border: 1px solid #00ff8c;
                 font-size: 10px;
                 border-radius: 2px;
             }
             QLineEdit {
-                background-color: rgba(0, 0, 0, 0.8);
+                background-color: #111111;
                 color: #00ff8c;
                 font-size: 11px;
                 font-weight: bold;
@@ -511,7 +503,7 @@ class OverlayRegionWidget(QWidget):
     def _toggle_mute(self):
         self.is_muted = not self.is_muted
         self.btn_mute.setText("🔇 静音" if self.is_muted else "🔊 静音")
-        self.btn_mute.setStyleSheet("QPushButton { background-color: #e65100; color: white; border: none; border-radius: 3px; padding: 2px 5px; font-size: 10px; }" if self.is_muted else "QPushButton { background-color: rgba(255,255,255,0.15); color: white; border: none; border-radius: 3px; padding: 2px 5px; font-size: 10px; }")
+        self.btn_mute.setStyleSheet("QPushButton { background-color: #e65100; color: white; border: none; border-radius: 3px; padding: 2px 5px; font-size: 10px; }" if self.is_muted else "QPushButton { background-color: #1a1a1a; color: white; border: 1px solid #444; border-radius: 3px; padding: 2px 5px; font-size: 10px; }")
 
     def _get_hit_mode(self, pos):
         x, y = pos.x(), pos.y()
@@ -664,7 +656,7 @@ class CoordinatePicker(QWidget):
             self.close()
 
 
-# ==================== 7. 后台识别线程 (支持实时倒计时) ====================
+# ==================== 7. 后台识别线程 (解耦实时倒计时) ====================
 class MonitorThread(QThread):
     value_updated = Signal(object, str, float)
     alarm_triggered = Signal(object, str, float)
@@ -761,54 +753,52 @@ class MonitorThread(QThread):
         with mss.mss() as sct:
             while self.running:
                 boxes_snapshot = list(self.boxes)
-                if not boxes_snapshot or not self.reader:
-                    self.msleep(300)
-                    continue
-
-                # 逐个窗口顺序识别，中间间隔1秒
-                for box in boxes_snapshot:
-                    if not self.running: break
-
-                    x, y, w, h = box.capture_x, box.capture_y, box.capture_w, box.capture_h
-                    if w > 0 and h > 0:
-                        try:
-                            bbox = {"top": y, "left": x, "width": w, "height": h}
-                            sct_img = sct.grab(bbox)
-                            img_np = np.array(sct_img)
-
-                            val = self._recognize_number(img_np)
-                            now_time = time.time()
-                            now_str = datetime.now().strftime("%H:%M:%S")
-
-                            self.result_updated.emit(box, val)
-
-                            if val is not None:
-                                if now_time - getattr(box, 'last_log_time', 0.0) >= self.log_interval * 60:
-                                    box.last_log_time = now_time
-                                    self.value_updated.emit(box, now_str, val)
-
-                                if val < box.lower or val > box.upper:
-                                    self.alarm_triggered.emit(box, now_str, val)
-                                else:
-                                    box.set_alarm_state(False)
-                        except Exception: pass
-
-                    # 每个窗口识别间静默等待 1 秒
-                    for _ in range(10):
+                
+                # 如果有选框且 OCR 可用，执行全选框一轮扫描
+                if boxes_snapshot and self.reader:
+                    for box in boxes_snapshot:
                         if not self.running: break
-                        self.msleep(100)
 
-                # 【需求三】进入本轮检测后的倒计时等待过程
+                        x, y, w, h = box.capture_x, box.capture_y, box.capture_w, box.capture_h
+                        if w > 0 and h > 0:
+                            try:
+                                bbox = {"top": y, "left": x, "width": w, "height": h}
+                                sct_img = sct.grab(bbox)
+                                img_np = np.array(sct_img)
+
+                                val = self._recognize_number(img_np)
+                                now_time = time.time()
+                                now_str = datetime.now().strftime("%H:%M:%S")
+
+                                self.result_updated.emit(box, val)
+
+                                if val is not None:
+                                    if now_time - getattr(box, 'last_log_time', 0.0) >= self.log_interval * 60:
+                                        box.last_log_time = now_time
+                                        self.value_updated.emit(box, now_str, val)
+
+                                    if val < box.lower or val > box.upper:
+                                        self.alarm_triggered.emit(box, now_str, val)
+                                    else:
+                                        box.set_alarm_state(False)
+                            except Exception: pass
+
+                        # 每个选框扫描间隔 0.2 秒
+                        self.msleep(200)
+
+                # 【需求二修复】解耦倒计时：不论是否有选框，均平滑进行倒计时循环
                 wait_sec = self.interval
-                steps = int(wait_sec * 10)
+                steps = max(1, int(wait_sec * 10))
                 for step in range(steps, 0, -1):
                     if not self.running: break
                     self.countdown_signal.emit(step / 10.0)
                     self.msleep(100)
-                self.countdown_signal.emit(0.0)
+                
+                if self.running:
+                    self.countdown_signal.emit(0.0)
 
 
-# ==================== 8. 全局控制面板 ====================
+# ==================== 8. 全局控制面板 (重新排版 & 纯黑背景) ====================
 class GlobalControlPanel(QWidget):
     def __init__(self):
         super().__init__(None)
@@ -834,14 +824,15 @@ class GlobalControlPanel(QWidget):
         self.f12_listener.start()
 
         main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(8, 8, 8, 8)
+        main_layout.setContentsMargins(6, 6, 6, 6)
         main_layout.setSpacing(6)
 
+        # 整体面板暗黑样式
         self.setStyleSheet("""
             QWidget#MainPanel { 
-                background-color: rgba(0, 0, 0, 0.88); 
+                background-color: #0d0d0d; 
                 border-radius: 8px; 
-                border: 1px solid rgba(255, 255, 255, 0.25);
+                border: 1px solid #333333;
             }
             QLabel { 
                 color: #ffffff; 
@@ -851,9 +842,9 @@ class GlobalControlPanel(QWidget):
                 border: none;
             }
             QPushButton { 
-                background-color: rgba(0, 0, 0, 0.8); 
+                background-color: #1a1a1a; 
                 color: #ffffff; 
-                border: 1px solid rgba(255, 255, 255, 0.3); 
+                border: 1px solid #444444; 
                 border-radius: 4px; 
                 padding: 0px 8px; 
                 height: 26px;
@@ -861,21 +852,21 @@ class GlobalControlPanel(QWidget):
                 font-weight: bold; 
             }
             QPushButton:hover { 
-                background-color: rgba(60, 60, 60, 0.8); 
-                border: 1px solid rgba(255, 255, 255, 0.5);
+                background-color: #2a2a2a; 
+                border: 1px solid #666666;
             }
             QDoubleSpinBox, QSpinBox { 
-                background-color: rgba(0, 0, 0, 0.8); 
+                background-color: #111111; 
                 color: #00ff8c; 
-                border: 1px solid rgba(255, 255, 255, 0.3); 
-                border-radius: 4px; 
+                border: 1px solid #00ff8c; 
+                border-radius: 3px; 
                 font-size: 11px; 
                 font-weight: bold; 
                 padding: 0px 2px;
-                height: 26px;
+                height: 22px;
             }
             QCheckBox { 
-                color: #00ff8c; 
+                color: #ffffff; 
                 font-size: 11px; 
                 font-weight: bold; 
                 background: transparent;
@@ -886,70 +877,111 @@ class GlobalControlPanel(QWidget):
                 height: 14px; 
                 border-radius: 3px;
                 border: 1px solid #00ff8c;
-                background: rgba(0, 0, 0, 0.8);
+                background: #000000;
             }
             QCheckBox::indicator:checked {
                 background: #00ff8c;
             }
         """)
 
-        # 【需求一】卡片化容器辅助构造函数
-        def make_styled_card(widgets):
+        # 【需求三】纯黑背景卡片构造辅助函数 (#000000 Pure Black)
+        def make_black_card(widgets):
             card = QFrame()
             card.setStyleSheet("""
                 QFrame {
-                    background-color: rgba(255, 255, 255, 0.08);
-                    border: 1px solid rgba(255, 255, 255, 0.22);
+                    background-color: #000000;
+                    border: 1px solid #333333;
                     border-radius: 5px;
                 }
-                QLabel { border: none; background: transparent; }
+                QLabel { border: none; background: transparent; color: #ffffff; }
             """)
             layout = QHBoxLayout(card)
-            layout.setContentsMargins(5, 2, 5, 2)
-            layout.setSpacing(4)
+            layout.setContentsMargins(6, 3, 6, 3)
+            layout.setSpacing(5)
             for w in widgets:
                 layout.addWidget(w)
             return card
 
-        # ---------- 第 1 排：【间隔】/【记录间隔】/【记录数】卡片 ----------
-        self.row1_container = QWidget()
-        row1_layout = QHBoxLayout(self.row1_container)
+        # ---------- 排版 1：顶部主控制栏 (常用按钮排在一起) ----------
+        top_bar_layout = QHBoxLayout()
+        top_bar_layout.setContentsMargins(0, 0, 0, 0)
+        top_bar_layout.setSpacing(5)
+
+        self.btn_monitor = QPushButton("▶ 开始监控")
+        self.btn_monitor.setFixedHeight(26)
+        self.btn_monitor.clicked.connect(self._toggle_monitor)
+        top_bar_layout.addWidget(self.btn_monitor)
+
+        # 倒计时显示
+        self.lbl_countdown = QLabel("⏳ 0.0s")
+        self.lbl_countdown.setStyleSheet("color: #00ff8c; font-size: 12px; font-weight: bold; padding: 0 4px;")
+        top_bar_layout.addWidget(self.lbl_countdown)
+
+        self.btn_toggle_sub = QPushButton("👁")
+        self.btn_toggle_sub.setFixedSize(26, 26)
+        self.btn_toggle_sub.setToolTip("显示/隐藏选框控制栏")
+        self.btn_toggle_sub.clicked.connect(self._toggle_sub_controls)
+        top_bar_layout.addWidget(self.btn_toggle_sub)
+
+        # 【需求一】收起/展开：纯图标表示，不包含文字
+        self.btn_collapse = QPushButton("▼")
+        self.btn_collapse.setFixedSize(26, 26)
+        self.btn_collapse.setToolTip("展开/收起参数面板")
+        self.btn_collapse.clicked.connect(self._toggle_collapse)
+        top_bar_layout.addWidget(self.btn_collapse)
+
+        self.btn_exit = QPushButton("❌")
+        self.btn_exit.setFixedSize(26, 26)
+        self.btn_exit.setToolTip("退出程序")
+        self.btn_exit.clicked.connect(self.close_app)
+        top_bar_layout.addWidget(self.btn_exit)
+
+        main_layout.addLayout(top_bar_layout)
+
+        # ---------- 排版 2：可收起的配置面板 ----------
+        self.config_panel = QWidget()
+        config_panel_layout = QVBoxLayout(self.config_panel)
+        config_panel_layout.setContentsMargins(0, 2, 0, 0)
+        config_panel_layout.setSpacing(5)
+
+        # 第一排：【间隔】/【记录间隔】/【记录数】(全纯黑背景卡片)
+        row1_layout = QHBoxLayout()
         row1_layout.setContentsMargins(0, 0, 0, 0)
-        row1_layout.setSpacing(6)
+        row1_layout.setSpacing(5)
 
         # 1. 间隔
         self.spin_interval = QDoubleSpinBox()
         self.spin_interval.setButtonSymbols(QAbstractSpinBox.NoButtons)
         self.spin_interval.setAlignment(Qt.AlignCenter)
-        self.spin_interval.setFixedSize(50, 24)
+        self.spin_interval.setFixedSize(48, 22)
         self.spin_interval.setRange(0.1, 99999.0)
         self.spin_interval.setValue(1.0)
         self.spin_interval.setSingleStep(0.5)
         self.spin_interval.valueChanged.connect(self._on_params_changed)
-        card_interval = make_styled_card([QLabel("⏱ 间隔(s):"), self.spin_interval])
+        card_interval = make_black_card([QLabel("⏱ 间隔(s):"), self.spin_interval])
         row1_layout.addWidget(card_interval)
 
         # 2. 记录间隔
         self.spin_log_interval = QDoubleSpinBox()
         self.spin_log_interval.setButtonSymbols(QAbstractSpinBox.NoButtons)
         self.spin_log_interval.setAlignment(Qt.AlignCenter)
-        self.spin_log_interval.setFixedSize(50, 24)
+        self.spin_log_interval.setFixedSize(48, 22)
         self.spin_log_interval.setRange(0.1, 1440.0)
         self.spin_log_interval.setValue(1.0)
         self.spin_log_interval.setSingleStep(0.5)
         self.spin_log_interval.valueChanged.connect(self._on_params_changed)
-        card_log_interval = make_styled_card([QLabel("📝 记录间隔(分):"), self.spin_log_interval])
+        card_log_interval = make_black_card([QLabel("📝 记录间隔(分):"), self.spin_log_interval])
         row1_layout.addWidget(card_log_interval)
 
         # 3. 记录数
         self.spin_count = QSpinBox()
         self.spin_count.setButtonSymbols(QAbstractSpinBox.NoButtons)
         self.spin_count.setAlignment(Qt.AlignCenter)
-        self.spin_count.setFixedSize(45, 24)
+        self.spin_count.setFixedSize(40, 22)
         self.spin_count.setRange(5, 500)
         self.spin_count.setValue(30)
         self.spin_count.valueChanged.connect(self._on_count_changed)
-        card_count = make_styled_card([QLabel("📊 记录数:"), self.spin_count])
+        card_count = make_black_card([QLabel("📊 记录数:"), self.spin_count])
         row1_layout.addWidget(card_count)
 
         self.btn_edit = QPushButton("⚙️ 调整")
@@ -958,84 +990,47 @@ class GlobalControlPanel(QWidget):
         row1_layout.addWidget(self.btn_edit)
 
         self.btn_add = QPushButton("➕ 添加选框")
-        self.btn_add.setStyleSheet("background-color: rgba(0, 168, 107, 0.85); color: white; height: 26px; font-weight: bold;")
+        self.btn_add.setStyleSheet("background-color: #008855; color: white; height: 26px; font-weight: bold;")
         self.btn_add.setVisible(False)
         self.btn_add.clicked.connect(self._add_box_picker)
         row1_layout.addWidget(self.btn_add)
 
-        row1_layout.addStretch()
-        main_layout.addWidget(self.row1_container)
+        config_panel_layout.addLayout(row1_layout)
 
-        # ---------- 第 2 排：【细格栅】/【执行间隔】卡片 ----------
-        self.row2_container = QWidget()
-        row2_layout = QHBoxLayout(self.row2_container)
+        # 第二排：【细格栅】/【执行间隔】(全纯黑背景卡片)
+        row2_layout = QHBoxLayout()
         row2_layout.setContentsMargins(0, 0, 0, 0)
-        row2_layout.setSpacing(6)
+        row2_layout.setSpacing(5)
 
         # 4. 细格栅
         self.chk_grille = QCheckBox("细格栅")
-        card_grille = make_styled_card([self.chk_grille])
+        card_grille = make_black_card([self.chk_grille])
         row2_layout.addWidget(card_grille)
 
         # 5. 执行间隔
         self.spin_grille_interval = QDoubleSpinBox()
         self.spin_grille_interval.setButtonSymbols(QAbstractSpinBox.NoButtons)
         self.spin_grille_interval.setAlignment(Qt.AlignCenter)
-        self.spin_grille_interval.setFixedSize(48, 24)
+        self.spin_grille_interval.setFixedSize(48, 22)
         self.spin_grille_interval.setRange(0.1, 1440.0)
         self.spin_grille_interval.setValue(2.0)
         self.spin_grille_interval.setSingleStep(0.5)
         self.spin_grille_interval.valueChanged.connect(self._on_grille_interval_changed)
-        card_grille_interval = make_styled_card([QLabel("执行间隔(分):"), self.spin_grille_interval])
+        card_grille_interval = make_black_card([QLabel("执行间隔(分):"), self.spin_grille_interval])
         row2_layout.addWidget(card_grille_interval)
 
         self.btn_grille_start = QPushButton("▶ 开始操作")
         self.btn_grille_start.setFixedHeight(26)
-        self.btn_grille_start.setStyleSheet("background-color: rgba(0, 136, 204, 0.8); color: white; font-weight: bold;")
+        self.btn_grille_start.setStyleSheet("background-color: #0066cc; color: white; font-weight: bold;")
         self.btn_grille_start.clicked.connect(self._toggle_grille)
         row2_layout.addWidget(self.btn_grille_start)
 
         row2_layout.addStretch()
-        main_layout.addWidget(self.row2_container)
+        config_panel_layout.addLayout(row2_layout)
 
-        # ---------- 第 3 排：收起按钮 / 监控按钮 / 显示隐藏 / 倒计时 / 退出 ----------
-        row3_layout = QHBoxLayout()
-        row3_layout.setContentsMargins(0, 0, 0, 0)
-        row3_layout.setSpacing(6)
+        main_layout.addWidget(self.config_panel)
 
-        # 【需求二】单箭头表示展开与收起
-        self.btn_collapse = QPushButton("▼ 收起")
-        self.btn_collapse.setFixedHeight(26)
-        self.btn_collapse.clicked.connect(self._toggle_collapse)
-        row3_layout.addWidget(self.btn_collapse)
-
-        self.btn_monitor = QPushButton("▶ 开始监控")
-        self.btn_monitor.setFixedHeight(26)
-        self.btn_monitor.clicked.connect(self._toggle_monitor)
-        row3_layout.addWidget(self.btn_monitor)
-
-        # 【需求三】倒计时与状态显示标签
-        self.lbl_countdown = QLabel("⏳ 0.0s")
-        self.lbl_countdown.setStyleSheet("color: #00ff8c; font-size: 11px; font-weight: bold;")
-        row3_layout.addWidget(self.lbl_countdown)
-
-        self.btn_toggle_sub = QPushButton("👁 隐藏窗口")
-        self.btn_toggle_sub.setFixedHeight(26)
-        self.btn_toggle_sub.clicked.connect(self._toggle_sub_controls)
-        row3_layout.addWidget(self.btn_toggle_sub)
-
-        self.btn_exit = QPushButton("❌ 退出")
-        self.btn_exit.setFixedHeight(26)
-        self.btn_exit.clicked.connect(self.close_app)
-        row3_layout.addWidget(self.btn_exit)
-
-        row3_layout.addStretch()
-        main_layout.addLayout(row3_layout)
-
-        # ---------- 第 4 排：【需求四】状态提示信息栏 ----------
-        self.lbl_status = QLabel("系统就绪，请添加识别选框或开始监控")
-        self.lbl_status.setStyleSheet("color: #aaaaaa; font-size: 10px; font-weight: normal;")
-        main_layout.addWidget(self.lbl_status)
+        # 【需求四】删除了底部的 “监控已停止” 标签 (lbl_status)
 
         self._update_button_styles()
         self.adjustSize()
@@ -1058,24 +1053,19 @@ class GlobalControlPanel(QWidget):
         self._drag_pos = None
 
     def _update_button_styles(self):
-        pad = "padding: 0px 8px; font-size: 11px; height: 26px;"
-        # 单箭头逻辑：展开显“▼”，折叠显“▲”
-        self.btn_collapse.setText("▲ 展开" if self.is_collapsed else "▼ 收起")
-        self.btn_collapse.setStyleSheet(f"background-color: rgba(0, 0, 0, 0.8); color: #00ff8c; font-weight: bold; {pad}")
-        self.btn_monitor.setStyleSheet(f"background-color: {'rgba(176, 58, 58, 0.8)' if self.monitoring else 'rgba(46, 154, 88, 0.8)'}; color: white; font-weight: bold; {pad}")
-        self.btn_toggle_sub.setStyleSheet(f"background-color: rgba(0, 0, 0, 0.8); color: #00ff8c; font-weight: bold; {pad}")
-        self.btn_exit.setStyleSheet(f"background-color: rgba(0, 0, 0, 0.8); color: white; font-weight: bold; {pad}")
+        # 纯图标表示收起/展开 (展开用 ▼，收起折叠后用 ▲)
+        self.btn_collapse.setText("▲" if self.is_collapsed else "▼")
+        
+        self.btn_monitor.setStyleSheet(f"background-color: {'#cc3333' if self.monitoring else '#008855'}; color: white; font-weight: bold; height: 26px;")
 
     def _toggle_collapse(self):
         self.is_collapsed = not self.is_collapsed
-        self.row1_container.setVisible(not self.is_collapsed)
-        self.row2_container.setVisible(not self.is_collapsed)
+        self.config_panel.setVisible(not self.is_collapsed)
         self._update_button_styles()
         self.adjustSize()
 
     def _toggle_sub_controls(self):
         self.sub_controls_visible = not self.sub_controls_visible
-        self.btn_toggle_sub.setText("👁 隐藏窗口" if self.sub_controls_visible else "👁 显示窗口")
         for box in self.boxes:
             box.set_sub_controls_visible(self.sub_controls_visible)
 
@@ -1092,8 +1082,7 @@ class GlobalControlPanel(QWidget):
             self.stop_grille()
         else:
             if not self.chk_grille.isChecked():
-                self.lbl_status.setText("⚠️ 请先勾选【细格栅】开关！")
-                self.lbl_status.setStyleSheet("color: #ff3333; font-size: 10px; font-weight: bold;")
+                QMessageBox.warning(self, "提示", "请先勾选【细格栅】选项！")
                 return
             self.start_grille()
 
@@ -1101,9 +1090,7 @@ class GlobalControlPanel(QWidget):
         self.grille_thread = FineGrilleThread(cycle_interval_min=self.spin_grille_interval.value())
         self.grille_thread.start()
         self.btn_grille_start.setText("⏹ 停止操作(F12)")
-        self.btn_grille_start.setStyleSheet("background-color: rgba(204, 51, 51, 0.8); color: white; font-weight: bold; height: 26px;")
-        self.lbl_status.setText("▶ 细格栅自动点击任务运行中...")
-        self.lbl_status.setStyleSheet("color: #00ff8c; font-size: 10px; font-weight: bold;")
+        self.btn_grille_start.setStyleSheet("background-color: #cc3333; color: white; font-weight: bold; height: 26px;")
 
     def stop_grille(self):
         if self.grille_thread:
@@ -1111,9 +1098,7 @@ class GlobalControlPanel(QWidget):
             self.grille_thread.wait()
             self.grille_thread = None
         self.btn_grille_start.setText("▶ 开始操作")
-        self.btn_grille_start.setStyleSheet("background-color: rgba(0, 136, 204, 0.8); color: white; font-weight: bold; height: 26px;")
-        self.lbl_status.setText("⏹ 细格栅自动点击已停止")
-        self.lbl_status.setStyleSheet("color: #aaaaaa; font-size: 10px; font-weight: normal;")
+        self.btn_grille_start.setStyleSheet("background-color: #0066cc; color: white; font-weight: bold; height: 26px;")
 
     def _position_top_right(self):
         screen_geo = QApplication.primaryScreen().geometry()
@@ -1129,21 +1114,12 @@ class GlobalControlPanel(QWidget):
                 except Exception:
                     self.loaded.emit(None)
 
-        self.lbl_status.setText("⏳ 正在初始化 OCR 识别引擎，请稍候...")
-        self.lbl_status.setStyleSheet("color: #ffcc00; font-size: 10px;")
-
         self.loader = OCRLoader()
         self.loader.loaded.connect(self._on_ocr_loaded)
         self.loader.start()
 
     def _on_ocr_loaded(self, reader):
         self.reader = reader
-        if reader:
-            self.lbl_status.setText("✅ OCR 引擎初始化完毕")
-            self.lbl_status.setStyleSheet("color: #00ff8c; font-size: 10px;")
-        else:
-            self.lbl_status.setText("❌ OCR 引擎加载失败，请确认已安装 ddddocr 库")
-            self.lbl_status.setStyleSheet("color: #ff3333; font-size: 10px;")
 
     def _on_params_changed(self):
         if hasattr(self, 'monitor_thread') and self.monitor_thread:
@@ -1161,10 +1137,10 @@ class GlobalControlPanel(QWidget):
         self.btn_add.setVisible(self.is_editing)
         if self.is_editing:
             self.btn_edit.setText("✅ 完成调整")
-            self.btn_edit.setStyleSheet("background-color: rgba(230, 184, 77, 0.85); color: black; height: 26px; font-weight: bold;")
+            self.btn_edit.setStyleSheet("background-color: #e6b800; color: black; height: 26px; font-weight: bold;")
         else:
             self.btn_edit.setText("⚙️ 调整")
-            self.btn_edit.setStyleSheet("background-color: rgba(0, 0, 0, 0.8); color: white; height: 26px; font-weight: bold;")
+            self.btn_edit.setStyleSheet("background-color: #1a1a1a; color: white; height: 26px; font-weight: bold;")
             self.save_config()
 
         for box in self.boxes:
@@ -1187,27 +1163,22 @@ class GlobalControlPanel(QWidget):
         box.set_max_log_count(self.spin_count.value())
         box.show()
         self.boxes.append(box)
-        self.lbl_status.setText(f"已添加 区域{box_id}，目前共 {len(self.boxes)} 个选框")
-        self.lbl_status.setStyleSheet("color: #00ff8c; font-size: 10px;")
 
     def _delete_box(self, box):
         if box in self.boxes:
             self.boxes.remove(box)
             box.close()
-            self.lbl_status.setText(f"已删除选框，剩余 {len(self.boxes)} 个选框")
 
-    # 【需求四】排查并修复：开始监控事件处理与友好提示
+    # 【需求二】解决点击“开始监控”没有反应与倒计时不走的异常
     def _toggle_monitor(self):
         if self.monitoring:
             self.stop_monitor()
         else:
             if not self.boxes:
-                self.lbl_status.setText("⚠️ 请先点击【⚙️ 调整】->【➕ 添加选框】建立识别区域！")
-                self.lbl_status.setStyleSheet("color: #ff3333; font-size: 10px; font-weight: bold;")
+                QMessageBox.warning(self, "提示", "请先点击【⚙️ 调整】->【➕ 添加选框】创建识别区域！")
                 return
             if not self.reader:
-                self.lbl_status.setText("⏳ OCR 模型加载中，请稍等几秒再尝试...")
-                self.lbl_status.setStyleSheet("color: #ffcc00; font-size: 10px; font-weight: bold;")
+                QMessageBox.information(self, "请稍候", "OCR 引擎初始化中，请稍等几秒后再次点击...")
                 return
             self.start_monitor()
 
@@ -1228,8 +1199,6 @@ class GlobalControlPanel(QWidget):
 
         self.monitoring = True
         self.btn_monitor.setText("⏹ 停止监控")
-        self.lbl_status.setText("▶ 后台监控运行中...")
-        self.lbl_status.setStyleSheet("color: #00ff8c; font-size: 10px; font-weight: bold;")
         self._update_button_styles()
 
     def stop_monitor(self):
@@ -1239,8 +1208,6 @@ class GlobalControlPanel(QWidget):
         self.monitoring = False
         self.btn_monitor.setText("▶ 开始监控")
         self.lbl_countdown.setText("⏳ 0.0s")
-        self.lbl_status.setText("⏹ 监控已停止")
-        self.lbl_status.setStyleSheet("color: #aaaaaa; font-size: 10px; font-weight: normal;")
         self._update_button_styles()
         self.alarm_player.stop()
 
