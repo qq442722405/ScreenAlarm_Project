@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QTableWidget, QTableWidgetItem, QLabel, QMessageBox,
     QAbstractItemView, QHeaderView, QCheckBox, QDoubleSpinBox, QGroupBox,
-    QDialog, QFormLayout, QDialogButtonBox
+    QDialog, QFormLayout, QDialogButtonBox, QSpinBox
 )
 from PySide6.QtCore import Qt, QTimer, QThread, Signal, QPoint, QRect
 from PySide6.QtGui import (
@@ -41,7 +41,7 @@ class MonitorThread(QThread):
         self.running = True
         self.reader = None
         self.last_values = {}
-        self.alarm_states = {}
+        self.last_alarm_values = {}  # 记录已触发报警的数值，避免数值未变时重复报警
 
     def set_reader(self, reader):
         self.reader = reader
@@ -108,18 +108,19 @@ class MonitorThread(QThread):
                                 self.last_values[row] = val
                                 self.value_updated.emit(row, val, now_str)
 
-                            # 报警逻辑
+                            # 报警逻辑（改进：当报警数值不变时，只报警一次）
                             lower, upper = m['lower'], m['upper']
                             is_alarm = (val < lower or val > upper)
-                            prev_alarm = self.alarm_states.get(row, False)
 
                             if is_alarm:
-                                self.alarm_triggered.emit(row, m['name'], val, lower, upper)
-                                self.alarm_states[row] = True
+                                last_alarm_val = self.last_alarm_values.get(row)
+                                if last_alarm_val != val:
+                                    self.last_alarm_values[row] = val
+                                    self.alarm_triggered.emit(row, m['name'], val, lower, upper)
                             else:
-                                if prev_alarm or last_val != val:
+                                if row in self.last_alarm_values:
+                                    del self.last_alarm_values[row]
                                     self.status_updated.emit(row, 'normal')
-                                self.alarm_states[row] = False
                         else:
                             self.status_updated.emit(row, 'error')
 
@@ -131,7 +132,94 @@ class MonitorThread(QThread):
                 self.msleep(int(sleep_needed * 1000))
 
 
-# ==================== 2. 独立上下限设置弹窗 ====================
+# ==================== 2. 趋势图表组件 ====================
+class TrendChartWidget(QWidget):
+    def __init__(self, parent=None, is_mini=False):
+        super().__init__(parent)
+        self.is_mini = is_mini
+        self.setMinimumHeight(80 if is_mini else 150)
+        self.max_points = 15
+        self.data = []
+
+    def set_max_points(self, count):
+        self.max_points = max(2, count)
+        while len(self.data) > self.max_points:
+            self.data.pop(0)
+        self.update()
+
+    def add_data_point(self, time_str, val):
+        self.data.append((time_str, val))
+        while len(self.data) > self.max_points:
+            self.data.pop(0)
+        self.update()
+
+    def clear_data(self):
+        self.data.clear()
+        self.update()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        rect = self.rect()
+
+        # 背景
+        bg_color = QColor("#14141e") if self.is_mini else QColor("#1e1e2d")
+        painter.setBrush(bg_color)
+        painter.setPen(QPen(QColor("#333344"), 1))
+        painter.drawRoundedRect(rect, 4 if self.is_mini else 8, 4 if self.is_mini else 8)
+
+        # 标注右上角数值数量
+        painter.setPen(QColor("#8888aa"))
+        painter.setFont(QFont("Microsoft YaHei", 7 if self.is_mini else 8))
+        info_str = f"数量: {len(self.data)}/{self.max_points}"
+        painter.drawText(rect.adjusted(0, 2, -6, 0), Qt.AlignRight | Qt.AlignTop, info_str)
+
+        if len(self.data) < 2:
+            painter.setPen(QColor("#666688"))
+            painter.setFont(QFont("Microsoft YaHei", 8))
+            painter.drawText(rect, Qt.AlignCenter, "暂无足够数据")
+            return
+
+        # 绘图区域边距
+        left_m = 25 if self.is_mini else 40
+        right_m = 10 if self.is_mini else 20
+        top_m = 18 if self.is_mini else 25
+        bottom_m = 15 if self.is_mini else 30
+
+        chart_rect = QRect(left_m, top_m, rect.width() - left_m - right_m, rect.height() - top_m - bottom_m)
+        vals = [d[1] for d in self.data]
+        min_v, max_v = min(vals), max(vals)
+        if min_v == max_v:
+            min_v -= 1.0; max_v += 1.0
+        rng = max_v - min_v
+
+        step_x = chart_rect.width() / (len(self.data) - 1) if len(self.data) > 1 else chart_rect.width()
+        points = []
+        for i, (t_str, val) in enumerate(self.data):
+            x = chart_rect.left() + i * step_x
+            y = chart_rect.bottom() - (val - min_v) / rng * chart_rect.height()
+            points.append((x, y, t_str, val))
+
+        # 折线
+        pen = QPen(QColor("#00ff8c"), 1.5 if self.is_mini else 2)
+        painter.setPen(pen)
+        for i in range(len(points) - 1):
+            painter.drawLine(QPoint(points[i][0], points[i][1]), QPoint(points[i+1][0], points[i+1][1]))
+
+        # 数据点与时间刻度
+        painter.setFont(QFont("Microsoft YaHei", 7 if self.is_mini else 8))
+        for i, (x, y, t_str, val) in enumerate(points):
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QColor("#ffffff"))
+            painter.drawEllipse(QPoint(x, y), 2 if self.is_mini else 3, 2 if self.is_mini else 3)
+
+            if not self.is_mini:
+                if i == 0 or i == len(points) - 1 or i % 4 == 0:
+                    painter.setPen(QColor("#8888aa"))
+                    painter.drawText(x - 20, chart_rect.bottom() + 15, 40, 15, Qt.AlignCenter, t_str)
+
+
+# ==================== 3. 独立上下限设置弹窗 ====================
 class RegionSettingsDialog(QDialog):
     def __init__(self, name, lower, upper, parent=None):
         super().__init__(parent)
@@ -165,7 +253,7 @@ class RegionSettingsDialog(QDialog):
         return self.spin_lower.value(), self.spin_upper.value()
 
 
-# ==================== 3. 独立悬浮选框 ====================
+# ==================== 4. 独立悬浮选框 ====================
 class OverlayRegionWidget(QWidget):
     rect_changed = Signal(int, int, int, int, int)      # row, x, y, w, h
     clear_alarm_requested = Signal(int)                 # row
@@ -177,13 +265,14 @@ class OverlayRegionWidget(QWidget):
         self.row = row
         self.capture_x = x
         self.capture_y = y
-        self.capture_w = max(20, w)   # 支持极小 20px
-        self.capture_h = max(15, h)   # 支持极小 15px
+        self.capture_w = max(20, w)   
+        self.capture_h = max(15, h)   
         self.top_bar_height = 24
 
         self.is_alarm = False
         self.is_editing = False
         self.is_muted = False
+        self.chart_visible = False
 
         self.setWindowFlags(Qt.WindowStaysOnTopHint | Qt.FramelessWindowHint | Qt.Tool)
         self.setAttribute(Qt.WA_TranslucentBackground, True)
@@ -198,19 +287,19 @@ class OverlayRegionWidget(QWidget):
         # 顶部控制栏
         self.top_bar = QWidget()
         self.top_bar.setFixedHeight(self.top_bar_height)
-        self.top_bar.setStyleSheet("background-color: rgba(20, 20, 30, 0.9); border-top-left-radius: 4px; border-top-right-radius: 4px;")
+        self.top_bar.setStyleSheet("background-color: rgba(20, 20, 30, 0.92); border-top-left-radius: 4px; border-top-right-radius: 4px;")
         top_layout = QHBoxLayout(self.top_bar)
         top_layout.setContentsMargins(4, 1, 4, 1)
-        top_layout.setSpacing(3)
+        top_layout.setSpacing(2)
 
-        # 左侧显示区域名称
+        # 左侧名称
         self.lbl_title = QLabel(name)
         self.lbl_title.setStyleSheet("color: #00ff8c; font-size: 11px; font-weight: bold;")
         top_layout.addWidget(self.lbl_title)
 
         top_layout.addStretch()
 
-        # 报警消除按钮
+        # 消除报警按钮
         self.btn_clear_alarm = QPushButton("🚨 消除")
         self.btn_clear_alarm.setStyleSheet("""
             QPushButton { background-color: #ff4d4d; color: white; border: none; border-radius: 3px; padding: 1px 4px; font-size: 10px; font-weight: bold; }
@@ -220,9 +309,20 @@ class OverlayRegionWidget(QWidget):
         self.btn_clear_alarm.clicked.connect(self._on_clear_alarm)
         top_layout.addWidget(self.btn_clear_alarm)
 
+        # ⬇️/⬆️ 折叠/展开迷你趋势图按钮
+        self.btn_toggle_chart = QPushButton("⬇️")
+        self.btn_toggle_chart.setFixedSize(20, 18)
+        self.btn_toggle_chart.setToolTip("展开/收起数值变动趋势图")
+        self.btn_toggle_chart.setStyleSheet("""
+            QPushButton { background-color: rgba(255,255,255,0.2); color: white; border: none; border-radius: 3px; font-size: 10px; }
+            QPushButton:hover { background-color: rgba(255,255,255,0.4); }
+        """)
+        self.btn_toggle_chart.clicked.connect(self._toggle_chart)
+        top_layout.addWidget(self.btn_toggle_chart)
+
         # 静音按钮
         self.btn_mute = QPushButton("🔊")
-        self.btn_mute.setFixedSize(22, 18)
+        self.btn_mute.setFixedSize(20, 18)
         self.btn_mute.setToolTip("屏蔽/开启此区域声音报警")
         self.btn_mute.setStyleSheet("""
             QPushButton { background-color: rgba(255,255,255,0.2); color: white; border: none; border-radius: 3px; font-size: 10px; }
@@ -231,9 +331,9 @@ class OverlayRegionWidget(QWidget):
         self.btn_mute.clicked.connect(self._on_toggle_mute)
         top_layout.addWidget(self.btn_mute)
 
-        # 设置按钮（设置上下限）
+        # 设置按钮
         self.btn_settings = QPushButton("⚙️")
-        self.btn_settings.setFixedSize(22, 18)
+        self.btn_settings.setFixedSize(20, 18)
         self.btn_settings.setToolTip("设置报警上下限")
         self.btn_settings.setStyleSheet("""
             QPushButton { background-color: rgba(255,255,255,0.2); color: white; border: none; border-radius: 3px; font-size: 10px; }
@@ -243,7 +343,16 @@ class OverlayRegionWidget(QWidget):
         top_layout.addWidget(self.btn_settings)
 
         main_layout.addWidget(self.top_bar)
-        main_layout.addStretch()
+
+        # 中间镂空占位区域（对应识别框）
+        self.capture_spacer = QWidget()
+        self.capture_spacer.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        main_layout.addWidget(self.capture_spacer)
+
+        # 底部迷你趋势图
+        self.mini_chart = TrendChartWidget(self, is_mini=True)
+        self.mini_chart.setVisible(False)
+        main_layout.addWidget(self.mini_chart)
 
         self._update_geometry()
         self.setMouseTracking(True)
@@ -251,10 +360,25 @@ class OverlayRegionWidget(QWidget):
     def set_title(self, name):
         self.lbl_title.setText(name)
 
+    def add_trend_data(self, time_str, val):
+        self.mini_chart.add_data_point(time_str, val)
+
     def _update_geometry(self):
-        # 保证顶部控制栏至少宽 130px，防极小框造成控件挤压
-        total_w = max(self.capture_w, 130)
-        self.setGeometry(self.capture_x, self.capture_y - self.top_bar_height, total_w, self.capture_h + self.top_bar_height)
+        total_w = max(self.capture_w, 160)
+        self.capture_spacer.setFixedHeight(self.capture_h)
+
+        total_h = self.top_bar_height + self.capture_h
+        if self.chart_visible:
+            self.mini_chart.setFixedHeight(85)
+            total_h += 85
+
+        self.setGeometry(self.capture_x, self.capture_y - self.top_bar_height, total_w, total_h)
+
+    def _toggle_chart(self):
+        self.chart_visible = not self.chart_visible
+        self.mini_chart.setVisible(self.chart_visible)
+        self.btn_toggle_chart.setText("⬆️" if self.chart_visible else "⬇️")
+        self._update_geometry()
 
     def set_alarm_state(self, is_alarm):
         self.is_alarm = is_alarm
@@ -362,7 +486,7 @@ class OverlayRegionWidget(QWidget):
         painter.drawRect(box_rect.adjusted(1, 1, -1, -1))
 
 
-# ==================== 4. 屏幕右上角全局悬浮控制条 ====================
+# ==================== 5. 屏幕右上角全局悬浮控制条 ====================
 class GlobalControlBar(QWidget):
     toggle_edit_signal = Signal(bool)
     toggle_main_signal = Signal()
@@ -432,7 +556,7 @@ class GlobalControlBar(QWidget):
             self.btn_monitor.setStyleSheet("background-color: #2e9a58; color: white;")
 
 
-# ==================== 5. 报警声音播放器 ====================
+# ==================== 6. 报警声音播放器 ====================
 class AlarmSoundPlayer:
     def __init__(self):
         self.is_playing = False
@@ -501,7 +625,7 @@ class AlarmSoundPlayer:
             except: pass
 
 
-# ==================== 6. 屏幕选区拾取器 ====================
+# ==================== 7. 屏幕选区拾取器 ====================
 class CoordinatePicker(QWidget):
     coord_selected = Signal(int, int, int, int)
     def __init__(self, parent=None):
@@ -569,73 +693,12 @@ class CoordinatePicker(QWidget):
             self.close()
 
 
-# ==================== 7. 趋势图表 ====================
-class TrendChartWidget(QWidget):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setMinimumHeight(180)
-        self.data = []
-
-    def add_data_point(self, time_str, val):
-        self.data.append((time_str, val))
-        if len(self.data) > 15:
-            self.data.pop(0)
-        self.update()
-
-    def clear_data(self):
-        self.data.clear()
-        self.update()
-
-    def paintEvent(self, event):
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.Antialiasing)
-        rect = self.rect()
-
-        painter.setBrush(QColor("#1e1e2d"))
-        painter.setPen(Qt.NoPen)
-        painter.drawRoundedRect(rect, 8, 8)
-
-        if len(self.data) < 2:
-            painter.setPen(QColor("#666688"))
-            painter.drawText(rect, Qt.AlignCenter, "等待数值变动数据...")
-            return
-
-        chart_rect = QRect(40, 20, rect.width() - 60, rect.height() - 50)
-        vals = [d[1] for d in self.data]
-        min_v, max_v = min(vals), max(vals)
-        if min_v == max_v:
-            min_v -= 1.0; max_v += 1.0
-        rng = max_v - min_v
-
-        step_x = chart_rect.width() / (len(self.data) - 1)
-        points = []
-        for i, (t_str, val) in enumerate(self.data):
-            x = chart_rect.left() + i * step_x
-            y = chart_rect.bottom() - (val - min_v) / rng * chart_rect.height()
-            points.append((x, y, t_str, val))
-
-        pen = QPen(QColor("#00ff8c"), 2)
-        painter.setPen(pen)
-        for i in range(len(points) - 1):
-            painter.drawLine(QPoint(points[i][0], points[i][1]), QPoint(points[i+1][0], points[i+1][1]))
-
-        painter.setFont(QFont("Microsoft YaHei", 8))
-        for i, (x, y, t_str, val) in enumerate(points):
-            painter.setPen(Qt.NoPen)
-            painter.setBrush(QColor("#ffffff"))
-            painter.drawEllipse(QPoint(x, y), 3, 3)
-
-            if i == 0 or i == len(points) - 1 or i % 4 == 0:
-                painter.setPen(QColor("#8888aa"))
-                painter.drawText(x - 20, chart_rect.bottom() + 18, 40, 15, Qt.AlignCenter, t_str)
-
-
 # ==================== 8. 主窗口逻辑 ====================
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("屏幕数值监控报警")
-        self.resize(1000, 680)
+        self.resize(1000, 700)
 
         icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "favicon.ico")
         if os.path.exists(icon_path):
@@ -657,7 +720,7 @@ class MainWindow(QMainWindow):
 
         self._setup_ui()
 
-        # 初始化全局悬浮控制条（屏幕右上角）
+        # 全局悬浮控制条
         self.global_bar = GlobalControlBar()
         self.global_bar.toggle_edit_signal.connect(self._on_global_toggle_edit)
         self.global_bar.toggle_main_signal.connect(self._on_global_toggle_main)
@@ -731,11 +794,25 @@ class MainWindow(QMainWindow):
         self.table.itemChanged.connect(self._on_table_item_changed)
         main_layout.addWidget(self.table, 3)
 
-        # 趋势图
+        # 趋势图区域
         self.chart_group = QGroupBox("📈 实时数值变动趋势")
-        chart_layout = QVBoxLayout(self.chart_group)
+        chart_group_layout = QVBoxLayout(self.chart_group)
+
+        chart_ctrl_layout = QHBoxLayout()
+        chart_ctrl_layout.addStretch()
+
+        lbl_points = QLabel("显示数值数量:")
+        self.spin_chart_points = QSpinBox()
+        self.spin_chart_points.setRange(5, 200)
+        self.spin_chart_points.setValue(15)
+        self.spin_chart_points.valueChanged.connect(self._on_chart_points_changed)
+        chart_ctrl_layout.addWidget(lbl_points)
+        chart_ctrl_layout.addWidget(self.spin_chart_points)
+
+        chart_group_layout.addLayout(chart_ctrl_layout)
+
         self.trend_chart = TrendChartWidget()
-        chart_layout.addWidget(self.trend_chart)
+        chart_group_layout.addWidget(self.trend_chart)
         main_layout.addWidget(self.chart_group, 2)
 
         # 底部按钮组
@@ -762,6 +839,11 @@ class MainWindow(QMainWindow):
     def _on_interval_changed(self, val):
         if self.monitoring and self.monitor_thread:
             self.monitor_thread.update_interval(val)
+
+    def _on_chart_points_changed(self, val):
+        self.trend_chart.set_max_points(val)
+        for ov in self.overlay_widgets.values():
+            ov.mini_chart.set_max_points(val)
 
     def _on_table_item_changed(self, item):
         if item.column() == 1:
@@ -827,12 +909,12 @@ class MainWindow(QMainWindow):
                 self.overlay_widgets[row].set_title(name)
             else:
                 ov = OverlayRegionWidget(row, x, y, w, h, name, self)
+                ov.mini_chart.set_max_points(self.spin_chart_points.value())
                 ov.rect_changed.connect(self._on_overlay_rect_changed)
                 ov.clear_alarm_requested.connect(self._on_overlay_clear_alarm)
                 ov.settings_requested.connect(self._open_region_settings)
                 ov.mute_toggled.connect(self._on_overlay_mute_toggled)
 
-                # 同步静音UI
                 chk = self.table.cellWidget(row, 8)
                 if chk:
                     ov.update_mute_ui(chk.isChecked())
@@ -953,6 +1035,8 @@ class MainWindow(QMainWindow):
             item.setText(f"{value:.2f}")
 
         self.trend_chart.add_data_point(time_str, value)
+        if row in self.overlay_widgets:
+            self.overlay_widgets[row].add_trend_data(time_str, value)
 
     def on_alarm_triggered(self, row, name, value, lower, upper):
         self.row_alarm[row] = True
@@ -999,6 +1083,7 @@ class MainWindow(QMainWindow):
     def save_config(self):
         config = {
             'interval': self.spin_interval.value(),
+            'chart_points': self.spin_chart_points.value(),
             'monitors': []
         }
         for row in range(self.table.rowCount()):
@@ -1020,6 +1105,7 @@ class MainWindow(QMainWindow):
             with open(self.config_file, 'r', encoding='utf-8') as f:
                 config = json.load(f)
             self.spin_interval.setValue(config.get('interval', 1.0))
+            self.spin_chart_points.setValue(config.get('chart_points', 15))
             self.table.setRowCount(0)
             for item in config.get('monitors', []):
                 row = self.table.rowCount()
