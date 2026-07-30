@@ -5,7 +5,6 @@ import time
 import re
 import threading
 import ctypes
-from ctypes import wintypes
 from datetime import datetime
 
 from PySide6.QtWidgets import (
@@ -15,7 +14,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, QTimer, QThread, Signal, QPoint, QRect
 from PySide6.QtGui import (
-    QColor, QBrush, QFont, QPainter, QPen, QPixmap, QIcon, QKeySequence
+    QColor, QBrush, QFont, QPainter, QPen, QPixmap, QIcon
 )
 
 import mss
@@ -29,22 +28,29 @@ except ImportError:
     PYGAME_AVAILABLE = False
 
 
-# ==================== 1. 全局 F12 快捷键监听线程 ====================
+# ==================== 1. 全局 F12 键盘监听线程（修复版） ====================
 class GlobalF12Listener(QThread):
     f12_triggered = Signal()
 
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.running = True
+
+    def stop(self):
+        self.running = False
+
     def run(self):
         user32 = ctypes.windll.user32
-        HOTKEY_ID = 9999
-        VK_F12 = 0x7B
-        if user32.RegisterHotKey(None, HOTKEY_ID, 0, VK_F12):
-            msg = wintypes.MSG()
-            while user32.GetMessageW(ctypes.byref(msg), None, 0, 0) != 0:
-                if msg.message == 0x0312:  # WM_HOTKEY
-                    self.f12_triggered.emit()
-                user32.TranslateMessage(ctypes.byref(msg))
-                user32.DispatchMessageW(ctypes.byref(msg))
-            user32.UnregisterHotKey(None, HOTKEY_ID)
+        VK_F12 = 0x7B  # F12 键码
+        was_pressed = False
+        while self.running:
+            # 获取 F12 键当前状态（最高位为 1 表示按下）
+            state = user32.GetAsyncKeyState(VK_F12)
+            is_pressed = bool(state & 0x8000)
+            if is_pressed and not was_pressed:
+                self.f12_triggered.emit()
+            was_pressed = is_pressed
+            self.msleep(50)
 
 
 # ==================== 2. 报警声音播放器 ====================
@@ -578,7 +584,7 @@ class MonitorThread(QThread):
                 self.msleep(int(sleep_needed * 1000))
 
 
-# ==================== 8. 全局控制面板 ====================
+# ==================== 8. 全局控制面板（完全重构与高质感对齐） ====================
 class GlobalControlPanel(QWidget):
     def __init__(self):
         super().__init__(None)
@@ -596,39 +602,80 @@ class GlobalControlPanel(QWidget):
 
         self._drag_pos = None
 
-        # 启动系统级 F12 键盘监听 (Req 5)
+        # 启动可靠的底层键盘 F12 监听线程
         self.f12_listener = GlobalF12Listener()
         self.f12_listener.f12_triggered.connect(self._on_f12_pressed)
         self.f12_listener.start()
 
         main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(8, 6, 8, 6)
+        main_layout.setContentsMargins(8, 8, 8, 8)
         main_layout.setSpacing(6)
 
-        # 全局统一样式（包含输入框格式定义 Req 6）
+        # 全局统一样式定义（统一高度26px、字号、圆角、边框与配色）
         self.setStyleSheet("""
-            QWidget { background-color: rgba(20, 20, 30, 0.92); border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.2); }
-            QLabel { color: white; font-size: 11px; }
-            QPushButton { background-color: rgba(255, 255, 255, 0.15); color: white; border: none; border-radius: 4px; padding: 4px 8px; font-size: 11px; font-weight: bold; }
-            QPushButton:hover { background-color: rgba(255, 255, 255, 0.3); }
-            QDoubleSpinBox, QSpinBox { 
-                background-color: #2a2a3c; 
-                color: #00ff8c; 
-                border: 1px solid rgba(255,255,255,0.2); 
-                border-radius: 3px; 
-                font-size: 11px; 
-                padding: 2px 4px; 
+            QWidget { 
+                background-color: rgba(22, 22, 32, 0.95); 
+                border-radius: 8px; 
             }
-            QCheckBox { color: white; font-size: 11px; font-weight: bold; }
-            QCheckBox::indicator { width: 13px; height: 13px; }
+            QLabel { 
+                color: #e0e0e0; 
+                font-size: 11px; 
+                font-weight: bold; 
+                background: transparent;
+                border: none;
+            }
+            QPushButton { 
+                background-color: #2b2d42; 
+                color: #ffffff; 
+                border: 1px solid rgba(255, 255, 255, 0.15); 
+                border-radius: 4px; 
+                padding: 0px 8px; 
+                height: 26px;
+                font-size: 11px; 
+                font-weight: bold; 
+            }
+            QPushButton:hover { 
+                background-color: #3d405b; 
+            }
+            QPushButton:pressed { 
+                background-color: #1a1b26; 
+            }
+            QDoubleSpinBox, QSpinBox { 
+                background-color: #1a1a26; 
+                color: #00ff8c; 
+                border: 1px solid rgba(255, 255, 255, 0.2); 
+                border-radius: 4px; 
+                font-size: 11px; 
+                font-weight: bold; 
+                padding: 0px 2px;
+                height: 26px;
+            }
+            QCheckBox { 
+                color: #00ff8c; 
+                font-size: 11px; 
+                font-weight: bold; 
+                background: transparent;
+                border: none;
+            }
+            QCheckBox::indicator { 
+                width: 14px; 
+                height: 14px; 
+                border-radius: 3px;
+                border: 1px solid #00ff8c;
+                background: #1a1a26;
+            }
+            QCheckBox::indicator:checked {
+                background: #00ff8c;
+            }
         """)
 
-        # ---------- 第 0 排：添加选框按钮容器（点击“调整选框”显示在最上边 Req 2） ----------
+        # ---------- 第 0 排：添加选框栏 ----------
         self.row0_container = QWidget()
         row0_layout = QHBoxLayout(self.row0_container)
         row0_layout.setContentsMargins(0, 0, 0, 0)
+        row0_layout.setSpacing(6)
         self.btn_add = QPushButton("➕ 添加选框")
-        self.btn_add.setStyleSheet("background-color: #00a86b; color: white; font-weight: bold; padding: 4px 12px;")
+        self.btn_add.setStyleSheet("background-color: #00a86b; color: white; height: 26px;")
         self.btn_add.clicked.connect(self._add_box_picker)
         row0_layout.addWidget(self.btn_add)
         row0_layout.addStretch()
@@ -640,16 +687,17 @@ class GlobalControlPanel(QWidget):
         self.row1_layout.setContentsMargins(0, 0, 0, 0)
         self.row1_layout.setSpacing(6)
 
-        # 可收起/展开的左侧设置容器
+        # 左侧可折叠的参数配置容器
         self.left_container = QWidget()
         left_layout = QHBoxLayout(self.left_container)
         left_layout.setContentsMargins(0, 0, 0, 0)
-        left_layout.setSpacing(6)
+        left_layout.setSpacing(5)
 
         left_layout.addWidget(QLabel("⏱ 间隔(s):"))
         self.spin_interval = QDoubleSpinBox()
-        self.spin_interval.setButtonSymbols(QAbstractSpinBox.NoButtons)  # 隐藏增减箭头
-        self.spin_interval.setFixedWidth(40)
+        self.spin_interval.setButtonSymbols(QAbstractSpinBox.NoButtons)
+        self.spin_interval.setAlignment(Qt.AlignCenter)
+        self.spin_interval.setFixedSize(48, 26)
         self.spin_interval.setRange(0.1, 10.0)
         self.spin_interval.setValue(1.0)
         self.spin_interval.setSingleStep(0.5)
@@ -658,14 +706,16 @@ class GlobalControlPanel(QWidget):
 
         left_layout.addWidget(QLabel("📊 记录数:"))
         self.spin_count = QSpinBox()
-        self.spin_count.setButtonSymbols(QAbstractSpinBox.NoButtons)  # 删除上下按钮 (Req 1)
-        self.spin_count.setFixedWidth(40)
+        self.spin_count.setButtonSymbols(QAbstractSpinBox.NoButtons)
+        self.spin_count.setAlignment(Qt.AlignCenter)
+        self.spin_count.setFixedSize(48, 26)
         self.spin_count.setRange(5, 200)
         self.spin_count.setValue(30)
         self.spin_count.valueChanged.connect(self._on_count_changed)
         left_layout.addWidget(self.spin_count)
 
         self.btn_edit = QPushButton("⚙️ 调整选框")
+        self.btn_edit.setFixedHeight(26)
         self.btn_edit.clicked.connect(self._toggle_edit)
         left_layout.addWidget(self.btn_edit)
 
@@ -673,34 +723,37 @@ class GlobalControlPanel(QWidget):
 
         # 折叠/展开按钮
         self.btn_collapse = QPushButton("◀ 收起")
+        self.btn_collapse.setFixedHeight(26)
         self.btn_collapse.clicked.connect(self._toggle_collapse)
         self.row1_layout.addWidget(self.btn_collapse)
 
         # 开始/停止监控按钮
         self.btn_monitor = QPushButton("▶ 开始监控")
+        self.btn_monitor.setFixedHeight(26)
         self.btn_monitor.clicked.connect(self._toggle_monitor)
         self.row1_layout.addWidget(self.btn_monitor)
 
         # 退出程序按钮
         self.btn_exit = QPushButton("❌ 退出")
+        self.btn_exit.setFixedHeight(26)
         self.btn_exit.clicked.connect(self.close_app)
         self.row1_layout.addWidget(self.btn_exit)
 
         main_layout.addLayout(self.row1_layout)
 
-        # ---------- 第 2 排：细格栅自动点击 ----------
+        # ---------- 第 2 排：细格栅自动点击栏 ----------
         row2_layout = QHBoxLayout()
         row2_layout.setContentsMargins(0, 0, 0, 0)
         row2_layout.setSpacing(6)
 
         self.chk_grille = QCheckBox("细格栅")
-        self.chk_grille.setStyleSheet("color: #00ff8c;")
         row2_layout.addWidget(self.chk_grille)
 
-        row2_layout.addWidget(QLabel("循环间隔(分):"))
+        row2_layout.addWidget(QLabel("执行间隔(分):"))
         self.spin_grille_interval = QDoubleSpinBox()
-        self.spin_grille_interval.setButtonSymbols(QAbstractSpinBox.NoButtons)  # 框子和旁边一样无箭头 (Req 6)
-        self.spin_grille_interval.setFixedWidth(40)
+        self.spin_grille_interval.setButtonSymbols(QAbstractSpinBox.NoButtons)
+        self.spin_grille_interval.setAlignment(Qt.AlignCenter)
+        self.spin_grille_interval.setFixedSize(48, 26)
         self.spin_grille_interval.setRange(0.1, 1440.0)
         self.spin_grille_interval.setValue(2.0)
         self.spin_grille_interval.setSingleStep(0.5)
@@ -708,7 +761,8 @@ class GlobalControlPanel(QWidget):
         row2_layout.addWidget(self.spin_grille_interval)
 
         self.btn_grille_start = QPushButton("▶ 开始操作")
-        self.btn_grille_start.setStyleSheet("background-color: #0088cc; color: white;")
+        self.btn_grille_start.setFixedHeight(26)
+        self.btn_grille_start.setStyleSheet("background-color: #0088cc; color: white; font-weight: bold;")
         self.btn_grille_start.clicked.connect(self._toggle_grille)
         row2_layout.addWidget(self.btn_grille_start)
 
@@ -722,7 +776,7 @@ class GlobalControlPanel(QWidget):
         self._init_ocr()
         self.load_config()
 
-    # ---------- 拖动面板窗口逻辑 ----------
+    # ---------- 鼠标拖动面板 ----------
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
             self._drag_pos = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
@@ -736,15 +790,13 @@ class GlobalControlPanel(QWidget):
     def mouseReleaseEvent(self, event):
         self._drag_pos = None
 
-    # ---------- 统一刷新按钮样式（处理收起时宽度缩小一半 Req 3） ----------
+    # ---------- 动态对齐更新 ----------
     def _update_button_styles(self):
         if self.is_collapsed:
-            # 收起状态：内边距减半，宽度缩小约一倍
-            pad = "padding: 2px 4px; min-width: 28px; font-size: 10px;"
+            pad = "padding: 0px 4px; min-width: 32px; font-size: 10px; height: 26px;"
             self.btn_collapse.setText("▶ 展开")
         else:
-            # 展开状态：正常样式
-            pad = "padding: 4px 8px; min-width: 50px; font-size: 11px;"
+            pad = "padding: 0px 8px; min-width: 50px; font-size: 11px; height: 26px;"
             self.btn_collapse.setText("◀ 收起")
 
         self.btn_collapse.setStyleSheet(f"background-color: rgba(255,255,255,0.1); color: #00ff8c; font-weight: bold; {pad}")
@@ -757,12 +809,12 @@ class GlobalControlPanel(QWidget):
         self._update_button_styles()
         self.adjustSize()
 
-    # ---------- 快捷键 F12 触发停止操作 (Req 5) ----------
+    # ---------- F12 全局快捷键响应（直接触发停止） ----------
     def _on_f12_pressed(self):
         if self.grille_thread and self.grille_thread.isRunning():
             self.stop_grille()
 
-    # ---------- 细格栅自动点击控制 (Req 4) ----------
+    # ---------- 细格栅自动点击控制 ----------
     def _on_grille_interval_changed(self, val):
         if self.grille_thread and self.grille_thread.isRunning():
             self.grille_thread.set_interval(val)
@@ -771,7 +823,6 @@ class GlobalControlPanel(QWidget):
         if self.grille_thread and self.grille_thread.isRunning():
             self.stop_grille()
         else:
-            # 未勾选细格栅时，点击开始操作不执行 (Req 4)
             if not self.chk_grille.isChecked():
                 return
             self.start_grille()
@@ -780,7 +831,7 @@ class GlobalControlPanel(QWidget):
         self.grille_thread = FineGrilleThread(cycle_interval_min=self.spin_grille_interval.value())
         self.grille_thread.start()
         self.btn_grille_start.setText("⏹ 停止操作(F12)")
-        self.btn_grille_start.setStyleSheet("background-color: #cc3333; color: white;")
+        self.btn_grille_start.setStyleSheet("background-color: #cc3333; color: white; font-weight: bold; height: 26px;")
 
     def stop_grille(self):
         if self.grille_thread:
@@ -788,7 +839,7 @@ class GlobalControlPanel(QWidget):
             self.grille_thread.wait()
             self.grille_thread = None
         self.btn_grille_start.setText("▶ 开始操作")
-        self.btn_grille_start.setStyleSheet("background-color: #0088cc; color: white;")
+        self.btn_grille_start.setStyleSheet("background-color: #0088cc; color: white; font-weight: bold; height: 26px;")
 
     def _position_top_right(self):
         screen_geo = QApplication.primaryScreen().geometry()
@@ -819,16 +870,15 @@ class GlobalControlPanel(QWidget):
         for box in self.boxes:
             box.set_max_log_count(val)
 
-    # ---------- 调整选框逻辑 (Req 2: 加按钮显示在上方) ----------
     def _toggle_edit(self):
         self.is_editing = not self.is_editing
-        self.row0_container.setVisible(self.is_editing)  # 加按钮在顶部展示
+        self.row0_container.setVisible(self.is_editing)
         if self.is_editing:
             self.btn_edit.setText("✅ 完成调整")
-            self.btn_edit.setStyleSheet("background-color: #e6b84d; color: black;")
+            self.btn_edit.setStyleSheet("background-color: #e6b84d; color: black; height: 26px; font-weight: bold;")
         else:
             self.btn_edit.setText("⚙️ 调整选框")
-            self.btn_edit.setStyleSheet("background-color: rgba(255, 255, 255, 0.15); color: white;")
+            self.btn_edit.setStyleSheet("background-color: #2b2d42; color: white; height: 26px; font-weight: bold;")
             self.save_config()
 
         for box in self.boxes:
@@ -939,8 +989,8 @@ class GlobalControlPanel(QWidget):
 
     def close_app(self):
         if hasattr(self, 'f12_listener'):
-            ctypes.windll.user32.UnregisterHotKey(None, 9999)
-            self.f12_listener.terminate()
+            self.f12_listener.stop()
+            self.f12_listener.wait()
         self.stop_monitor()
         self.stop_grille()
         self.save_config()
