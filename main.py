@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QTableWidget, QTableWidgetItem, QLabel, QMessageBox,
     QAbstractItemView, QHeaderView, QCheckBox, QDoubleSpinBox, QGroupBox,
-    QDialog, QFormLayout, QDialogButtonBox, QSpinBox
+    QDialog, QFormLayout, QDialogButtonBox, QSpinBox, QListWidget
 )
 from PySide6.QtCore import Qt, QTimer, QThread, Signal, QPoint, QRect
 from PySide6.QtGui import (
@@ -108,7 +108,7 @@ class MonitorThread(QThread):
                                 self.last_values[row] = val
                                 self.value_updated.emit(row, val, now_str)
 
-                            # 报警逻辑（改进：当报警数值不变时，只报警一次）
+                            # 报警逻辑（数值不变时不重复报警）
                             lower, upper = m['lower'], m['upper']
                             is_alarm = (val < lower or val > upper)
 
@@ -132,12 +132,11 @@ class MonitorThread(QThread):
                 self.msleep(int(sleep_needed * 1000))
 
 
-# ==================== 2. 趋势图表组件 ====================
+# ==================== 2. 主界面趋势图表组件 ====================
 class TrendChartWidget(QWidget):
-    def __init__(self, parent=None, is_mini=False):
+    def __init__(self, parent=None):
         super().__init__(parent)
-        self.is_mini = is_mini
-        self.setMinimumHeight(80 if is_mini else 150)
+        self.setMinimumHeight(150)
         self.max_points = 15
         self.data = []
 
@@ -162,17 +161,14 @@ class TrendChartWidget(QWidget):
         painter.setRenderHint(QPainter.Antialiasing)
         rect = self.rect()
 
-        # 背景
-        bg_color = QColor("#14141e") if self.is_mini else QColor("#1e1e2d")
-        painter.setBrush(bg_color)
+        painter.setBrush(QColor("#1e1e2d"))
         painter.setPen(QPen(QColor("#333344"), 1))
-        painter.drawRoundedRect(rect, 4 if self.is_mini else 8, 4 if self.is_mini else 8)
+        painter.drawRoundedRect(rect, 8, 8)
 
-        # 标注右上角数值数量
         painter.setPen(QColor("#8888aa"))
-        painter.setFont(QFont("Microsoft YaHei", 7 if self.is_mini else 8))
-        info_str = f"数量: {len(self.data)}/{self.max_points}"
-        painter.drawText(rect.adjusted(0, 2, -6, 0), Qt.AlignRight | Qt.AlignTop, info_str)
+        painter.setFont(QFont("Microsoft YaHei", 8))
+        info_str = f"显示数量: {len(self.data)}/{self.max_points}"
+        painter.drawText(rect.adjusted(0, 4, -10, 0), Qt.AlignRight | Qt.AlignTop, info_str)
 
         if len(self.data) < 2:
             painter.setPen(QColor("#666688"))
@@ -180,12 +176,7 @@ class TrendChartWidget(QWidget):
             painter.drawText(rect, Qt.AlignCenter, "暂无足够数据")
             return
 
-        # 绘图区域边距
-        left_m = 25 if self.is_mini else 40
-        right_m = 10 if self.is_mini else 20
-        top_m = 18 if self.is_mini else 25
-        bottom_m = 15 if self.is_mini else 30
-
+        left_m, right_m, top_m, bottom_m = 40, 20, 25, 30
         chart_rect = QRect(left_m, top_m, rect.width() - left_m - right_m, rect.height() - top_m - bottom_m)
         vals = [d[1] for d in self.data]
         min_v, max_v = min(vals), max(vals)
@@ -200,23 +191,20 @@ class TrendChartWidget(QWidget):
             y = chart_rect.bottom() - (val - min_v) / rng * chart_rect.height()
             points.append((x, y, t_str, val))
 
-        # 折线
-        pen = QPen(QColor("#00ff8c"), 1.5 if self.is_mini else 2)
+        pen = QPen(QColor("#00ff8c"), 2)
         painter.setPen(pen)
         for i in range(len(points) - 1):
             painter.drawLine(QPoint(points[i][0], points[i][1]), QPoint(points[i+1][0], points[i+1][1]))
 
-        # 数据点与时间刻度
-        painter.setFont(QFont("Microsoft YaHei", 7 if self.is_mini else 8))
+        painter.setFont(QFont("Microsoft YaHei", 8))
         for i, (x, y, t_str, val) in enumerate(points):
             painter.setPen(Qt.NoPen)
             painter.setBrush(QColor("#ffffff"))
-            painter.drawEllipse(QPoint(x, y), 2 if self.is_mini else 3, 2 if self.is_mini else 3)
+            painter.drawEllipse(QPoint(x, y), 3, 3)
 
-            if not self.is_mini:
-                if i == 0 or i == len(points) - 1 or i % 4 == 0:
-                    painter.setPen(QColor("#8888aa"))
-                    painter.drawText(x - 20, chart_rect.bottom() + 15, 40, 15, Qt.AlignCenter, t_str)
+            if i == 0 or i == len(points) - 1 or i % 4 == 0:
+                painter.setPen(QColor("#8888aa"))
+                painter.drawText(x - 20, chart_rect.bottom() + 15, 40, 15, Qt.AlignCenter, t_str)
 
 
 # ==================== 3. 独立上下限设置弹窗 ====================
@@ -267,12 +255,12 @@ class OverlayRegionWidget(QWidget):
         self.capture_y = y
         self.capture_w = max(20, w)   
         self.capture_h = max(15, h)   
-        self.top_bar_height = 24
+        self.top_bar_height = 48  # 两排控制栏固定高度
 
         self.is_alarm = False
         self.is_editing = False
         self.is_muted = False
-        self.chart_visible = False
+        self.log_visible = False
 
         self.setWindowFlags(Qt.WindowStaysOnTopHint | Qt.FramelessWindowHint | Qt.Tool)
         self.setAttribute(Qt.WA_TranslucentBackground, True)
@@ -284,20 +272,28 @@ class OverlayRegionWidget(QWidget):
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
 
-        # 顶部控制栏
+        # 1. 顶部控制栏（分两排）
         self.top_bar = QWidget()
         self.top_bar.setFixedHeight(self.top_bar_height)
-        self.top_bar.setStyleSheet("background-color: rgba(20, 20, 30, 0.92); border-top-left-radius: 4px; border-top-right-radius: 4px;")
-        top_layout = QHBoxLayout(self.top_bar)
-        top_layout.setContentsMargins(4, 1, 4, 1)
-        top_layout.setSpacing(2)
+        self.top_bar.setStyleSheet("background-color: rgba(20, 20, 30, 0.95); border-top-left-radius: 4px; border-top-right-radius: 4px;")
+        
+        top_bar_layout = QVBoxLayout(self.top_bar)
+        top_bar_layout.setContentsMargins(4, 2, 4, 2)
+        top_bar_layout.setSpacing(2)
 
-        # 左侧名称
+        # 第一排：识别窗口名称
+        row1_layout = QHBoxLayout()
+        row1_layout.setContentsMargins(0, 0, 0, 0)
         self.lbl_title = QLabel(name)
         self.lbl_title.setStyleSheet("color: #00ff8c; font-size: 11px; font-weight: bold;")
-        top_layout.addWidget(self.lbl_title)
+        row1_layout.addWidget(self.lbl_title)
+        row1_layout.addStretch()
+        top_bar_layout.addLayout(row1_layout)
 
-        top_layout.addStretch()
+        # 第二排：操作按钮组
+        row2_layout = QHBoxLayout()
+        row2_layout.setContentsMargins(0, 0, 0, 0)
+        row2_layout.setSpacing(3)
 
         # 消除报警按钮
         self.btn_clear_alarm = QPushButton("🚨 消除")
@@ -307,52 +303,69 @@ class OverlayRegionWidget(QWidget):
         """)
         self.btn_clear_alarm.setVisible(False)
         self.btn_clear_alarm.clicked.connect(self._on_clear_alarm)
-        top_layout.addWidget(self.btn_clear_alarm)
+        row2_layout.addWidget(self.btn_clear_alarm)
 
-        # ⬇️/⬆️ 折叠/展开迷你趋势图按钮
-        self.btn_toggle_chart = QPushButton("⬇️")
-        self.btn_toggle_chart.setFixedSize(20, 18)
-        self.btn_toggle_chart.setToolTip("展开/收起数值变动趋势图")
-        self.btn_toggle_chart.setStyleSheet("""
-            QPushButton { background-color: rgba(255,255,255,0.2); color: white; border: none; border-radius: 3px; font-size: 10px; }
+        # ⬇️/⬆️ 展开收起记录按钮
+        self.btn_toggle_log = QPushButton("⬇️ 记录")
+        self.btn_toggle_log.setStyleSheet("""
+            QPushButton { background-color: rgba(255,255,255,0.2); color: white; border: none; border-radius: 3px; padding: 1px 4px; font-size: 10px; }
             QPushButton:hover { background-color: rgba(255,255,255,0.4); }
         """)
-        self.btn_toggle_chart.clicked.connect(self._toggle_chart)
-        top_layout.addWidget(self.btn_toggle_chart)
+        self.btn_toggle_log.setToolTip("展开/收起数值历史记录")
+        self.btn_toggle_log.clicked.connect(self._toggle_log)
+        row2_layout.addWidget(self.btn_toggle_log)
 
         # 静音按钮
         self.btn_mute = QPushButton("🔊")
-        self.btn_mute.setFixedSize(20, 18)
+        self.btn_mute.setFixedSize(22, 18)
         self.btn_mute.setToolTip("屏蔽/开启此区域声音报警")
         self.btn_mute.setStyleSheet("""
             QPushButton { background-color: rgba(255,255,255,0.2); color: white; border: none; border-radius: 3px; font-size: 10px; }
             QPushButton:hover { background-color: rgba(255,255,255,0.4); }
         """)
         self.btn_mute.clicked.connect(self._on_toggle_mute)
-        top_layout.addWidget(self.btn_mute)
+        row2_layout.addWidget(self.btn_mute)
 
         # 设置按钮
         self.btn_settings = QPushButton("⚙️")
-        self.btn_settings.setFixedSize(20, 18)
+        self.btn_settings.setFixedSize(22, 18)
         self.btn_settings.setToolTip("设置报警上下限")
         self.btn_settings.setStyleSheet("""
             QPushButton { background-color: rgba(255,255,255,0.2); color: white; border: none; border-radius: 3px; font-size: 10px; }
             QPushButton:hover { background-color: rgba(255,255,255,0.4); }
         """)
         self.btn_settings.clicked.connect(lambda: self.settings_requested.emit(self.row))
-        top_layout.addWidget(self.btn_settings)
+        row2_layout.addWidget(self.btn_settings)
+
+        row2_layout.addStretch()
+        top_bar_layout.addLayout(row2_layout)
 
         main_layout.addWidget(self.top_bar)
 
-        # 中间镂空占位区域（对应识别框）
+        # 2. 中间镂空识别区域
         self.capture_spacer = QWidget()
         self.capture_spacer.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         main_layout.addWidget(self.capture_spacer)
 
-        # 底部迷你趋势图
-        self.mini_chart = TrendChartWidget(self, is_mini=True)
-        self.mini_chart.setVisible(False)
-        main_layout.addWidget(self.mini_chart)
+        # 3. 底部数值历史记录列表（替代趋势图，向下展开）
+        self.log_list = QListWidget()
+        self.log_list.setStyleSheet("""
+            QListWidget {
+                background-color: rgba(15, 15, 25, 0.95);
+                color: #00ff8c;
+                border: 1px solid rgba(255, 255, 255, 0.2);
+                border-bottom-left-radius: 4px;
+                border-bottom-right-radius: 4px;
+                font-family: Consolas, "Courier New", monospace;
+                font-size: 11px;
+            }
+            QListWidget::item {
+                padding: 1px 4px;
+                border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            }
+        """)
+        self.log_list.setVisible(False)
+        main_layout.addWidget(self.log_list)
 
         self._update_geometry()
         self.setMouseTracking(True)
@@ -360,24 +373,28 @@ class OverlayRegionWidget(QWidget):
     def set_title(self, name):
         self.lbl_title.setText(name)
 
-    def add_trend_data(self, time_str, val):
-        self.mini_chart.add_data_point(time_str, val)
+    def add_log_data(self, time_str, val):
+        item_text = f"[{time_str}]  {val:.2f}"
+        self.log_list.insertItem(0, item_text)
+        if self.log_list.count() > 30:
+            self.log_list.takeItem(30)
 
     def _update_geometry(self):
         total_w = max(self.capture_w, 160)
         self.capture_spacer.setFixedHeight(self.capture_h)
 
         total_h = self.top_bar_height + self.capture_h
-        if self.chart_visible:
-            self.mini_chart.setFixedHeight(85)
-            total_h += 85
+        if self.log_visible:
+            self.log_list.setFixedHeight(100)
+            total_h += 100
 
+        # 控制栏固定位于识别窗上方（不会因展开而向上偏移遮挡画面）
         self.setGeometry(self.capture_x, self.capture_y - self.top_bar_height, total_w, total_h)
 
-    def _toggle_chart(self):
-        self.chart_visible = not self.chart_visible
-        self.mini_chart.setVisible(self.chart_visible)
-        self.btn_toggle_chart.setText("⬆️" if self.chart_visible else "⬇️")
+    def _toggle_log(self):
+        self.log_visible = not self.log_visible
+        self.log_list.setVisible(self.log_visible)
+        self.btn_toggle_log.setText("⬆️ 记录" if self.log_visible else "⬇️ 记录")
         self._update_geometry()
 
     def set_alarm_state(self, is_alarm):
@@ -507,17 +524,14 @@ class GlobalControlBar(QWidget):
             QPushButton:hover { background-color: rgba(255, 255, 255, 0.3); }
         """)
 
-        # 调整选框按钮
         self.btn_edit = QPushButton("⚙️ 调整选框")
         self.is_editing = False
         self.btn_edit.clicked.connect(self._on_toggle_edit)
 
-        # 显隐主界面按钮
         self.btn_main = QPushButton("👁️ 隐藏主界面")
         self.main_visible = True
         self.btn_main.clicked.connect(lambda: self.toggle_main_signal.emit())
 
-        # 开始/停止监控按钮
         self.btn_monitor = QPushButton("▶ 开始监控")
         self.btn_monitor.setStyleSheet("background-color: #2e9a58; color: white;")
         self.btn_monitor.clicked.connect(lambda: self.toggle_monitor_signal.emit())
@@ -842,8 +856,6 @@ class MainWindow(QMainWindow):
 
     def _on_chart_points_changed(self, val):
         self.trend_chart.set_max_points(val)
-        for ov in self.overlay_widgets.values():
-            ov.mini_chart.set_max_points(val)
 
     def _on_table_item_changed(self, item):
         if item.column() == 1:
@@ -909,7 +921,6 @@ class MainWindow(QMainWindow):
                 self.overlay_widgets[row].set_title(name)
             else:
                 ov = OverlayRegionWidget(row, x, y, w, h, name, self)
-                ov.mini_chart.set_max_points(self.spin_chart_points.value())
                 ov.rect_changed.connect(self._on_overlay_rect_changed)
                 ov.clear_alarm_requested.connect(self._on_overlay_clear_alarm)
                 ov.settings_requested.connect(self._open_region_settings)
@@ -1036,7 +1047,7 @@ class MainWindow(QMainWindow):
 
         self.trend_chart.add_data_point(time_str, value)
         if row in self.overlay_widgets:
-            self.overlay_widgets[row].add_trend_data(time_str, value)
+            self.overlay_widgets[row].add_log_data(time_str, value)
 
     def on_alarm_triggered(self, row, name, value, lower, upper):
         self.row_alarm[row] = True
