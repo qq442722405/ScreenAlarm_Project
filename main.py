@@ -194,7 +194,7 @@ class FineGrilleThread(QThread):
             if not self._safe_sleep(wait_sec): break
 
 
-# ==================== 4. 悬浮识别选框窗口（记录常驻显示） ====================
+# ==================== 4. 悬浮识别选框窗口（记录常驻） ====================
 class OverlayRegionWidget(QWidget):
     delete_requested = Signal(object)
     alarm_cleared = Signal()
@@ -261,7 +261,7 @@ class OverlayRegionWidget(QWidget):
         self.edit_title.textChanged.connect(self._on_title_changed)
 
         self.lbl_result = QLabel("--")
-        self.lbl_result.setMaximumWidth(45)
+        self.lbl_result.setMaximumWidth(55)
         self.lbl_result.setStyleSheet("color: #a0a0a0; font-size: 11px; font-weight: bold; margin-left: 2px;")
 
         row1_layout.addWidget(self.lbl_title)
@@ -331,7 +331,7 @@ class OverlayRegionWidget(QWidget):
         row3_layout.addStretch()
         panel_layout.addWidget(self.row3_container)
 
-        # --- 第四容器：常驻显示的历史日志列表（需求二）---
+        # --- 第四容器：常驻显示的历史日志列表 ---
         self.log_container = QWidget()
         log_layout = QVBoxLayout(self.log_container)
         log_layout.setContentsMargins(0, 3, 0, 0)
@@ -436,7 +436,7 @@ class OverlayRegionWidget(QWidget):
         if self.panel_hidden:
             panel_h = 28 if self.is_alarm else 0
         else:
-            panel_h = 181  # 控制面板 + 常驻日志面板的统一高度
+            panel_h = 181
 
         self.capture_spacer.setFixedHeight(self.capture_h)
         total_h = self.capture_h + panel_h
@@ -606,7 +606,7 @@ class CoordinatePicker(QWidget):
             self.close()
 
 
-# ==================== 6. 后台识别线程 ====================
+# ==================== 6. 后台识别线程（接入 PaddleOCR） ====================
 class MonitorThread(QThread):
     value_updated = Signal(object, str, object, str)
     alarm_triggered = Signal(object, str, float)
@@ -674,47 +674,31 @@ class MonitorThread(QThread):
                         else:
                             bgr = cv2.cvtColor(img_np, cv2.COLOR_RGB2BGR)
 
+                        # 放大画面强化字符笔画与小数点
                         target_h = 100
                         scale_factor = max(3.0, target_h / float(max(1, h)))
                         new_w, new_h = int(w * scale_factor), int(h * scale_factor)
                         scaled_bgr = cv2.resize(bgr, (new_w, new_h), interpolation=cv2.INTER_CUBIC)
 
-                        attempts = []
-
-                        ok1, buf1 = cv2.imencode(".png", scaled_bgr)
-                        if ok1: attempts.append(buf1.tobytes())
-
-                        gray = cv2.cvtColor(scaled_bgr, cv2.COLOR_BGR2GRAY)
-                        ok2, buf2 = cv2.imencode(".png", gray)
-                        if ok2: attempts.append(buf2.tobytes())
-
-                        inverted = cv2.bitwise_not(gray)
-                        ok3, buf3 = cv2.imencode(".png", inverted)
-                        if ok3: attempts.append(buf3.tobytes())
-
-                        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-                        enhanced = clahe.apply(gray)
-                        sharpened = cv2.filter2D(enhanced, -1, np.array([[-1,-1,-1],[-1,9,-1],[-1,-1,-1]]))
-                        binary = cv2.adaptiveThreshold(sharpened, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2)
-                        ok4, buf4 = cv2.imencode(".png", binary)
-                        if ok4: attempts.append(buf4.tobytes())
+                        # 使用 PaddleOCR 进行识别 (PaddleOCR 接受 BGR 图像数组)
+                        ocr_res = self.reader.ocr(scaled_bgr, cls=False)
+                        
+                        raw_text = ""
+                        if ocr_res and ocr_res[0]:
+                            raw_text = "".join([line[1][0] for line in ocr_res[0]])
 
                         found_val = None
-                        last_raw_str = ""
+                        last_raw_str = raw_text
 
-                        for buf in attempts:
-                            raw_text = str(self.reader.classification(buf))
-                            if not raw_text: continue
-                            last_raw_str = raw_text
-
+                        if raw_text:
                             clean_t = self._clean_digit_text(raw_text).replace(' ', '')
+                            # 替换杂质标点为标准小数点
                             clean_t = re.sub(r'(?<=\d)[,::·\'`_\-*\°ae~,;–—.\s、]+(?=\d)', '.', clean_t)
 
                             nums = re.findall(r'-?\d+(?:\.\d+)?', clean_t)
                             if nums:
                                 try:
                                     found_val = float(nums[0])
-                                    break
                                 except ValueError:
                                     pass
 
@@ -894,14 +878,14 @@ class GlobalControlPanel(QWidget):
         self.btn_toggle_hide.clicked.connect(self._toggle_hide_boxes)
         row2_extra_layout.addWidget(self.btn_toggle_hide)
 
-        # 调整窗口按钮（固定宽度 90px）
+        # 调整窗口按钮
         self.btn_edit = QPushButton("⚙️ 调整窗口")
         self.btn_edit.setFixedSize(90, 26)
         self.btn_edit.setStyleSheet("QPushButton { background-color: rgba(255,255,255,0.12); color: #ffffff; border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; padding: 0px 4px; font-size: 11px; font-weight: bold; } QPushButton:hover { background-color: rgba(61, 64, 91, 0.8); }")
         self.btn_edit.clicked.connect(self._toggle_edit)
         row2_extra_layout.addWidget(self.btn_edit)
 
-        # 双按钮形态容器（完成 + ➕，总计 90px）
+        # 双按钮形态容器
         self.widget_edit_tools = QWidget()
         self.widget_edit_tools.setFixedSize(90, 26)
         edit_tools_layout = QHBoxLayout(self.widget_edit_tools)
@@ -925,12 +909,10 @@ class GlobalControlPanel(QWidget):
         row2_extra_layout.addWidget(self.widget_edit_tools)
         row2_layout.addWidget(self.row2_extra_container)
 
-        # 展开/收起推至最右侧的弹簧
         self.spacer_widget = QWidget()
         self.spacer_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         row2_layout.addWidget(self.spacer_widget)
 
-        # 折叠切换按钮
         self.btn_collapse = QPushButton("◀")
         self.btn_collapse.setFixedSize(26, 26)
         self.btn_collapse.clicked.connect(self._toggle_collapse)
@@ -1045,14 +1027,18 @@ class GlobalControlPanel(QWidget):
         screen_geo = QApplication.primaryScreen().geometry()
         self.move(screen_geo.width() - self.width() - 20, 20)
 
+    # ---------- 异步加载 PaddleOCR 模型 ----------
     def _init_ocr(self):
         class OCRLoader(QThread):
             loaded = Signal(object)
             def run(self):
                 try:
-                    import ddddocr
-                    self.loaded.emit(ddddocr.DdddOcr(show_ad=False))
-                except Exception:
+                    from paddleocr import PaddleOCR
+                    # 使用 lang='en' 针对英文字符和数字快速识别
+                    reader = PaddleOCR(use_angle_cls=False, lang="en", show_log=False)
+                    self.loaded.emit(reader)
+                except Exception as e:
+                    print("PaddleOCR 初始化异常:", e)
                     self.loaded.emit(None)
 
         self.loader = OCRLoader()
@@ -1144,7 +1130,6 @@ class GlobalControlPanel(QWidget):
         self._update_button_styles()
         self.alarm_player.stop()
 
-    # 需求一：将倒计时实时更新到停止按钮名称中
     def _on_countdown_tick(self, rem):
         self.lbl_countdown.setText(f"⏳ {rem:.1f}s")
         if self.monitoring:
