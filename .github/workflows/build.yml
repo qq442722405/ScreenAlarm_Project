@@ -17,6 +17,7 @@ jobs:
       uses: actions/setup-python@v5
       with:
         python-version: '3.10'
+        cache: 'pip' # 💡 新增：开启 Pip 依赖缓存，大幅加快后续自动化构建速度
 
     - name: Install Dependencies
       run: |
@@ -25,7 +26,7 @@ jobs:
 
     - name: Build with PyInstaller
       run: |
-        pyinstaller -D -w -n "屏幕数值监控报警" --icon=favicon.ico --add-data "favicon.ico;." --collect-data ddddocr main.py
+        pyinstaller -D -w -n "屏幕数值监控报警" --icon=favicon.ico --add-data "favicon.ico;." --collect-all paddleocr --collect-all paddle main.py
 
     - name: Upload Artifact
       uses: actions/upload-artifact@v4
