@@ -14,11 +14,12 @@ os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "1"
 from PySide6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel, QLineEdit, QDoubleSpinBox, QSpinBox,
-    QListWidget, QCheckBox, QAbstractSpinBox, QFrame, QSizePolicy
+    QListWidget, QCheckBox, QAbstractSpinBox, QFrame, QSizePolicy,
+    QPlainTextEdit
 )
-from PySide6.QtCore import Qt, QTimer, QThread, Signal, QPoint, QRect
+from PySide6.QtCore import Qt, QTimer, QThread, Signal, QPoint, QRect, QObject
 from PySide6.QtGui import (
-    QColor, QBrush, QFont, QPainter, QPen, QPixmap, QIcon
+    QColor, QBrush, QFont, QPainter, QPen, QPixmap, QIcon, QTextCursor
 )
 
 import mss
@@ -30,6 +31,79 @@ try:
     PYGAME_AVAILABLE = True
 except ImportError:
     PYGAME_AVAILABLE = False
+
+
+# ==================== 0. 日志重定向辅助类与日志窗口 ====================
+class LogStream(QObject):
+    """日志重定向信号源"""
+    text_written = Signal(str)
+
+    def write(self, text):
+        if text:
+            self.text_written.emit(str(text))
+
+    def flush(self):
+        pass
+
+
+class LogWindow(QWidget):
+    """独立的运行日志捕获与展示窗口"""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("屏幕数字识别报警 - 运行日志")
+        self.resize(650, 400)
+        self.setWindowFlags(Qt.Window | Qt.WindowStaysOnTopHint)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setSpacing(6)
+
+        # 日志文本展示框
+        self.txt_log = QPlainTextEdit()
+        self.txt_log.setReadOnly(True)
+        self.txt_log.setStyleSheet("""
+            QPlainTextEdit {
+                background-color: #1e1e1e;
+                color: #dcdcdc;
+                font-family: Consolas, "Courier New", monospace;
+                font-size: 11px;
+                border: 1px solid #3c3c3c;
+                border-radius: 4px;
+            }
+        """)
+        layout.addWidget(self.txt_log)
+
+        # 底部控制栏
+        bottom_layout = QHBoxLayout()
+        
+        self.chk_autoscroll = QCheckBox("自动滚动")
+        self.chk_autoscroll.setChecked(True)
+        self.chk_autoscroll.setStyleSheet("color: white; font-weight: bold;")
+        bottom_layout.addWidget(self.chk_autoscroll)
+
+        bottom_layout.addStretch()
+
+        btn_copy = QPushButton("📋 复制日志")
+        btn_copy.setStyleSheet("QPushButton { background-color: #3a3d52; color: white; border-radius: 4px; padding: 4px 12px; font-weight: bold; } QPushButton:hover { background-color: #4a4d66; }")
+        btn_copy.clicked.connect(self._copy_log)
+        bottom_layout.addWidget(btn_copy)
+
+        btn_clear = QPushButton("🧹 清空日志")
+        btn_clear.setStyleSheet("QPushButton { background-color: #b33939; color: white; border-radius: 4px; padding: 4px 12px; font-weight: bold; } QPushButton:hover { background-color: #d63031; }")
+        btn_clear.clicked.connect(self.txt_log.clear)
+        bottom_layout.addWidget(btn_clear)
+
+        layout.addLayout(bottom_layout)
+
+    def append_log(self, text):
+        self.txt_log.moveCursor(QTextCursor.End)
+        self.txt_log.insertPlainText(text)
+        if self.chk_autoscroll.isChecked():
+            self.txt_log.ensureCursorVisible()
+
+    def _copy_log(self):
+        clipboard = QApplication.clipboard()
+        clipboard.setText(self.txt_log.toPlainText())
 
 
 # ==================== 路径辅助函数（支持打包与开发环境） ====================
@@ -50,7 +124,7 @@ def get_resource_path(relative_path):
     return path
 
 
-# ==================== 0. 自定义无冗余 .00 的 SpinBox ====================
+# ==================== 1. 自定义无冗余 .00 的 SpinBox ====================
 class CleanDoubleSpinBox(QDoubleSpinBox):
     """自动消除末尾 .00 / 冗余 0 的输入框"""
     def textFromValue(self, val):
@@ -62,7 +136,7 @@ class CleanDoubleSpinBox(QDoubleSpinBox):
         return s
 
 
-# ==================== 1. 全局 F12 键盘监听线程 ====================
+# ==================== 2. 全局 F12 键盘监听线程 ====================
 class GlobalF12Listener(QThread):
     f12_triggered = Signal()
 
@@ -86,7 +160,7 @@ class GlobalF12Listener(QThread):
             self.msleep(50)
 
 
-# ==================== 2. 报警声音播放器（支持即时停止） ====================
+# ==================== 3. 报警声音播放器 ====================
 class AlarmSoundPlayer:
     def __init__(self):
         self.is_playing = False
@@ -163,7 +237,7 @@ class AlarmSoundPlayer:
             except: pass
 
 
-# ==================== 3. 细格栅自动点击线程 ====================
+# ==================== 4. 细格栅自动点击线程 ====================
 class FineGrilleThread(QThread):
     def __init__(self, cycle_interval_min=2.0, parent=None):
         super().__init__(parent)
@@ -202,6 +276,7 @@ class FineGrilleThread(QThread):
         return True
 
     def run(self):
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] 🚀 细格栅自动点击线程已启动...")
         while self.running:
             if not self._click_matrix(19, 955): break
             if not self._safe_sleep(120): break
@@ -209,9 +284,10 @@ class FineGrilleThread(QThread):
 
             wait_sec = max(1.0, self.cycle_interval_min * 60)
             if not self._safe_sleep(wait_sec): break
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] 🛑 细格栅自动点击线程已停止。")
 
 
-# ==================== 4. 悬浮识别选框窗口 ====================
+# ==================== 5. 悬浮识别选框窗口 ====================
 class OverlayRegionWidget(QWidget):
     delete_requested = Signal(object)
     alarm_cleared = Signal()
@@ -251,19 +327,19 @@ class OverlayRegionWidget(QWidget):
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
 
-        # ---------------- 1. 识别框区域占位 ----------------
+        # 1. 识别框区域占位
         self.capture_spacer = QWidget()
         self.capture_spacer.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         main_layout.addWidget(self.capture_spacer)
 
-        # ---------------- 2. 下方控制面板 ----------------
+        # 2. 下方控制面板
         self.control_panel = QWidget()
         self.control_panel.setStyleSheet("background-color: rgba(0, 0, 0, 0.85); border-bottom-left-radius: 6px; border-bottom-right-radius: 6px;")
         panel_layout = QVBoxLayout(self.control_panel)
         panel_layout.setContentsMargins(4, 4, 4, 4)
         panel_layout.setSpacing(3)
 
-        # --- 第一排容器：名字 + 识别结果 ---
+        # 第一排容器：名字 + 识别结果
         self.row1_container = QWidget()
         row1_layout = QHBoxLayout(self.row1_container)
         row1_layout.setContentsMargins(0, 0, 0, 0)
@@ -287,7 +363,7 @@ class OverlayRegionWidget(QWidget):
         row1_layout.addStretch()
         panel_layout.addWidget(self.row1_container)
 
-        # --- 第二排容器：下限/上限/删除框 ---
+        # 第二排容器：下限/上限/删除框
         self.row2_container = QWidget()
         row2_layout = QHBoxLayout(self.row2_container)
         row2_layout.setContentsMargins(0, 0, 0, 0)
@@ -328,7 +404,7 @@ class OverlayRegionWidget(QWidget):
         row2_layout.addWidget(self.btn_delete)
         panel_layout.addWidget(self.row2_container)
 
-        # --- 第三排容器：静音 + 消除 ---
+        # 第三排容器：静音 + 消除
         self.row3_container = QWidget()
         row3_layout = QHBoxLayout(self.row3_container)
         row3_layout.setContentsMargins(0, 0, 0, 0)
@@ -348,7 +424,7 @@ class OverlayRegionWidget(QWidget):
         row3_layout.addStretch()
         panel_layout.addWidget(self.row3_container)
 
-        # --- 第四容器：常驻显示的历史日志列表 ---
+        # 第四容器：常驻显示的历史日志列表
         self.log_container = QWidget()
         log_layout = QVBoxLayout(self.log_container)
         log_layout.setContentsMargins(0, 3, 0, 0)
@@ -380,12 +456,8 @@ class OverlayRegionWidget(QWidget):
         self._update_geometry()
         self.setMouseTracking(True)
 
-    def _on_lower_changed(self, val):
-        self.lower = val
-
-    def _on_upper_changed(self, val):
-        self.upper = val
-
+    def _on_lower_changed(self, val): self.lower = val
+    def _on_upper_changed(self, val): self.upper = val
     def _on_title_changed(self, text):
         self.name = text
         self.lbl_title.setText(text)
@@ -450,14 +522,9 @@ class OverlayRegionWidget(QWidget):
 
     def _update_geometry(self):
         total_w = max(self.capture_w, 210)
-        if self.panel_hidden:
-            panel_h = 28 if self.is_alarm else 0
-        else:
-            panel_h = 181
-
+        panel_h = (28 if self.is_alarm else 0) if self.panel_hidden else 181
         self.capture_spacer.setFixedHeight(self.capture_h)
-        total_h = self.capture_h + panel_h
-        self.setGeometry(self.capture_x, self.capture_y, total_w, total_h)
+        self.setGeometry(self.capture_x, self.capture_y, total_w, self.capture_h + panel_h)
 
     def set_edit_mode(self, enabled):
         self.is_editing = enabled
@@ -487,8 +554,7 @@ class OverlayRegionWidget(QWidget):
     def _get_hit_mode(self, pos):
         x, y = pos.x(), pos.y()
         m = 6
-        ch = self.capture_h
-        cw = self.capture_w
+        ch, cw = self.capture_h, self.capture_w
         if y <= ch:
             if y > ch - m and x > cw - m: return "BR"
             if y > ch - m: return "B"
@@ -555,7 +621,7 @@ class OverlayRegionWidget(QWidget):
         painter.drawRect(box_rect.adjusted(1, 1, -1, -1))
 
 
-# ==================== 5. 屏幕选区拾取器 ====================
+# ==================== 6. 屏幕选区拾取器 ====================
 class CoordinatePicker(QWidget):
     coord_selected = Signal(int, int, int, int)
     def __init__(self, parent=None):
@@ -623,7 +689,7 @@ class CoordinatePicker(QWidget):
             self.close()
 
 
-# ==================== 6. 后台识别线程（PaddleOCR） ====================
+# ==================== 7. 后台识别线程（PaddleOCR） ====================
 class MonitorThread(QThread):
     value_updated = Signal(object, str, object, str)
     alarm_triggered = Signal(object, str, float)
@@ -663,6 +729,7 @@ class MonitorThread(QThread):
     def run(self):
         screen = QApplication.primaryScreen()
         scale = screen.devicePixelRatio() if screen else 1.0
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] 🔍 监控线程已启动 (缩放比例: {scale})...")
 
         with mss.mss() as sct:
             while self.running:
@@ -696,21 +763,11 @@ class MonitorThread(QThread):
                         new_w, new_h = int(w * scale_factor), int(h * scale_factor)
                         scaled_bgr = cv2.resize(bgr, (new_w, new_h), interpolation=cv2.INTER_CUBIC)
 
-                        # 构建多重变体图像 (3通道 NumPy 数组供 PaddleOCR 使用)
-                        attempts = []
-                        attempts.append(scaled_bgr)
-
-                        gray = cv2.cvtColor(scaled_bgr, cv2.COLOR_BGR2GRAY)
-                        attempts.append(cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR))
-
-                        inverted = cv2.bitwise_not(gray)
-                        attempts.append(cv2.cvtColor(inverted, cv2.COLOR_GRAY2BGR))
-
-                        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-                        enhanced = clahe.apply(gray)
-                        sharpened = cv2.filter2D(enhanced, -1, np.array([[-1,-1,-1],[-1,9,-1],[-1,-1,-1]]))
-                        binary = cv2.adaptiveThreshold(sharpened, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2)
-                        attempts.append(cv2.cvtColor(binary, cv2.COLOR_GRAY2BGR))
+                        attempts = [
+                            scaled_bgr,
+                            cv2.cvtColor(cv2.cvtColor(scaled_bgr, cv2.COLOR_BGR2GRAY), cv2.COLOR_GRAY2BGR),
+                            cv2.cvtColor(cv2.bitwise_not(cv2.cvtColor(scaled_bgr, cv2.COLOR_BGR2GRAY)), cv2.COLOR_GRAY2BGR)
+                        ]
 
                         found_val = None
                         last_raw_str = ""
@@ -723,20 +780,13 @@ class MonitorThread(QThread):
                                     texts = [item[1][0] for item in res[0] if len(item) >= 2 and isinstance(item[1], (tuple, list))]
                                     raw_text = "".join(texts)
 
-                                # 若包含检测框模式未识别出，降级至纯识别模式 (适用于微小紧凑文本框)
                                 if not raw_text:
                                     res_nodet = self.reader.ocr(img_arr, det=False, cls=False)
                                     if res_nodet and len(res_nodet) > 0 and res_nodet[0] is not None:
-                                        texts = []
-                                        for item in res_nodet[0]:
-                                            if isinstance(item, (tuple, list)) and len(item) >= 1:
-                                                if isinstance(item[0], str):
-                                                    texts.append(item[0])
+                                        texts = [item[0] for item in res_nodet[0] if isinstance(item, (tuple, list)) and len(item) >= 1 and isinstance(item[0], str)]
                                         raw_text = "".join(texts)
 
-                                if not raw_text:
-                                    continue
-
+                                if not raw_text: continue
                                 last_raw_str = raw_text
 
                                 clean_t = self._clean_digit_text(raw_text).replace(' ', '')
@@ -744,11 +794,8 @@ class MonitorThread(QThread):
 
                                 nums = re.findall(r'-?\d+(?:\.\d+)?', clean_t)
                                 if nums:
-                                    try:
-                                        found_val = float(nums[0])
-                                        break
-                                    except ValueError:
-                                        pass
+                                    found_val = float(nums[0])
+                                    break
                             except Exception:
                                 continue
 
@@ -757,7 +804,6 @@ class MonitorThread(QThread):
 
                         if found_val is not None:
                             is_out_of_bounds = (found_val < box.lower or found_val > box.upper)
-                            
                             if is_out_of_bounds:
                                 val_changed = (box.last_alarm_val is None) or (abs(found_val - box.last_alarm_val) > 1e-4)
                                 if val_changed:
@@ -765,6 +811,7 @@ class MonitorThread(QThread):
                                     box.last_alarm_val = found_val
 
                                 if not box.user_cleared_alarm:
+                                    print(f"[{now_str}] ⚠️ 触发报警！[{box.name}] 当前值: {found_val} (超出区间: [{box.lower}, {box.upper}])")
                                     self.alarm_triggered.emit(box, now_str, found_val)
                             else:
                                 box.user_cleared_alarm = False
@@ -775,6 +822,7 @@ class MonitorThread(QThread):
 
                     except Exception as e:
                         now_str = datetime.now().strftime("%H:%M:%S")
+                        print(f"[{now_str}] ❌ 识别异常 [{box.name}]: {e}")
                         self.value_updated.emit(box, now_str, None, f"异常:{e}")
 
                 elapsed = time.time() - start_time
@@ -787,12 +835,16 @@ class MonitorThread(QThread):
                     self.msleep(50)
 
 
-# ==================== 7. 全局控制面板 ====================
+# ==================== 8. 全局控制面板 ====================
 class GlobalControlPanel(QWidget):
     def __init__(self):
         super().__init__(None)
         self.setWindowFlags(Qt.WindowStaysOnTopHint | Qt.FramelessWindowHint | Qt.Tool)
         self.setAttribute(Qt.WA_TranslucentBackground, True)
+
+        # 实例化运行日志窗口
+        self.log_window = LogWindow()
+        self._redirect_stdout_stderr()
 
         self.boxes = []
         self.monitoring = False
@@ -923,11 +975,19 @@ class GlobalControlPanel(QWidget):
         self.btn_toggle_hide.clicked.connect(self._toggle_hide_boxes)
         row2_extra_layout.addWidget(self.btn_toggle_hide)
 
+        # ⚙️ 调整窗口 按钮
         self.btn_edit = QPushButton("⚙️ 调整窗口")
         self.btn_edit.setFixedSize(90, 26)
         self.btn_edit.setStyleSheet("QPushButton { background-color: rgba(255,255,255,0.12); color: #ffffff; border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; padding: 0px 4px; font-size: 11px; font-weight: bold; } QPushButton:hover { background-color: rgba(61, 64, 91, 0.8); }")
         self.btn_edit.clicked.connect(self._toggle_edit)
         row2_extra_layout.addWidget(self.btn_edit)
+
+        # 📜 日志 按钮 (放置于【调整窗口】后面)
+        self.btn_sys_log = QPushButton("📜 日志")
+        self.btn_sys_log.setFixedHeight(26)
+        self.btn_sys_log.setStyleSheet("QPushButton { background-color: rgba(0,180,216,0.2); color: #00b4d8; border: 1px solid #00b4d8; border-radius: 4px; padding: 0px 8px; font-size: 11px; font-weight: bold; } QPushButton:hover { background-color: rgba(0,180,216,0.4); }")
+        self.btn_sys_log.clicked.connect(self._show_sys_log)
+        row2_extra_layout.addWidget(self.btn_sys_log)
 
         self.widget_edit_tools = QWidget()
         self.widget_edit_tools.setFixedSize(90, 26)
@@ -991,8 +1051,20 @@ class GlobalControlPanel(QWidget):
         self.adjustSize()
         self._position_top_right()
 
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] ⚙️ 系统初始化完成，准备加载 OCR 模型...")
         self._init_ocr()
         self.load_config()
+
+    def _redirect_stdout_stderr(self):
+        self.log_stream = LogStream()
+        self.log_stream.text_written.connect(self.log_window.append_log)
+        sys.stdout = self.log_stream
+        sys.stderr = self.log_stream
+
+    def _show_sys_log(self):
+        self.log_window.show()
+        self.log_window.raise_()
+        self.log_window.activateWindow()
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
@@ -1008,23 +1080,17 @@ class GlobalControlPanel(QWidget):
         self._drag_pos = None
 
     def _update_button_styles(self):
-        if self.is_collapsed:
-            self.btn_collapse.setText("▶")
-        else:
-            self.btn_collapse.setText("◀")
-
+        self.btn_collapse.setText("▶" if self.is_collapsed else "◀")
         self.btn_collapse.setStyleSheet("background-color: rgba(255,255,255,0.1); color: #00ff8c; font-weight: bold; border-radius: 4px;")
         self.btn_monitor.setStyleSheet(f"background-color: {'#b03a3a' if self.monitoring else '#2e9a58'}; color: white; font-weight: bold; height: 26px;")
         self.btn_exit.setStyleSheet("background-color: rgba(255, 255, 255, 0.15); color: white; font-weight: bold; height: 26px;")
 
     def _toggle_collapse(self):
         self.is_collapsed = not self.is_collapsed
-
         self.row1_card.setVisible(not self.is_collapsed)
         self.grille_card.setVisible(not self.is_collapsed)
         self.row2_extra_container.setVisible(not self.is_collapsed)
         self.spacer_widget.setVisible(not self.is_collapsed)
-
         self._update_button_styles()
         self.adjustSize()
 
@@ -1038,6 +1104,7 @@ class GlobalControlPanel(QWidget):
 
     def _on_f12_pressed(self):
         if self.grille_thread and self.grille_thread.isRunning():
+            print(f"[{datetime.now().strftime('%H:%M:%S')}] ⚡ 收到全局快捷键 F12，立即中断细格栅操作！")
             self.stop_grille()
 
     def _on_grille_interval_changed(self, val):
@@ -1049,6 +1116,7 @@ class GlobalControlPanel(QWidget):
             self.stop_grille()
         else:
             if not self.chk_grille.isChecked():
+                print(f"[{datetime.now().strftime('%H:%M:%S')}] ⚠️ 请先勾选“细格栅”复选框")
                 return
             self.start_grille()
 
@@ -1076,11 +1144,11 @@ class GlobalControlPanel(QWidget):
             def run(self):
                 try:
                     from paddleocr import PaddleOCR
-                    
                     det_dir = get_resource_path("models/ch_PP-OCRv4_det_infer")
                     rec_dir = get_resource_path("models/ch_PP-OCRv4_rec_infer")
                     cls_dir = get_resource_path("models/ch_ppocr_mobile_v2.0_cls_infer")
 
+                    print(f"[{datetime.now().strftime('%H:%M:%S')}] 📦 正在加载 PaddleOCR 模型...")
                     ocr_engine = PaddleOCR(
                         use_angle_cls=True,
                         lang="ch",
@@ -1092,7 +1160,7 @@ class GlobalControlPanel(QWidget):
                     )
                     self.loaded.emit(ocr_engine)
                 except Exception as e:
-                    print(f"PaddleOCR 初始化失败: {e}")
+                    print(f"[{datetime.now().strftime('%H:%M:%S')}] ❌ PaddleOCR 模型加载失败: {e}")
                     self.loaded.emit(None)
 
         self.loader = PaddleOCRLoader()
@@ -1101,6 +1169,8 @@ class GlobalControlPanel(QWidget):
 
     def _on_ocr_loaded(self, reader):
         self.reader = reader
+        if reader:
+            print(f"[{datetime.now().strftime('%H:%M:%S')}] 🎉 PaddleOCR 初始化成功，随时可开始监控！")
 
     def _on_interval_changed(self, val):
         if hasattr(self, 'monitor_thread') and self.monitor_thread:
@@ -1116,7 +1186,6 @@ class GlobalControlPanel(QWidget):
 
     def _toggle_edit(self):
         self.is_editing = not self.is_editing
-        
         self.btn_edit.setVisible(not self.is_editing)
         self.widget_edit_tools.setVisible(self.is_editing)
 
@@ -1146,9 +1215,11 @@ class GlobalControlPanel(QWidget):
         box.log_interval_min = self.spin_log_interval.value()
         box.show()
         self.boxes.append(box)
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] ➕ 新增选框 [{box.name}]: X={x}, Y={y}, W={w}, H={h}")
 
     def _delete_box(self, box):
         if box in self.boxes:
+            print(f"[{datetime.now().strftime('%H:%M:%S')}] 🗑️ 删除选框 [{box.name}]")
             self.boxes.remove(box)
             box.close()
             self.check_and_update_alarm_sound()
@@ -1160,7 +1231,9 @@ class GlobalControlPanel(QWidget):
             self.start_monitor()
 
     def start_monitor(self):
-        if not self.boxes: return
+        if not self.boxes:
+            print(f"[{datetime.now().strftime('%H:%M:%S')}] ⚠️ 当前没有添加任何检测选框")
+            return
         self.monitor_thread = MonitorThread(self.boxes, interval=self.spin_interval.value())
         if self.reader:
             self.monitor_thread.set_reader(self.reader)
@@ -1183,6 +1256,7 @@ class GlobalControlPanel(QWidget):
         self.lbl_countdown.setText("⏳ 0.0s")
         self._update_button_styles()
         self.alarm_player.stop()
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] 🛑 识别监控已停止")
 
     def _on_countdown_tick(self, rem):
         self.lbl_countdown.setText(f"⏳ {rem:.1f}s")
@@ -1256,8 +1330,8 @@ class GlobalControlPanel(QWidget):
                 box.log_interval_min = self.spin_log_interval.value()
                 box.show()
                 self.boxes.append(box)
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[{datetime.now().strftime('%H:%M:%S')}] ⚠️ 读取配置文件异常: {e}")
 
     def close_app(self):
         if hasattr(self, 'f12_listener'):
@@ -1268,6 +1342,7 @@ class GlobalControlPanel(QWidget):
         self.save_config()
         for b in self.boxes:
             b.close()
+        self.log_window.close()
         self.close()
         QApplication.quit()
 
