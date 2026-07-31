@@ -1,34 +1,41 @@
-name: 屏幕数值监控报警
+name: Build Windows Executable
 
 on:
   push:
     branches: [ "main", "master" ]
-  workflow_dispatch: 
+  pull_request:
+    branches: [ "main", "master" ]
+  workflow_dispatch: # 支持在 GitHub 页面手动点击触发构建
 
 jobs:
   build:
     runs-on: windows-latest
 
     steps:
-    - name: Checkout Code
+    - name: 📥 检出代码
       uses: actions/checkout@v4
 
-    - name: Set up Python 3.10
+    - name: 🐍 配置 Python 环境 (3.10)
       uses: actions/setup-python@v5
       with:
-        python-version: '3.10'
+        python-version: "3.10"
+        cache: 'pip'
 
-    - name: Install Dependencies
+    - name: 📦 安装项目依赖
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt
 
-    - name: Build with PyInstaller
+    - name: 🔨 使用 PyInstaller 打包应用
       run: |
-        pyinstaller -D -w -n "屏幕数值监控报警" --icon=favicon.ico --add-data "favicon.ico;." --collect-data ddddocr main.py
+        pyinstaller --noconfirm --onedir --windowed --name="屏幕数值监控软件" --collect-all ddddocr --add-data "警报声.mp3;." main.py
 
-    - name: Upload Artifact
+    - name: 🗜️ 压缩打包好的软件文件夹
+      run: |
+        Powershell Compress-Archive -Path dist/屏幕数值监控软件/* -DestinationPath dist/ScreenMonitor-Windows.zip
+
+    - name: 📤 上传打包后的文件 (Artifacts)
       uses: actions/upload-artifact@v4
       with:
-        name: 屏幕数值监控报警
-        path: dist/屏幕数值监控报警/
+        name: ScreenMonitor-Windows-EXE
+        path: dist/ScreenMonitor-Windows.zip
