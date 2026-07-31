@@ -29,6 +29,8 @@ jobs:
       - name: Build Portable Directory (--onedir)
         run: |
           pyinstaller --noconfirm --onedir --windowed `
+            --icon="favicon.ico" `
+            --add-data "favicon.ico;." `
             --add-data "警报声.mp3;." `
             --add-data "models;models" `
             --name "屏幕数字识别报警" `
