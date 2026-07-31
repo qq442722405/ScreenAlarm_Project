@@ -1149,7 +1149,7 @@ class GlobalControlPanel(QWidget):
         screen_geo = QApplication.primaryScreen().geometry()
         self.move(screen_geo.width() - self.width() - 20, 20)
 
-    def _init_ocr(self):
+def _init_ocr(self):
         class PaddleOCRLoader(QThread):
             loaded = Signal(object)
             def run(self):
@@ -1159,17 +1159,31 @@ class GlobalControlPanel(QWidget):
                     rec_dir = get_resource_path("models/ch_PP-OCRv4_rec_infer")
                     cls_dir = get_resource_path("models/ch_ppocr_mobile_v2.0_cls_infer")
 
-                    print(f"[{datetime.now().strftime('%H:%M:%S')}] 📦 正在加载 PaddleOCR 模型...")
+                    print(f"[{datetime.now().strftime('%H:%M:%S')}] 📦 正在加载 PaddleOCR 离线模型...")
                     
-                    # 使用最新的 PaddleOCR 参数，消除 DeprecationWarning，并移除导致报错的 show_log 参数
-                    ocr_engine = PaddleOCR(
-                        use_textline_orientation=True,
-                        lang="ch",
-                        text_detection_model_dir=det_dir if os.path.exists(det_dir) else None,
-                        text_recognition_model_dir=rec_dir if os.path.exists(rec_dir) else None,
-                        textline_orientation_model_dir=cls_dir if os.path.exists(cls_dir) else None,
-                        use_gpu=False
-                    )
+                    # 构建兼容最新 PaddleOCR API 的参数字典
+                    ocr_kwargs = {
+                        "use_textline_orientation": True
+                    }
+
+                    # 判断是否存在离线模型路径
+                    has_custom_dir = False
+                    if os.path.exists(det_dir):
+                        ocr_kwargs["text_detection_model_dir"] = det_dir
+                        has_custom_dir = True
+                    if os.path.exists(rec_dir):
+                        ocr_kwargs["text_recognition_model_dir"] = rec_dir
+                        has_custom_dir = True
+                    if os.path.exists(cls_dir):
+                        ocr_kwargs["textline_orientation_model_dir"] = cls_dir
+                        has_custom_dir = True
+
+                    # 只有没有本地模型时，才传入 lang="ch"，避免触发 UserWarning 警告
+                    if not has_custom_dir:
+                        ocr_kwargs["lang"] = "ch"
+
+                    # 实例化 PaddleOCR（已移除 use_gpu 参数）
+                    ocr_engine = PaddleOCR(**ocr_kwargs)
                     self.loaded.emit(ocr_engine)
                 except Exception as e:
                     print(f"[{datetime.now().strftime('%H:%M:%S')}] ❌ PaddleOCR 模型加载失败: {e}")
