@@ -5,6 +5,7 @@ import time
 import re
 import threading
 import ctypes
+import socket
 from datetime import datetime
 
 # 开启 Windows 高 DPI 屏幕兼容支持
@@ -31,6 +32,24 @@ try:
     PYGAME_AVAILABLE = True
 except ImportError:
     PYGAME_AVAILABLE = False
+
+try:
+    from flask import Flask, jsonify, render_template_string
+    FLASK_AVAILABLE = True
+except ImportError:
+    FLASK_AVAILABLE = False
+
+
+# ==================== 获取本机局域网 IP ====================
+def get_local_ip():
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        return "127.0.0.1"
 
 
 # ==================== 0. 自定义无冗余 .00 的 SpinBox ====================
@@ -231,7 +250,6 @@ class OCRAdjustDialog(QDialog):
 
         main_layout = QVBoxLayout(self)
 
-        # 1. 参数控制与框选按钮
         top_layout = QHBoxLayout()
         form = QFormLayout()
 
@@ -254,7 +272,6 @@ class OCRAdjustDialog(QDialog):
         self.spin_c.setRange(0, 50)
         self.spin_c.setValue(self.params.get('thresh_c', 2))
 
-        # 绑定参数改变信号
         self.spin_scale.valueChanged.connect(self.update_preview)
         self.spin_clahe.valueChanged.connect(self.update_preview)
         self.spin_block.valueChanged.connect(self.update_preview)
@@ -275,7 +292,6 @@ class OCRAdjustDialog(QDialog):
 
         main_layout.addLayout(top_layout)
 
-        # 2. 原图与预处理对比图像区域
         img_layout = QHBoxLayout()
 
         box_orig = QVBoxLayout()
@@ -302,13 +318,11 @@ class OCRAdjustDialog(QDialog):
         img_layout.addLayout(box_proc)
         main_layout.addLayout(img_layout)
 
-        # 3. 识别结果显示
         self.lbl_ocr_result = QLabel("🔍 识别结果: --")
         self.lbl_ocr_result.setAlignment(Qt.AlignCenter)
         self.lbl_ocr_result.setStyleSheet("color: #00ff8c; font-size: 13px; font-weight: bold; background: rgba(0,0,0,0.4); padding: 6px; border-radius: 4px;")
         main_layout.addWidget(self.lbl_ocr_result)
 
-        # 4. 确认 / 取消按钮
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
@@ -351,13 +365,11 @@ class OCRAdjustDialog(QDialog):
 
         scaled_bgr = cv2.resize(self.crop_bgr, (new_w, new_h), interpolation=cv2.INTER_CUBIC)
 
-        # 1. 显示原图 (Scaled RGB)
         orig_rgb = cv2.cvtColor(scaled_bgr, cv2.COLOR_BGR2RGB)
         qimg_orig = QImage(orig_rgb.data, new_w, new_h, new_w * 3, QImage.Format_RGB888)
         pix_orig = QPixmap.fromImage(qimg_orig)
         self.lbl_orig_img.setPixmap(pix_orig.scaled(self.lbl_orig_img.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation))
 
-        # 2. 预处理二值化图
         gray = cv2.cvtColor(scaled_bgr, cv2.COLOR_BGR2GRAY)
         clahe_clip = float(p['clahe'])
         if clahe_clip > 0:
@@ -374,12 +386,10 @@ class OCRAdjustDialog(QDialog):
 
         binary = cv2.adaptiveThreshold(sharpened, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, block, c_val)
 
-        # 显示处理后的二值图
         qimg_proc = QImage(binary.data, new_w, new_h, new_w, QImage.Format_Grayscale8)
         pix_proc = QPixmap.fromImage(qimg_proc)
         self.lbl_proc_img.setPixmap(pix_proc.scaled(self.lbl_proc_img.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation))
 
-        # 3. 运行 OCR 测试识别结果
         if self.reader:
             try:
                 ok, buf = cv2.imencode(".png", binary)
@@ -422,7 +432,7 @@ class OverlayRegionWidget(QWidget):
         self.name = name
         self.lower = lower
         self.upper = upper
-        self.decimal_places = decimal_places  # 小数点纠正位数
+        self.decimal_places = decimal_places
 
         self.log_interval_min = 1.0
         self.last_log_time = 0.0
@@ -446,19 +456,16 @@ class OverlayRegionWidget(QWidget):
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
 
-        # ---------------- 1. 识别框区域占位 ----------------
         self.capture_spacer = QWidget()
         self.capture_spacer.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         main_layout.addWidget(self.capture_spacer)
 
-        # ---------------- 2. 下方控制面板 ----------------
         self.control_panel = QWidget()
         self.control_panel.setStyleSheet("background-color: rgba(0, 0, 0, 0.8); border-bottom-left-radius: 6px; border-bottom-right-radius: 6px;")
         panel_layout = QVBoxLayout(self.control_panel)
         panel_layout.setContentsMargins(4, 4, 4, 4)
         panel_layout.setSpacing(3)
 
-        # --- 第一排容器：名字 + 识别结果 ---
         self.row1_container = QWidget()
         row1_layout = QHBoxLayout(self.row1_container)
         row1_layout.setContentsMargins(0, 0, 0, 0)
@@ -482,7 +489,6 @@ class OverlayRegionWidget(QWidget):
         row1_layout.addStretch()
         panel_layout.addWidget(self.row1_container)
 
-        # --- 第二排容器：下限/上限/删除框 ---
         self.row2_container = QWidget()
         row2_layout = QHBoxLayout(self.row2_container)
         row2_layout.setContentsMargins(0, 0, 0, 0)
@@ -523,7 +529,6 @@ class OverlayRegionWidget(QWidget):
         row2_layout.addWidget(self.btn_delete)
         panel_layout.addWidget(self.row2_container)
 
-        # --- 第三排容器：静音 + 小数点纠正 + 消除 ---
         self.row3_container = QWidget()
         row3_layout = QHBoxLayout(self.row3_container)
         row3_layout.setContentsMargins(0, 0, 0, 0)
@@ -556,7 +561,6 @@ class OverlayRegionWidget(QWidget):
         row3_layout.addStretch()
         panel_layout.addWidget(self.row3_container)
 
-        # --- 第四容器：常驻显示的历史日志列表 ---
         self.log_container = QWidget()
         log_layout = QVBoxLayout(self.log_container)
         log_layout.setContentsMargins(0, 3, 0, 0)
@@ -953,7 +957,6 @@ class MonitorThread(QThread):
                             clean_t = self._clean_digit_text(raw_text).replace(' ', '')
                             clean_t = re.sub(r'(?<=\d)[,::·\'`_\-*\°ae~,;–—.\s、]+(?=\d)', '.', clean_t)
 
-                            # --- 小数点强制纠正逻辑 ---
                             dp = getattr(box, 'decimal_places', 0)
                             if dp > 0:
                                 digits = re.sub(r'\D', '', clean_t)
@@ -1011,7 +1014,167 @@ class MonitorThread(QThread):
                     self.msleep(50)
 
 
-# ==================== 8. 全局控制面板 ====================
+# ==================== 8. Flask 手机端 Web 服务 ====================
+MOBILE_HTML_TEMPLATE = """
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>📱 屏显数据手机监控面板</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { background: #121218; color: #e0e0e0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 12px; }
+        .header { display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; background: #1a1a26; border-radius: 10px; margin-bottom: 12px; border: 1px solid rgba(255,255,255,0.1); }
+        .title { font-size: 15px; font-weight: bold; color: #00ff8c; }
+        .status { font-size: 12px; padding: 4px 10px; border-radius: 12px; font-weight: bold; }
+        .status.active { background: rgba(0, 255, 140, 0.2); color: #00ff8c; border: 1px solid #00ff8c; }
+        .status.idle { background: rgba(255, 255, 255, 0.1); color: #aaa; }
+        .card { background: #1a1a26; border-radius: 12px; padding: 16px; margin-bottom: 12px; border: 1px solid rgba(255,255,255,0.1); transition: all 0.3s; }
+        .card.alarm { border: 2px solid #ff4d4d; background: rgba(255, 77, 77, 0.08); animation: blink 1s infinite alternate; }
+        @keyframes blink { from { box-shadow: 0 0 5px rgba(255,77,77,0.3); } to { box-shadow: 0 0 15px rgba(255,77,77,0.8); } }
+        .card-header { display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 13px; color: #888; font-weight: bold; }
+        .card-title { color: #ffffff; font-size: 16px; font-weight: bold; }
+        .value-box { text-align: center; margin: 12px 0; }
+        .val-text { font-size: 38px; font-weight: bold; color: #00ff8c; font-family: monospace; }
+        .val-text.alarm-text { color: #ff4d4d; }
+        .range-info { display: flex; justify-content: space-between; font-size: 12px; color: #ffaa00; font-weight: bold; background: rgba(0,0,0,0.3); padding: 6px 12px; border-radius: 6px; }
+        .log-title { margin-top: 10px; font-size: 11px; color: #888; font-weight: bold; }
+        .log-list { margin-top: 4px; background: rgba(0,0,0,0.4); border-radius: 6px; padding: 8px; font-size: 11px; font-family: monospace; max-height: 80px; overflow-y: auto; color: #00ff8c; }
+        .log-item { padding: 2px 0; border-bottom: 1px solid rgba(255,255,255,0.05); }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="title">📱 实时监控数据面板</div>
+        <div id="status" class="status idle">初始化...</div>
+    </div>
+    <div id="cards-container"></div>
+
+    <script>
+        async function refreshData() {
+            try {
+                const res = await fetch('/api/data');
+                const data = await res.json();
+                
+                const statusEl = document.getElementById('status');
+                if (data.monitoring) {
+                    statusEl.className = 'status active';
+                    statusEl.innerText = '🟢 监控中 ' + data.time;
+                } else {
+                    statusEl.className = 'status idle';
+                    statusEl.innerText = '⚪ 暂停监控';
+                }
+
+                const container = document.getElementById('cards-container');
+                let html = '';
+
+                if (!data.boxes || data.boxes.length === 0) {
+                    container.innerHTML = '<div style="text-align:center; padding: 40px; color: #666;">未添加监控选框</div>';
+                    return;
+                }
+
+                data.boxes.forEach(b => {
+                    const isAlarm = b.is_alarm;
+                    const cardClass = isAlarm ? 'card alarm' : 'card';
+                    const valClass = isAlarm ? 'val-text alarm-text' : 'val-text';
+                    
+                    let logsHtml = '';
+                    if (b.logs && b.logs.length > 0) {
+                        logsHtml = b.logs.map(l => `<div class="log-item">${l}</div>`).join('');
+                    } else {
+                        logsHtml = '<div class="log-item">无历史记录</div>';
+                    }
+
+                    html += `
+                        <div class="${cardClass}">
+                            <div class="card-header">
+                                <span class="card-title">${b.name}</span>
+                                <span>${isAlarm ? '🚨 超标告警' : '🟢 正常'}</span>
+                            </div>
+                            <div class="value-box">
+                                <div class="${valClass}">${b.value}</div>
+                            </div>
+                            <div class="range-info">
+                                <span>下限: ${b.lower}</span>
+                                <span>上限: ${b.upper}</span>
+                            </div>
+                            <div class="log-title">📜 历史日志:</div>
+                            <div class="log-list">${logsHtml}</div>
+                        </div>
+                    `;
+                });
+
+                container.innerHTML = html;
+            } catch(e) {
+                console.error("加载失败:", e);
+            }
+        }
+
+        setInterval(refreshData, 1000);
+        refreshData();
+    </script>
+</body>
+</html>
+"""
+
+class WebServerThread(QThread):
+    def __init__(self, main_panel, host='0.0.0.0', port=5000, parent=None):
+        super().__init__(parent)
+        self.main_panel = main_panel
+        self.host = host
+        self.port = port
+        self.server = None
+
+    def run(self):
+        if not FLASK_AVAILABLE:
+            return
+
+        app = Flask(__name__)
+
+        @app.route('/')
+        def index():
+            return render_template_string(MOBILE_HTML_TEMPLATE)
+
+        @app.route('/api/data')
+        def get_data():
+            boxes_data = []
+            for b in self.main_panel.boxes:
+                logs = []
+                for i in range(min(10, b.list_widget.count())):
+                    logs.append(b.list_widget.item(i).text())
+
+                boxes_data.append({
+                    'id': b.box_id,
+                    'name': b.name,
+                    'value': b.lbl_result.text(),
+                    'lower': b.lower,
+                    'upper': b.upper,
+                    'is_alarm': b.is_alarm,
+                    'logs': logs
+                })
+            return jsonify({
+                'monitoring': self.main_panel.monitoring,
+                'time': datetime.now().strftime("%H:%M:%S"),
+                'boxes': boxes_data
+            })
+
+        from werkzeug.serving import make_server
+        try:
+            self.server = make_server(self.host, self.port, app, threaded=True)
+            self.server.serve_forever()
+        except Exception as e:
+            print("Web Server Error:", e)
+
+    def stop(self):
+        if self.server:
+            try:
+                self.server.shutdown()
+            except Exception:
+                pass
+
+
+# ==================== 9. 全局控制面板 ====================
 class GlobalControlPanel(QWidget):
     def __init__(self):
         super().__init__(None)
@@ -1028,6 +1191,7 @@ class GlobalControlPanel(QWidget):
         self.alarm_player = AlarmSoundPlayer()
         self.grille_thread = None
         self.monitor_thread = None
+        self.web_thread = None
 
         self.ocr_params = {'scale': 3.0, 'clahe': 2.0, 'thresh_block': 11, 'thresh_c': 2}
         self._drag_pos = None
@@ -1123,46 +1287,39 @@ class GlobalControlPanel(QWidget):
         row2_layout.setContentsMargins(8, 5, 8, 5)
         row2_layout.setSpacing(6)
 
-        # 开始/停止监控按钮
         self.btn_monitor = QPushButton("▶ 开始监控")
         self.btn_monitor.setFixedHeight(26)
         self.btn_monitor.clicked.connect(self._toggle_monitor)
         row2_layout.addWidget(self.btn_monitor)
 
-        # 开始操作
         self.btn_grille_start = QPushButton("▶ 开始操作")
         self.btn_grille_start.setFixedHeight(26)
         self.btn_grille_start.setStyleSheet("background-color: #0088cc; color: white; font-weight: bold;")
         self.btn_grille_start.clicked.connect(self._toggle_grille)
         row2_layout.addWidget(self.btn_grille_start)
 
-        # 退出按钮
         self.btn_exit = QPushButton("❌ 退出")
         self.btn_exit.setFixedHeight(26)
         self.btn_exit.clicked.connect(self.close_app)
         row2_layout.addWidget(self.btn_exit)
 
-        # 扩展容器
         self.row2_extra_container = QWidget()
         row2_extra_layout = QHBoxLayout(self.row2_extra_container)
         row2_extra_layout.setContentsMargins(0, 0, 0, 0)
         row2_extra_layout.setSpacing(6)
 
-        # 隐藏/显示选框按钮
         self.btn_toggle_hide = QPushButton("👁 隐藏")
         self.btn_toggle_hide.setFixedHeight(26)
         self.btn_toggle_hide.setStyleSheet("background-color: rgba(255,255,255,0.12); color: #00ff8c; border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; padding: 0px 8px; font-size: 11px; font-weight: bold;")
         self.btn_toggle_hide.clicked.connect(self._toggle_hide_boxes)
         row2_extra_layout.addWidget(self.btn_toggle_hide)
 
-        # 调整窗口按钮
         self.btn_edit = QPushButton("⚙️ 调整窗口")
         self.btn_edit.setFixedSize(90, 26)
         self.btn_edit.setStyleSheet("QPushButton { background-color: rgba(255,255,255,0.12); color: #ffffff; border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; padding: 0px 4px; font-size: 11px; font-weight: bold; } QPushButton:hover { background-color: rgba(61, 64, 91, 0.8); }")
         self.btn_edit.clicked.connect(self._toggle_edit)
         row2_extra_layout.addWidget(self.btn_edit)
 
-        # 双按钮形态容器
         self.widget_edit_tools = QWidget()
         self.widget_edit_tools.setFixedSize(90, 26)
         edit_tools_layout = QHBoxLayout(self.widget_edit_tools)
@@ -1197,7 +1354,7 @@ class GlobalControlPanel(QWidget):
 
         main_layout.addWidget(self.row2_card)
 
-        # ---------- 第 3 排：细格栅参数配置栏 ----------
+        # ---------- 第 3 排：细格栅参数与 Web 服务栏 ----------
         self.grille_card = QFrame()
         self.grille_card.setStyleSheet("QFrame { background-color: rgba(0, 0, 0, 0.8); border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 6px; }")
         row3_layout = QHBoxLayout(self.grille_card)
@@ -1222,6 +1379,17 @@ class GlobalControlPanel(QWidget):
         self.lbl_grille_countdown.setStyleSheet("color: #ffcc00; font-weight: bold; padding-left: 4px;")
         row3_layout.addWidget(self.lbl_grille_countdown)
 
+        row3_layout.addSpacing(10)
+
+        # Web 手机服务控制
+        self.chk_web = QCheckBox("🌐 网页服务")
+        self.chk_web.toggled.connect(self._toggle_web_service)
+        row3_layout.addWidget(self.chk_web)
+
+        self.lbl_web_url = QLabel("手机访问: 未开启")
+        self.lbl_web_url.setStyleSheet("color: #00ff8c; font-weight: bold; font-size: 11px;")
+        row3_layout.addWidget(self.lbl_web_url)
+
         row3_layout.addStretch()
         main_layout.addWidget(self.grille_card)
 
@@ -1231,6 +1399,28 @@ class GlobalControlPanel(QWidget):
 
         self._init_ocr()
         self.load_config()
+
+    def _toggle_web_service(self, checked):
+        if checked:
+            if not FLASK_AVAILABLE:
+                self.lbl_web_url.setText("❌未安装flask (pip install flask)")
+                self.lbl_web_url.setStyleSheet("color: #ff4d4d;")
+                self.chk_web.setChecked(False)
+                return
+
+            local_ip = get_local_ip()
+            url_str = f"http://{local_ip}:5000"
+            self.lbl_web_url.setText(f"📱 手机浏览器打开: {url_str}")
+            self.lbl_web_url.setStyleSheet("color: #00ff8c; font-weight: bold;")
+
+            self.web_thread = WebServerThread(self, host='0.0.0.0', port=5000)
+            self.web_thread.start()
+        else:
+            if self.web_thread:
+                self.web_thread.stop()
+                self.web_thread = None
+            self.lbl_web_url.setText("手机访问: 未开启")
+            self.lbl_web_url.setStyleSheet("color: #aaa;")
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
@@ -1398,18 +1588,15 @@ class GlobalControlPanel(QWidget):
     def start_monitor(self):
         if not self.boxes: return
         
-        # 若之前存在线程，确保彻底停止并释放资源
         if hasattr(self, 'monitor_thread') and self.monitor_thread:
             self.monitor_thread.stop()
             self.monitor_thread.wait()
             self.monitor_thread = None
 
-        # 立即更新界面与倒计时状态，清空残留等待时间
         self.btn_monitor.setText("⏹ 停止 0.0s")
         self.monitoring = True
         self._update_button_styles()
 
-        # 启动全新监控线程（启动后会立刻运行第一轮识别）
         self.monitor_thread = MonitorThread(self.boxes, interval=self.spin_interval.value(), ocr_params=self.ocr_params)
         if self.reader:
             self.monitor_thread.set_reader(self.reader)
@@ -1457,6 +1644,7 @@ class GlobalControlPanel(QWidget):
             'log_interval': self.spin_log_interval.value(),
             'grille_interval': self.spin_grille_interval.value(),
             'grille_checked': self.chk_grille.isChecked(),
+            'web_checked': self.chk_web.isChecked(),
             'ocr_params': self.ocr_params,
             'boxes': []
         }
@@ -1485,6 +1673,7 @@ class GlobalControlPanel(QWidget):
             self.spin_log_interval.setValue(data.get('log_interval', 1.0))
             self.spin_grille_interval.setValue(data.get('grille_interval', 2.0))
             self.chk_grille.setChecked(data.get('grille_checked', False))
+            self.chk_web.setChecked(data.get('web_checked', False))
             self.ocr_params = data.get('ocr_params', {'scale': 3.0, 'clahe': 2.0, 'thresh_block': 11, 'thresh_c': 2})
 
             for item in data.get('boxes', []):
@@ -1511,6 +1700,8 @@ class GlobalControlPanel(QWidget):
         if hasattr(self, 'f12_listener'):
             self.f12_listener.stop()
             self.f12_listener.wait()
+        if self.web_thread:
+            self.web_thread.stop()
         self.stop_monitor()
         self.stop_grille()
         self.save_config()
