@@ -1,4 +1,4 @@
-name: Build Executable with PaddleOCR
+name: 屏幕数字识别报警
 
 on:
   push:
@@ -31,11 +31,11 @@ jobs:
           pyinstaller --noconfirm --onedir --windowed `
             --add-data "警报声.mp3;." `
             --add-data "models;models" `
-            --name "ScreenOCRMonitor" `
+            --name "屏幕数字识别报警" `
             main.py
 
       - name: Archive Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ScreenOCRMonitor-Windows-x64
-          path: dist/ScreenOCRMonitor
+          name: 屏幕数字识别报警
+          path: dist/屏幕数字识别报警
