@@ -14,7 +14,8 @@ os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "1"
 from PySide6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel, QLineEdit, QDoubleSpinBox, QSpinBox,
-    QListWidget, QCheckBox, QAbstractSpinBox, QFrame, QSizePolicy
+    QListWidget, QCheckBox, QAbstractSpinBox, QFrame, QSizePolicy,
+    QDialog, QFormLayout, QDialogButtonBox
 )
 from PySide6.QtCore import Qt, QTimer, QThread, Signal, QPoint, QRect
 from PySide6.QtGui import (
@@ -148,6 +149,8 @@ class AlarmSoundPlayer:
 
 # ==================== 3. 细格栅自动点击线程 ====================
 class FineGrilleThread(QThread):
+    countdown_tick = Signal(float)
+
     def __init__(self, cycle_interval_min=2.0, parent=None):
         super().__init__(parent)
         self.cycle_interval_min = cycle_interval_min
@@ -160,12 +163,12 @@ class FineGrilleThread(QThread):
         self.running = False
 
     def _safe_sleep(self, seconds):
-        steps = int(seconds * 10)
-        for _ in range(steps):
-            if not self.running:
-                return False
+        start_t = time.time()
+        while self.running and (time.time() - start_t < seconds):
+            rem = max(0.0, seconds - (time.time() - start_t))
+            self.countdown_tick.emit(rem)
             self.msleep(100)
-        return True
+        return self.running
 
     def _click_matrix(self, start_x, start_y):
         rows = [(0, 5), (1, 5), (2, 4)]
@@ -194,24 +197,98 @@ class FineGrilleThread(QThread):
             if not self._safe_sleep(wait_sec): break
 
 
-# ==================== 4. 悬浮识别选框窗口（记录常驻显示） ====================
+# ==================== 4. OCR 识别参数调整对话框 ====================
+class OCRAdjustDialog(QDialog):
+    def __init__(self, params, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("⚙️ 识别图像预处理调整")
+        self.setWindowFlags(Qt.WindowStaysOnTopHint | Qt.Tool)
+        self.setStyleSheet("""
+            QDialog { background-color: #1a1a26; color: white; }
+            QLabel { color: #e0e0e0; font-size: 11px; font-weight: bold; }
+            QDoubleSpinBox, QSpinBox {
+                background-color: rgba(26, 26, 38, 0.8);
+                color: #00ff8c;
+                border: 1px solid rgba(255, 255, 255, 0.2);
+                border-radius: 4px;
+                padding: 2px 4px;
+                font-weight: bold;
+            }
+            QPushButton {
+                background-color: rgba(43, 45, 66, 0.8);
+                color: white;
+                border: 1px solid rgba(255, 255, 255, 0.2);
+                border-radius: 4px;
+                padding: 4px 12px;
+                font-weight: bold;
+            }
+            QPushButton:hover { background-color: rgba(61, 64, 91, 0.9); }
+        """)
+
+        layout = QVBoxLayout(self)
+        form = QFormLayout()
+
+        self.spin_scale = QDoubleSpinBox()
+        self.spin_scale.setRange(1.0, 10.0)
+        self.spin_scale.setSingleStep(0.5)
+        self.spin_scale.setValue(params.get('scale', 3.0))
+
+        self.spin_clahe = QDoubleSpinBox()
+        self.spin_clahe.setRange(0.0, 20.0)
+        self.spin_clahe.setSingleStep(0.5)
+        self.spin_clahe.setValue(params.get('clahe', 2.0))
+
+        self.spin_block = QSpinBox()
+        self.spin_block.setRange(3, 99)
+        self.spin_block.setSingleStep(2)
+        self.spin_block.setValue(params.get('thresh_block', 11))
+
+        self.spin_c = QSpinBox()
+        self.spin_c.setRange(0, 50)
+        self.spin_c.setValue(params.get('thresh_c', 2))
+
+        form.addRow("放大倍数:", self.spin_scale)
+        form.addRow("对比度增强 (CLAHE):", self.spin_clahe)
+        form.addRow("二值化块大小 (奇数):", self.spin_block)
+        form.addRow("二值化常数 C:", self.spin_c)
+
+        layout.addLayout(form)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def get_params(self):
+        block = self.spin_block.value()
+        if block % 2 == 0:
+            block += 1
+        return {
+            'scale': self.spin_scale.value(),
+            'clahe': self.spin_clahe.value(),
+            'thresh_block': block,
+            'thresh_c': self.spin_c.value()
+        }
+
+
+# ==================== 5. 悬浮识别选框窗口（记录常驻显示） ====================
 class OverlayRegionWidget(QWidget):
     delete_requested = Signal(object)
     alarm_cleared = Signal()
     mute_toggled = Signal()
 
-    def __init__(self, box_id, x, y, w, h, name="区域", lower=0.0, upper=100.0, parent=None):
+    def __init__(self, box_id, x, y, w, h, name="区域", lower=0.0, upper=100.0, decimal_places=0, parent=None):
         super().__init__(None)
         self.box_id = box_id
         self.capture_x = x
         self.capture_y = y
-        # 取消最小限制，仅限制大于 0px
         self.capture_w = max(1, w)
         self.capture_h = max(1, h)
 
         self.name = name
         self.lower = lower
         self.upper = upper
+        self.decimal_places = decimal_places  # 小数点纠正位数
 
         self.log_interval_min = 1.0
         self.last_log_time = 0.0
@@ -242,7 +319,6 @@ class OverlayRegionWidget(QWidget):
 
         # ---------------- 2. 下方控制面板 ----------------
         self.control_panel = QWidget()
-        # 黑色背景改为 80% 不透明度 (rgba(0, 0, 0, 0.8))
         self.control_panel.setStyleSheet("background-color: rgba(0, 0, 0, 0.8); border-bottom-left-radius: 6px; border-bottom-right-radius: 6px;")
         panel_layout = QVBoxLayout(self.control_panel)
         panel_layout.setContentsMargins(4, 4, 4, 4)
@@ -313,7 +389,7 @@ class OverlayRegionWidget(QWidget):
         row2_layout.addWidget(self.btn_delete)
         panel_layout.addWidget(self.row2_container)
 
-        # --- 第三排容器：静音 + 消除 ---
+        # --- 第三排容器：静音 + 小数点纠正 + 消除 ---
         self.row3_container = QWidget()
         row3_layout = QHBoxLayout(self.row3_container)
         row3_layout.setContentsMargins(0, 0, 0, 0)
@@ -324,11 +400,24 @@ class OverlayRegionWidget(QWidget):
         self.btn_mute.setStyleSheet("QPushButton { background-color: rgba(255,255,255,0.15); color: white; border: none; border-radius: 3px; font-size: 10px; } QPushButton:hover { background-color: rgba(255,255,255,0.3); }")
         self.btn_mute.clicked.connect(self._toggle_mute)
 
+        self.lbl_dec = QLabel("小数点:")
+        self.lbl_dec.setStyleSheet("color: #a0a0a0; font-size: 10px; font-weight: bold;")
+        self.spin_dec = QSpinBox()
+        self.spin_dec.setButtonSymbols(QAbstractSpinBox.NoButtons)
+        self.spin_dec.setAlignment(Qt.AlignCenter)
+        self.spin_dec.setRange(0, 4)
+        self.spin_dec.setValue(self.decimal_places)
+        self.spin_dec.setFixedSize(26, 20)
+        self.spin_dec.setStyleSheet("background-color: rgba(26, 26, 38, 0.5); color: #00ff8c; border: 1px solid #00ff8c; font-size: 10px; border-radius: 2px;")
+        self.spin_dec.valueChanged.connect(self._on_dec_changed)
+
         self.btn_clear_alarm = QPushButton("🚨 消除")
         self.btn_clear_alarm.setStyleSheet("QPushButton { background-color: #ff4d4d; color: white; border: none; border-radius: 3px; padding: 2px 8px; font-size: 10px; font-weight: bold; } QPushButton:hover { background-color: #ff6666; }")
         self.btn_clear_alarm.clicked.connect(self._on_clear_alarm)
 
         row3_layout.addWidget(self.btn_mute)
+        row3_layout.addWidget(self.lbl_dec)
+        row3_layout.addWidget(self.spin_dec)
         row3_layout.addWidget(self.btn_clear_alarm)
         row3_layout.addStretch()
         panel_layout.addWidget(self.row3_container)
@@ -370,6 +459,9 @@ class OverlayRegionWidget(QWidget):
 
     def _on_upper_changed(self, val):
         self.upper = val
+
+    def _on_dec_changed(self, val):
+        self.decimal_places = val
 
     def _on_title_changed(self, text):
         self.name = text
@@ -413,12 +505,13 @@ class OverlayRegionWidget(QWidget):
                 self.row3_container.setVisible(True)
                 self.log_container.setVisible(False)
                 self.btn_mute.setVisible(False)
+                self.lbl_dec.setVisible(False)
+                self.spin_dec.setVisible(False)
                 self.btn_clear_alarm.setVisible(True)
             else:
                 self.control_panel.setVisible(False)
         else:
             self.control_panel.setVisible(True)
-            # 黑色背景改为 80% 不透明度 (rgba(0, 0, 0, 0.8))
             self.control_panel.setStyleSheet("background-color: rgba(0, 0, 0, 0.8); border-bottom-left-radius: 6px; border-bottom-right-radius: 6px;")
             self.row1_container.setVisible(True)
             self.row2_container.setVisible(True)
@@ -426,6 +519,8 @@ class OverlayRegionWidget(QWidget):
             self.log_container.setVisible(True)
 
             self.btn_mute.setVisible(True)
+            self.lbl_dec.setVisible(self.is_editing)
+            self.spin_dec.setVisible(self.is_editing)
             self.btn_clear_alarm.setVisible(self.is_alarm)
 
             self.btn_delete.setVisible(self.is_editing)
@@ -439,7 +534,7 @@ class OverlayRegionWidget(QWidget):
         if self.panel_hidden:
             panel_h = 28 if self.is_alarm else 0
         else:
-            panel_h = 181  # 控制面板 + 常驻日志面板的高度
+            panel_h = 181
 
         self.capture_spacer.setFixedHeight(self.capture_h)
         total_h = self.capture_h + panel_h
@@ -501,7 +596,6 @@ class OverlayRegionWidget(QWidget):
         if event.buttons() & Qt.LeftButton:
             g_pos = event.globalPosition().toPoint()
             if self._resize_mode == "BR":
-                # 取消最小尺寸限制，只保留 >0 边界校验
                 self.capture_w = max(1, g_pos.x() - self.capture_x)
                 self.capture_h = max(1, g_pos.y() - self.capture_y)
             elif self._resize_mode == "R":
@@ -542,7 +636,7 @@ class OverlayRegionWidget(QWidget):
         painter.drawRect(box_rect.adjusted(1, 1, -1, -1))
 
 
-# ==================== 5. 屏幕选区拾取器 ====================
+# ==================== 6. 屏幕选区拾取器 ====================
 class CoordinatePicker(QWidget):
     coord_selected = Signal(int, int, int, int)
     def __init__(self, parent=None):
@@ -596,7 +690,6 @@ class CoordinatePicker(QWidget):
                 y = min(self.start_pos.y(), self.end_pos.y())
                 w = abs(self.end_pos.x() - self.start_pos.x())
                 h = abs(self.end_pos.y() - self.start_pos.y())
-                # 取消最小选取框限制
                 if w > 0 and h > 0:
                     self.coord_selected.emit(x, y, w, h)
                     self.close()
@@ -611,25 +704,29 @@ class CoordinatePicker(QWidget):
             self.close()
 
 
-# ==================== 6. 后台识别线程 ====================
+# ==================== 7. 后台识别线程 ====================
 class MonitorThread(QThread):
     value_updated = Signal(object, str, object, str)
     alarm_triggered = Signal(object, str, float)
     alarm_state_cleared = Signal()
     countdown_tick = Signal(float)
 
-    def __init__(self, boxes, interval=1.0, parent=None):
+    def __init__(self, boxes, interval=1.0, ocr_params=None, parent=None):
         super().__init__(parent)
         self.boxes = boxes
         self.interval = max(0.1, interval)
+        self.ocr_params = ocr_params or {'scale': 3.0, 'clahe': 2.0, 'thresh_block': 11, 'thresh_c': 2}
         self.running = True
         self.reader = None
 
     def set_reader(self, reader):
         self.reader = reader
 
-    def update_interval(self, val):
-        self.interval = max(0.1, val)
+    def update_params(self, interval=None, ocr_params=None):
+        if interval is not None:
+            self.interval = max(0.1, interval)
+        if ocr_params is not None:
+            self.ocr_params = ocr_params
 
     def stop(self):
         self.running = False
@@ -679,8 +776,7 @@ class MonitorThread(QThread):
                         else:
                             bgr = cv2.cvtColor(img_np, cv2.COLOR_RGB2BGR)
 
-                        target_h = 100
-                        scale_factor = max(3.0, target_h / float(max(1, h)))
+                        scale_factor = max(1.0, float(self.ocr_params.get('scale', 3.0)))
                         new_w, new_h = int(w * scale_factor), int(h * scale_factor)
                         scaled_bgr = cv2.resize(bgr, (new_w, new_h), interpolation=cv2.INTER_CUBIC)
 
@@ -697,10 +793,18 @@ class MonitorThread(QThread):
                         ok3, buf3 = cv2.imencode(".png", inverted)
                         if ok3: attempts.append(buf3.tobytes())
 
-                        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-                        enhanced = clahe.apply(gray)
+                        clahe_clip = float(self.ocr_params.get('clahe', 2.0))
+                        if clahe_clip > 0:
+                            clahe = cv2.createCLAHE(clipLimit=clahe_clip, tileGridSize=(8, 8))
+                            enhanced = clahe.apply(gray)
+                        else:
+                            enhanced = gray
+
                         sharpened = cv2.filter2D(enhanced, -1, np.array([[-1,-1,-1],[-1,9,-1],[-1,-1,-1]]))
-                        binary = cv2.adaptiveThreshold(sharpened, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2)
+                        
+                        block = int(self.ocr_params.get('thresh_block', 11))
+                        c_val = int(self.ocr_params.get('thresh_c', 2))
+                        binary = cv2.adaptiveThreshold(sharpened, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, block, c_val)
                         ok4, buf4 = cv2.imencode(".png", binary)
                         if ok4: attempts.append(buf4.tobytes())
 
@@ -715,13 +819,28 @@ class MonitorThread(QThread):
                             clean_t = self._clean_digit_text(raw_text).replace(' ', '')
                             clean_t = re.sub(r'(?<=\d)[,::·\'`_\-*\°ae~,;–—.\s、]+(?=\d)', '.', clean_t)
 
-                            nums = re.findall(r'-?\d+(?:\.\d+)?', clean_t)
-                            if nums:
-                                try:
-                                    found_val = float(nums[0])
-                                    break
-                                except ValueError:
-                                    pass
+                            # --- 小数点强制纠正逻辑 ---
+                            dp = getattr(box, 'decimal_places', 0)
+                            if dp > 0:
+                                digits = re.sub(r'\D', '', clean_t)
+                                if digits:
+                                    if len(digits) > dp:
+                                        val_str = digits[:-dp] + '.' + digits[-dp:]
+                                    else:
+                                        val_str = "0." + digits.zfill(dp)
+                                    try:
+                                        found_val = float(val_str)
+                                        break
+                                    except ValueError:
+                                        pass
+                            else:
+                                nums = re.findall(r'-?\d+(?:\.\d+)?', clean_t)
+                                if nums:
+                                    try:
+                                        found_val = float(nums[0])
+                                        break
+                                    except ValueError:
+                                        pass
 
                         now_str = datetime.now().strftime("%H:%M:%S")
                         self.value_updated.emit(box, now_str, found_val, last_raw_str)
@@ -758,7 +877,7 @@ class MonitorThread(QThread):
                     self.msleep(50)
 
 
-# ==================== 7. 全局控制面板 ====================
+# ==================== 8. 全局控制面板 ====================
 class GlobalControlPanel(QWidget):
     def __init__(self):
         super().__init__(None)
@@ -775,6 +894,7 @@ class GlobalControlPanel(QWidget):
         self.alarm_player = AlarmSoundPlayer()
         self.grille_thread = None
 
+        self.ocr_params = {'scale': 3.0, 'clahe': 2.0, 'thresh_block': 11, 'thresh_c': 2}
         self._drag_pos = None
 
         self.f12_listener = GlobalF12Listener()
@@ -833,10 +953,6 @@ class GlobalControlPanel(QWidget):
         self.spin_interval.valueChanged.connect(self._on_interval_changed)
         self.row1_layout.addWidget(self.spin_interval)
 
-        self.lbl_countdown = QLabel("⏳ 0.0s")
-        self.lbl_countdown.setStyleSheet("color: #ffcc00; font-weight: bold; padding-right: 4px;")
-        self.row1_layout.addWidget(self.lbl_countdown)
-
         self.row1_layout.addWidget(QLabel("📊 记录数:"))
         self.spin_count = QSpinBox()
         self.spin_count.setButtonSymbols(QAbstractSpinBox.NoButtons)
@@ -857,6 +973,11 @@ class GlobalControlPanel(QWidget):
         self.spin_log_interval.setSingleStep(0.5)
         self.spin_log_interval.valueChanged.connect(self._on_log_interval_changed)
         self.row1_layout.addWidget(self.spin_log_interval)
+
+        self.btn_ocr_adjust = QPushButton("⚙️ 识别调整")
+        self.btn_ocr_adjust.setFixedHeight(26)
+        self.btn_ocr_adjust.clicked.connect(self._open_ocr_adjust_dialog)
+        self.row1_layout.addWidget(self.btn_ocr_adjust)
 
         main_layout.addWidget(self.row1_card)
 
@@ -899,14 +1020,14 @@ class GlobalControlPanel(QWidget):
         self.btn_toggle_hide.clicked.connect(self._toggle_hide_boxes)
         row2_extra_layout.addWidget(self.btn_toggle_hide)
 
-        # 调整窗口按钮（固定宽度 90px）
+        # 调整窗口按钮
         self.btn_edit = QPushButton("⚙️ 调整窗口")
         self.btn_edit.setFixedSize(90, 26)
         self.btn_edit.setStyleSheet("QPushButton { background-color: rgba(255,255,255,0.12); color: #ffffff; border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; padding: 0px 4px; font-size: 11px; font-weight: bold; } QPushButton:hover { background-color: rgba(61, 64, 91, 0.8); }")
         self.btn_edit.clicked.connect(self._toggle_edit)
         row2_extra_layout.addWidget(self.btn_edit)
 
-        # 双按钮形态容器（完成 + ➕，总计 90px）
+        # 双按钮形态容器
         self.widget_edit_tools = QWidget()
         self.widget_edit_tools.setFixedSize(90, 26)
         edit_tools_layout = QHBoxLayout(self.widget_edit_tools)
@@ -930,12 +1051,10 @@ class GlobalControlPanel(QWidget):
         row2_extra_layout.addWidget(self.widget_edit_tools)
         row2_layout.addWidget(self.row2_extra_container)
 
-        # 展开/收起推至最右侧的弹簧
         self.spacer_widget = QWidget()
         self.spacer_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         row2_layout.addWidget(self.spacer_widget)
 
-        # 折叠切换按钮
         self.btn_collapse = QPushButton("◀")
         self.btn_collapse.setFixedSize(26, 26)
         self.btn_collapse.clicked.connect(self._toggle_collapse)
@@ -964,6 +1083,10 @@ class GlobalControlPanel(QWidget):
         self.spin_grille_interval.valueChanged.connect(self._on_grille_interval_changed)
         row3_layout.addWidget(self.spin_grille_interval)
 
+        self.lbl_grille_countdown = QLabel("⏳ --")
+        self.lbl_grille_countdown.setStyleSheet("color: #ffcc00; font-weight: bold; padding-left: 4px;")
+        row3_layout.addWidget(self.lbl_grille_countdown)
+
         row3_layout.addStretch()
         main_layout.addWidget(self.grille_card)
 
@@ -986,6 +1109,13 @@ class GlobalControlPanel(QWidget):
 
     def mouseReleaseEvent(self, event):
         self._drag_pos = None
+
+    def _open_ocr_adjust_dialog(self):
+        dialog = OCRAdjustDialog(self.ocr_params, self)
+        if dialog.exec() == QDialog.Accepted:
+            self.ocr_params = dialog.get_params()
+            if hasattr(self, 'monitor_thread') and self.monitor_thread:
+                self.monitor_thread.update_params(ocr_params=self.ocr_params)
 
     def _update_button_styles(self):
         if self.is_collapsed:
@@ -1034,6 +1164,7 @@ class GlobalControlPanel(QWidget):
 
     def start_grille(self):
         self.grille_thread = FineGrilleThread(cycle_interval_min=self.spin_grille_interval.value())
+        self.grille_thread.countdown_tick.connect(self._on_grille_countdown_tick)
         self.grille_thread.start()
         self.btn_grille_start.setText("⏹ 停止操作(F12)")
         self.btn_grille_start.setStyleSheet("background-color: #cc3333; color: white; font-weight: bold; height: 26px;")
@@ -1043,8 +1174,13 @@ class GlobalControlPanel(QWidget):
             self.grille_thread.stop()
             self.grille_thread.wait()
             self.grille_thread = None
+        self.lbl_grille_countdown.setText("⏳ --")
         self.btn_grille_start.setText("▶ 开始操作")
         self.btn_grille_start.setStyleSheet("background-color: #0088cc; color: white; font-weight: bold; height: 26px;")
+
+    def _on_grille_countdown_tick(self, rem_sec):
+        m, s = divmod(int(rem_sec), 60)
+        self.lbl_grille_countdown.setText(f"⏳ {m:02d}:{s:02d}")
 
     def _position_top_right(self):
         screen_geo = QApplication.primaryScreen().geometry()
@@ -1069,7 +1205,7 @@ class GlobalControlPanel(QWidget):
 
     def _on_interval_changed(self, val):
         if hasattr(self, 'monitor_thread') and self.monitor_thread:
-            self.monitor_thread.update_interval(val)
+            self.monitor_thread.update_params(interval=val)
 
     def _on_count_changed(self, val):
         for box in self.boxes:
@@ -1126,7 +1262,7 @@ class GlobalControlPanel(QWidget):
 
     def start_monitor(self):
         if not self.boxes: return
-        self.monitor_thread = MonitorThread(self.boxes, interval=self.spin_interval.value())
+        self.monitor_thread = MonitorThread(self.boxes, interval=self.spin_interval.value(), ocr_params=self.ocr_params)
         if self.reader:
             self.monitor_thread.set_reader(self.reader)
         self.monitor_thread.value_updated.connect(self._on_value_updated)
@@ -1145,12 +1281,10 @@ class GlobalControlPanel(QWidget):
             self.monitor_thread.wait()
         self.monitoring = False
         self.btn_monitor.setText("▶ 开始监控")
-        self.lbl_countdown.setText("⏳ 0.0s")
         self._update_button_styles()
         self.alarm_player.stop()
 
     def _on_countdown_tick(self, rem):
-        self.lbl_countdown.setText(f"⏳ {rem:.1f}s")
         if self.monitoring:
             self.btn_monitor.setText(f"⏹ 停止 {rem:.1f}s")
 
@@ -1178,6 +1312,7 @@ class GlobalControlPanel(QWidget):
             'log_interval': self.spin_log_interval.value(),
             'grille_interval': self.spin_grille_interval.value(),
             'grille_checked': self.chk_grille.isChecked(),
+            'ocr_params': self.ocr_params,
             'boxes': []
         }
         for b in self.boxes:
@@ -1185,7 +1320,8 @@ class GlobalControlPanel(QWidget):
                 'name': b.name,
                 'x': b.capture_x, 'y': b.capture_y,
                 'w': b.capture_w, 'h': b.capture_h,
-                'lower': b.lower, 'upper': b.upper
+                'lower': b.lower, 'upper': b.upper,
+                'decimal_places': getattr(b, 'decimal_places', 0)
             })
         with open(self.config_file, 'w', encoding='utf-8') as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
@@ -1204,6 +1340,7 @@ class GlobalControlPanel(QWidget):
             self.spin_log_interval.setValue(data.get('log_interval', 1.0))
             self.spin_grille_interval.setValue(data.get('grille_interval', 2.0))
             self.chk_grille.setChecked(data.get('grille_checked', False))
+            self.ocr_params = data.get('ocr_params', {'scale': 3.0, 'clahe': 2.0, 'thresh_block': 11, 'thresh_c': 2})
 
             for item in data.get('boxes', []):
                 box = OverlayRegionWidget(
@@ -1211,7 +1348,8 @@ class GlobalControlPanel(QWidget):
                     x=item['x'], y=item['y'],
                     w=item['w'], h=item['h'],
                     name=item['name'],
-                    lower=item.get('lower', 0.0), upper=item.get('upper', 100.0)
+                    lower=item.get('lower', 0.0), upper=item.get('upper', 100.0),
+                    decimal_places=item.get('decimal_places', 0)
                 )
                 box.delete_requested.connect(self._delete_box)
                 box.alarm_cleared.connect(self.check_and_update_alarm_sound)
