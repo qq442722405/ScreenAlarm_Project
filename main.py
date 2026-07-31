@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, QTimer, QThread, Signal, QPoint, QRect
 from PySide6.QtGui import (
-    QColor, QBrush, QFont, QPainter, QPen, QPixmap, QIcon
+    QColor, QBrush, QFont, QPainter, QPen, QPixmap, QIcon, QImage
 )
 
 import mss
@@ -197,11 +197,15 @@ class FineGrilleThread(QThread):
             if not self._safe_sleep(wait_sec): break
 
 
-# ==================== 4. OCR 识别参数调整对话框 ====================
+# ==================== 4. OCR 识别参数调整及实显预览对话框 ====================
 class OCRAdjustDialog(QDialog):
-    def __init__(self, params, parent=None):
+    def __init__(self, params, reader=None, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("⚙️ 识别图像预处理调整")
+        self.params = params.copy()
+        self.reader = reader
+        self.crop_bgr = None
+
+        self.setWindowTitle("⚙️ 识别图像预处理与预览调整")
         self.setWindowFlags(Qt.WindowStaysOnTopHint | Qt.Tool)
         self.setStyleSheet("""
             QDialog { background-color: #1a1a26; color: white; }
@@ -225,39 +229,169 @@ class OCRAdjustDialog(QDialog):
             QPushButton:hover { background-color: rgba(61, 64, 91, 0.9); }
         """)
 
-        layout = QVBoxLayout(self)
+        main_layout = QVBoxLayout(self)
+
+        # 1. 参数控制与框选按钮
+        top_layout = QHBoxLayout()
         form = QFormLayout()
 
         self.spin_scale = QDoubleSpinBox()
         self.spin_scale.setRange(1.0, 10.0)
         self.spin_scale.setSingleStep(0.5)
-        self.spin_scale.setValue(params.get('scale', 3.0))
+        self.spin_scale.setValue(self.params.get('scale', 3.0))
 
         self.spin_clahe = QDoubleSpinBox()
         self.spin_clahe.setRange(0.0, 20.0)
         self.spin_clahe.setSingleStep(0.5)
-        self.spin_clahe.setValue(params.get('clahe', 2.0))
+        self.spin_clahe.setValue(self.params.get('clahe', 2.0))
 
         self.spin_block = QSpinBox()
         self.spin_block.setRange(3, 99)
         self.spin_block.setSingleStep(2)
-        self.spin_block.setValue(params.get('thresh_block', 11))
+        self.spin_block.setValue(self.params.get('thresh_block', 11))
 
         self.spin_c = QSpinBox()
         self.spin_c.setRange(0, 50)
-        self.spin_c.setValue(params.get('thresh_c', 2))
+        self.spin_c.setValue(self.params.get('thresh_c', 2))
+
+        # 绑定参数改变信号
+        self.spin_scale.valueChanged.connect(self.update_preview)
+        self.spin_clahe.valueChanged.connect(self.update_preview)
+        self.spin_block.valueChanged.connect(self.update_preview)
+        self.spin_c.valueChanged.connect(self.update_preview)
 
         form.addRow("放大倍数:", self.spin_scale)
         form.addRow("对比度增强 (CLAHE):", self.spin_clahe)
         form.addRow("二值化块大小 (奇数):", self.spin_block)
         form.addRow("二值化常数 C:", self.spin_c)
 
-        layout.addLayout(form)
+        top_layout.addLayout(form)
 
+        self.btn_pick = QPushButton("📐 识别框选")
+        self.btn_pick.setFixedHeight(40)
+        self.btn_pick.setStyleSheet("background-color: #0088cc; color: white; font-size: 12px; font-weight: bold;")
+        self.btn_pick.clicked.connect(self._pick_preview_area)
+        top_layout.addWidget(self.btn_pick)
+
+        main_layout.addLayout(top_layout)
+
+        # 2. 原图与预处理对比图像区域
+        img_layout = QHBoxLayout()
+
+        box_orig = QVBoxLayout()
+        lbl_title_orig = QLabel("📷 原始截取图")
+        lbl_title_orig.setAlignment(Qt.AlignCenter)
+        box_orig.addWidget(lbl_title_orig)
+        self.lbl_orig_img = QLabel("未框选区域")
+        self.lbl_orig_img.setAlignment(Qt.AlignCenter)
+        self.lbl_orig_img.setFixedSize(220, 130)
+        self.lbl_orig_img.setStyleSheet("border: 1px dashed rgba(255,255,255,0.3); background-color: rgba(0,0,0,0.5); border-radius: 4px;")
+        box_orig.addWidget(self.lbl_orig_img)
+
+        box_proc = QVBoxLayout()
+        lbl_title_proc = QLabel("⚡ 调整后二值图")
+        lbl_title_proc.setAlignment(Qt.AlignCenter)
+        box_proc.addWidget(lbl_title_proc)
+        self.lbl_proc_img = QLabel("未框选区域")
+        self.lbl_proc_img.setAlignment(Qt.AlignCenter)
+        self.lbl_proc_img.setFixedSize(220, 130)
+        self.lbl_proc_img.setStyleSheet("border: 1px dashed rgba(255,255,255,0.3); background-color: rgba(0,0,0,0.5); border-radius: 4px;")
+        box_proc.addWidget(self.lbl_proc_img)
+
+        img_layout.addLayout(box_orig)
+        img_layout.addLayout(box_proc)
+        main_layout.addLayout(img_layout)
+
+        # 3. 识别结果显示
+        self.lbl_ocr_result = QLabel("🔍 识别结果: --")
+        self.lbl_ocr_result.setAlignment(Qt.AlignCenter)
+        self.lbl_ocr_result.setStyleSheet("color: #00ff8c; font-size: 13px; font-weight: bold; background: rgba(0,0,0,0.4); padding: 6px; border-radius: 4px;")
+        main_layout.addWidget(self.lbl_ocr_result)
+
+        # 4. 确认 / 取消按钮
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)
+        main_layout.addWidget(buttons)
+
+    def _pick_preview_area(self):
+        self.hide()
+        time.sleep(0.2)
+        self.picker = CoordinatePicker()
+
+        def on_picked(x, y, w, h):
+            self.show()
+            if w <= 0 or h <= 0:
+                return
+            screen = QApplication.primaryScreen()
+            scale = screen.devicePixelRatio() if screen else 1.0
+            rx, ry, rw, rh = int(x * scale), int(y * scale), int(w * scale), int(h * scale)
+
+            with mss.mss() as sct:
+                sct_img = sct.grab({"top": ry, "left": rx, "width": rw, "height": rh})
+                img_np = np.array(sct_img)
+                if img_np.shape[2] == 4:
+                    self.crop_bgr = cv2.cvtColor(img_np, cv2.COLOR_BGRA2BGR)
+                else:
+                    self.crop_bgr = cv2.cvtColor(img_np, cv2.COLOR_RGB2BGR)
+
+            self.update_preview()
+
+        self.picker.coord_selected.connect(on_picked)
+        self.picker.showFullScreen()
+
+    def update_preview(self):
+        if self.crop_bgr is None:
+            return
+
+        p = self.get_params()
+        scale_factor = max(1.0, float(p['scale']))
+        h, w = self.crop_bgr.shape[:2]
+        new_w, new_h = max(1, int(w * scale_factor)), max(1, int(h * scale_factor))
+
+        scaled_bgr = cv2.resize(self.crop_bgr, (new_w, new_h), interpolation=cv2.INTER_CUBIC)
+
+        # 1. 显示原图 (Scaled RGB)
+        orig_rgb = cv2.cvtColor(scaled_bgr, cv2.COLOR_BGR2RGB)
+        qimg_orig = QImage(orig_rgb.data, new_w, new_h, new_w * 3, QImage.Format_RGB888)
+        pix_orig = QPixmap.fromImage(qimg_orig)
+        self.lbl_orig_img.setPixmap(pix_orig.scaled(self.lbl_orig_img.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation))
+
+        # 2. 预处理二值化图
+        gray = cv2.cvtColor(scaled_bgr, cv2.COLOR_BGR2GRAY)
+        clahe_clip = float(p['clahe'])
+        if clahe_clip > 0:
+            clahe = cv2.createCLAHE(clipLimit=clahe_clip, tileGridSize=(8, 8))
+            enhanced = clahe.apply(gray)
+        else:
+            enhanced = gray
+
+        sharpened = cv2.filter2D(enhanced, -1, np.array([[-1,-1,-1],[-1,9,-1],[-1,-1,-1]]))
+        block = int(p['thresh_block'])
+        if block % 2 == 0:
+            block += 1
+        c_val = int(p['thresh_c'])
+
+        binary = cv2.adaptiveThreshold(sharpened, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, block, c_val)
+
+        # 显示处理后的二值图
+        qimg_proc = QImage(binary.data, new_w, new_h, new_w, QImage.Format_Grayscale8)
+        pix_proc = QPixmap.fromImage(qimg_proc)
+        self.lbl_proc_img.setPixmap(pix_proc.scaled(self.lbl_proc_img.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation))
+
+        # 3. 运行 OCR 测试识别结果
+        if self.reader:
+            try:
+                ok, buf = cv2.imencode(".png", binary)
+                if ok:
+                    raw_text = str(self.reader.classification(buf.tobytes()))
+                    self.lbl_ocr_result.setText(f"🔍 识别结果: {raw_text if raw_text else '(未识别到文本)'}")
+                else:
+                    self.lbl_ocr_result.setText("🔍 识别结果: 图像编码失败")
+            except Exception as e:
+                self.lbl_ocr_result.setText(f"🔍 识别结果: 识别异常 ({e})")
+        else:
+            self.lbl_ocr_result.setText("🔍 识别结果: (OCR引擎未准备就绪)")
 
     def get_params(self):
         block = self.spin_block.value()
@@ -893,6 +1027,7 @@ class GlobalControlPanel(QWidget):
         self.config_file = "monitor_config.json"
         self.alarm_player = AlarmSoundPlayer()
         self.grille_thread = None
+        self.monitor_thread = None
 
         self.ocr_params = {'scale': 3.0, 'clahe': 2.0, 'thresh_block': 11, 'thresh_c': 2}
         self._drag_pos = None
@@ -1111,7 +1246,7 @@ class GlobalControlPanel(QWidget):
         self._drag_pos = None
 
     def _open_ocr_adjust_dialog(self):
-        dialog = OCRAdjustDialog(self.ocr_params, self)
+        dialog = OCRAdjustDialog(self.ocr_params, reader=self.reader, parent=self)
         if dialog.exec() == QDialog.Accepted:
             self.ocr_params = dialog.get_params()
             if hasattr(self, 'monitor_thread') and self.monitor_thread:
@@ -1262,6 +1397,19 @@ class GlobalControlPanel(QWidget):
 
     def start_monitor(self):
         if not self.boxes: return
+        
+        # 若之前存在线程，确保彻底停止并释放资源
+        if hasattr(self, 'monitor_thread') and self.monitor_thread:
+            self.monitor_thread.stop()
+            self.monitor_thread.wait()
+            self.monitor_thread = None
+
+        # 立即更新界面与倒计时状态，清空残留等待时间
+        self.btn_monitor.setText("⏹ 停止 0.0s")
+        self.monitoring = True
+        self._update_button_styles()
+
+        # 启动全新监控线程（启动后会立刻运行第一轮识别）
         self.monitor_thread = MonitorThread(self.boxes, interval=self.spin_interval.value(), ocr_params=self.ocr_params)
         if self.reader:
             self.monitor_thread.set_reader(self.reader)
@@ -1271,14 +1419,11 @@ class GlobalControlPanel(QWidget):
         self.monitor_thread.countdown_tick.connect(self._on_countdown_tick)
         self.monitor_thread.start()
 
-        self.monitoring = True
-        self.btn_monitor.setText("⏹ 停止 0.0s")
-        self._update_button_styles()
-
     def stop_monitor(self):
         if hasattr(self, 'monitor_thread') and self.monitor_thread:
             self.monitor_thread.stop()
             self.monitor_thread.wait()
+            self.monitor_thread = None
         self.monitoring = False
         self.btn_monitor.setText("▶ 开始监控")
         self._update_button_styles()
