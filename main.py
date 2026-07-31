@@ -205,8 +205,9 @@ class OverlayRegionWidget(QWidget):
         self.box_id = box_id
         self.capture_x = x
         self.capture_y = y
-        self.capture_w = max(80, w)
-        self.capture_h = max(25, h)
+        # 取消最小限制，仅限制大于 0px
+        self.capture_w = max(1, w)
+        self.capture_h = max(1, h)
 
         self.name = name
         self.lower = lower
@@ -241,7 +242,8 @@ class OverlayRegionWidget(QWidget):
 
         # ---------------- 2. 下方控制面板 ----------------
         self.control_panel = QWidget()
-        self.control_panel.setStyleSheet("background-color: rgba(0, 0, 0, 0.85); border-bottom-left-radius: 6px; border-bottom-right-radius: 6px;")
+        # 黑色背景改为 80% 不透明度 (rgba(0, 0, 0, 0.8))
+        self.control_panel.setStyleSheet("background-color: rgba(0, 0, 0, 0.8); border-bottom-left-radius: 6px; border-bottom-right-radius: 6px;")
         panel_layout = QVBoxLayout(self.control_panel)
         panel_layout.setContentsMargins(4, 4, 4, 4)
         panel_layout.setSpacing(3)
@@ -331,7 +333,7 @@ class OverlayRegionWidget(QWidget):
         row3_layout.addStretch()
         panel_layout.addWidget(self.row3_container)
 
-        # --- 第四容器：常驻显示的历史日志列表（需求二）---
+        # --- 第四容器：常驻显示的历史日志列表 ---
         self.log_container = QWidget()
         log_layout = QVBoxLayout(self.log_container)
         log_layout.setContentsMargins(0, 3, 0, 0)
@@ -341,7 +343,7 @@ class OverlayRegionWidget(QWidget):
         self.list_widget.setFixedHeight(100)
         self.list_widget.setStyleSheet("""
             QListWidget {
-                background-color: rgba(10, 10, 15, 0.9);
+                background-color: rgba(10, 10, 15, 0.8);
                 color: #00ff8c;
                 border: 1px solid rgba(255, 255, 255, 0.15);
                 border-radius: 4px;
@@ -416,7 +418,8 @@ class OverlayRegionWidget(QWidget):
                 self.control_panel.setVisible(False)
         else:
             self.control_panel.setVisible(True)
-            self.control_panel.setStyleSheet("background-color: rgba(0, 0, 0, 0.85); border-bottom-left-radius: 6px; border-bottom-right-radius: 6px;")
+            # 黑色背景改为 80% 不透明度 (rgba(0, 0, 0, 0.8))
+            self.control_panel.setStyleSheet("background-color: rgba(0, 0, 0, 0.8); border-bottom-left-radius: 6px; border-bottom-right-radius: 6px;")
             self.row1_container.setVisible(True)
             self.row2_container.setVisible(True)
             self.row3_container.setVisible(True)
@@ -436,7 +439,7 @@ class OverlayRegionWidget(QWidget):
         if self.panel_hidden:
             panel_h = 28 if self.is_alarm else 0
         else:
-            panel_h = 181  # 控制面板 + 常驻日志面板的统一高度
+            panel_h = 181  # 控制面板 + 常驻日志面板的高度
 
         self.capture_spacer.setFixedHeight(self.capture_h)
         total_h = self.capture_h + panel_h
@@ -498,15 +501,16 @@ class OverlayRegionWidget(QWidget):
         if event.buttons() & Qt.LeftButton:
             g_pos = event.globalPosition().toPoint()
             if self._resize_mode == "BR":
-                self.capture_w = max(80, g_pos.x() - self.capture_x)
-                self.capture_h = max(25, g_pos.y() - self.capture_y)
+                # 取消最小尺寸限制，只保留 >0 边界校验
+                self.capture_w = max(1, g_pos.x() - self.capture_x)
+                self.capture_h = max(1, g_pos.y() - self.capture_y)
             elif self._resize_mode == "R":
-                self.capture_w = max(80, g_pos.x() - self.capture_x)
+                self.capture_w = max(1, g_pos.x() - self.capture_x)
             elif self._resize_mode == "B":
-                self.capture_h = max(25, g_pos.y() - self.capture_y)
+                self.capture_h = max(1, g_pos.y() - self.capture_y)
             elif self._resize_mode == "L":
                 diff = self.capture_x - g_pos.x()
-                if self.capture_w + diff >= 80:
+                if self.capture_w + diff >= 1:
                     self.capture_x = g_pos.x()
                     self.capture_w += diff
             elif self._resize_mode == "MOVE":
@@ -592,7 +596,8 @@ class CoordinatePicker(QWidget):
                 y = min(self.start_pos.y(), self.end_pos.y())
                 w = abs(self.end_pos.x() - self.start_pos.x())
                 h = abs(self.end_pos.y() - self.start_pos.y())
-                if w > 5 and h > 5:
+                # 取消最小选取框限制
+                if w > 0 and h > 0:
                     self.coord_selected.emit(x, y, w, h)
                     self.close()
 
@@ -1144,7 +1149,6 @@ class GlobalControlPanel(QWidget):
         self._update_button_styles()
         self.alarm_player.stop()
 
-    # 需求一：将倒计时实时更新到停止按钮名称中
     def _on_countdown_tick(self, rem):
         self.lbl_countdown.setText(f"⏳ {rem:.1f}s")
         if self.monitoring:
