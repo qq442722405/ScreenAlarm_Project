@@ -1,17 +1,8 @@
-# UI 框架
-PySide6>=6.5.0
-
-# 核心 OCR 与图像处理（替换 ddddocr）
-paddlepaddle>=2.5.0
-paddleocr>=2.7.0
-opencv-python>=4.8.0
-Pillow>=10.0.0
-
-# 屏幕截图
-mss>=9.0.0
-
-# 音频播放
-pygame>=2.5.0
-
-# 打包工具
-pyinstaller>=6.3.0
+Plaintext
+PySide6
+mss
+numpy
+opencv-python
+pygame
+paddlepaddle
+paddleocr
