@@ -348,8 +348,10 @@ class OverlayRegionWidget(QWidget):
         self.spin_upper.setStyleSheet("background-color: rgba(26, 26, 38, 0.5); color: #ffaa00; border: 1px solid #ffaa00; font-size: 10px; border-radius: 2px;")
         self.spin_upper.valueChanged.connect(self._on_upper_changed)
 
-        self.btn_delete = QPushButton("➖ 删除框")
-        self.btn_delete.setStyleSheet("QPushButton { background-color: #ff3333; color: white; border: none; border-radius: 3px; padding: 2px 5px; font-weight: bold; font-size: 10px; } QPushButton:hover { background-color: #ff6666; }")
+        # 需求一：删除框改为 X 图标
+        self.btn_delete = QPushButton("❌")
+        self.btn_delete.setFixedSize(22, 20)
+        self.btn_delete.setStyleSheet("QPushButton { background-color: #ff3333; color: white; border: none; border-radius: 3px; font-weight: bold; font-size: 10px; } QPushButton:hover { background-color: #ff6666; }")
         self.btn_delete.clicked.connect(lambda: self.delete_requested.emit(self))
 
         row2_layout.addWidget(self.lbl_lower)
@@ -895,12 +897,7 @@ class GlobalControlPanel(QWidget):
         self.row1_layout.setContentsMargins(8, 5, 8, 5)
         self.row1_layout.setSpacing(6)
 
-        self.left_container = QWidget()
-        left_layout = QHBoxLayout(self.left_container)
-        left_layout.setContentsMargins(0, 0, 0, 0)
-        left_layout.setSpacing(5)
-
-        left_layout.addWidget(QLabel("⏱ 识别间隔(秒):"))
+        self.row1_layout.addWidget(QLabel("⏱ 识别间隔(秒):"))
         self.spin_interval = CleanDoubleSpinBox()
         self.spin_interval.setButtonSymbols(QAbstractSpinBox.NoButtons)
         self.spin_interval.setAlignment(Qt.AlignCenter)
@@ -909,13 +906,13 @@ class GlobalControlPanel(QWidget):
         self.spin_interval.setValue(1.0)
         self.spin_interval.setSingleStep(0.5)
         self.spin_interval.valueChanged.connect(self._on_interval_changed)
-        left_layout.addWidget(self.spin_interval)
+        self.row1_layout.addWidget(self.spin_interval)
 
         self.lbl_countdown = QLabel("⏳ 0.0s")
         self.lbl_countdown.setStyleSheet("color: #ffcc00; font-weight: bold; padding-right: 4px;")
-        left_layout.addWidget(self.lbl_countdown)
+        self.row1_layout.addWidget(self.lbl_countdown)
 
-        left_layout.addWidget(QLabel("📊 记录数:"))
+        self.row1_layout.addWidget(QLabel("📊 记录数:"))
         self.spin_count = QSpinBox()
         self.spin_count.setButtonSymbols(QAbstractSpinBox.NoButtons)
         self.spin_count.setAlignment(Qt.AlignCenter)
@@ -923,9 +920,9 @@ class GlobalControlPanel(QWidget):
         self.spin_count.setRange(5, 200)
         self.spin_count.setValue(30)
         self.spin_count.valueChanged.connect(self._on_count_changed)
-        left_layout.addWidget(self.spin_count)
+        self.row1_layout.addWidget(self.spin_count)
 
-        left_layout.addWidget(QLabel("📝 记录间隔(分):"))
+        self.row1_layout.addWidget(QLabel("📝 记录间隔(分):"))
         self.spin_log_interval = CleanDoubleSpinBox()
         self.spin_log_interval.setButtonSymbols(QAbstractSpinBox.NoButtons)
         self.spin_log_interval.setAlignment(Qt.AlignCenter)
@@ -934,41 +931,11 @@ class GlobalControlPanel(QWidget):
         self.spin_log_interval.setValue(1.0)
         self.spin_log_interval.setSingleStep(0.5)
         self.spin_log_interval.valueChanged.connect(self._on_log_interval_changed)
-        left_layout.addWidget(self.spin_log_interval)
+        self.row1_layout.addWidget(self.spin_log_interval)
 
-        # 需求四：隐藏框按钮（基准高度 26px）
-        self.btn_toggle_hide = QPushButton("👁 隐藏框")
-        self.btn_toggle_hide.setFixedHeight(26)
-        self.btn_toggle_hide.setStyleSheet("background-color: rgba(255,255,255,0.12); color: #00ff8c;")
-        self.btn_toggle_hide.clicked.connect(self._toggle_hide_boxes)
-        left_layout.addWidget(self.btn_toggle_hide)
-
-        # 需求四：调整按钮统一为 26px 高度
-        self.btn_edit = QPushButton("⚙️ 调整")
-        self.btn_edit.setFixedHeight(26)
-        self.btn_edit.setStyleSheet("QPushButton { background-color: rgba(255,255,255,0.12); color: #ffffff; border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; padding: 0px 8px; font-size: 11px; font-weight: bold; } QPushButton:hover { background-color: rgba(61, 64, 91, 0.8); }")
-        self.btn_edit.clicked.connect(self._toggle_edit)
-        left_layout.addWidget(self.btn_edit)
-
-        # 需求二 & 四：显示“完整”和“➕”按钮，尺寸样式统一为 26px
-        self.btn_finish = QPushButton("✅ 完整")
-        self.btn_finish.setFixedHeight(26)
-        self.btn_finish.setStyleSheet("QPushButton { background-color: #e6b84d; color: black; border-radius: 4px; padding: 0px 8px; font-size: 11px; font-weight: bold; }")
-        self.btn_finish.clicked.connect(self._toggle_edit)
-        self.btn_finish.setVisible(False)
-        left_layout.addWidget(self.btn_finish)
-
-        self.btn_add = QPushButton("➕")
-        self.btn_add.setFixedHeight(26)
-        self.btn_add.setStyleSheet("QPushButton { background-color: #00a86b; color: white; border-radius: 4px; padding: 0px 8px; font-size: 11px; font-weight: bold; }")
-        self.btn_add.clicked.connect(self._add_box_picker)
-        self.btn_add.setVisible(False)
-        left_layout.addWidget(self.btn_add)
-
-        self.row1_layout.addWidget(self.left_container)
         main_layout.addWidget(self.row1_card)
 
-        # ---------- 第 2 排：主要核心操作按键栏 ----------
+        # ---------- 第 2 排：主要核心操作及扩展控制栏 ----------
         self.row2_card = QFrame()
         self.row2_card.setStyleSheet("""
             QFrame {
@@ -981,25 +948,62 @@ class GlobalControlPanel(QWidget):
         row2_layout.setContentsMargins(8, 5, 8, 5)
         row2_layout.setSpacing(6)
 
-        # 需求一：开始监控
+        # 开始监控
         self.btn_monitor = QPushButton("▶ 开始监控")
         self.btn_monitor.setFixedHeight(26)
         self.btn_monitor.clicked.connect(self._toggle_monitor)
         row2_layout.addWidget(self.btn_monitor)
 
-        # 需求一：开始操作
+        # 开始操作
         self.btn_grille_start = QPushButton("▶ 开始操作")
         self.btn_grille_start.setFixedHeight(26)
         self.btn_grille_start.setStyleSheet("background-color: #0088cc; color: white; font-weight: bold;")
         self.btn_grille_start.clicked.connect(self._toggle_grille)
         row2_layout.addWidget(self.btn_grille_start)
 
-        # 需求一：退出按钮
+        # 退出按钮
         self.btn_exit = QPushButton("❌ 退出")
         self.btn_exit.setFixedHeight(26)
         self.btn_exit.clicked.connect(self.close_app)
         row2_layout.addWidget(self.btn_exit)
 
+        # 需求二：放在退出后面的扩展按钮容器（包含隐藏框、调整/完整、加号）
+        self.row2_extra_container = QWidget()
+        row2_extra_layout = QHBoxLayout(self.row2_extra_container)
+        row2_extra_layout.setContentsMargins(0, 0, 0, 0)
+        row2_extra_layout.setSpacing(6)
+
+        # 隐藏框按钮（固定 26px 高度）
+        self.btn_toggle_hide = QPushButton("👁 隐藏框")
+        self.btn_toggle_hide.setFixedHeight(26)
+        self.btn_toggle_hide.setStyleSheet("background-color: rgba(255,255,255,0.12); color: #00ff8c; border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; padding: 0px 8px; font-size: 11px; font-weight: bold;")
+        self.btn_toggle_hide.clicked.connect(self._toggle_hide_boxes)
+        row2_extra_layout.addWidget(self.btn_toggle_hide)
+
+        # 调整按钮（固定 26px 高度）
+        self.btn_edit = QPushButton("⚙️ 调整")
+        self.btn_edit.setFixedHeight(26)
+        self.btn_edit.setStyleSheet("QPushButton { background-color: rgba(255,255,255,0.12); color: #ffffff; border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; padding: 0px 8px; font-size: 11px; font-weight: bold; } QPushButton:hover { background-color: rgba(61, 64, 91, 0.8); }")
+        self.btn_edit.clicked.connect(self._toggle_edit)
+        row2_extra_layout.addWidget(self.btn_edit)
+
+        # 完整按钮（固定 26px 高度）
+        self.btn_finish = QPushButton("✅ 完整")
+        self.btn_finish.setFixedHeight(26)
+        self.btn_finish.setStyleSheet("QPushButton { background-color: #e6b84d; color: black; border-radius: 4px; padding: 0px 8px; font-size: 11px; font-weight: bold; }")
+        self.btn_finish.clicked.connect(self._toggle_edit)
+        self.btn_finish.setVisible(False)
+        row2_extra_layout.addWidget(self.btn_finish)
+
+        # 加号按钮（固定 26px 高度）
+        self.btn_add = QPushButton("➕")
+        self.btn_add.setFixedHeight(26)
+        self.btn_add.setStyleSheet("QPushButton { background-color: #00a86b; color: white; border-radius: 4px; padding: 0px 8px; font-size: 11px; font-weight: bold; }")
+        self.btn_add.clicked.connect(self._add_box_picker)
+        self.btn_add.setVisible(False)
+        row2_extra_layout.addWidget(self.btn_add)
+
+        row2_layout.addWidget(self.row2_extra_container)
         row2_layout.addStretch()
 
         # 收起/展开折叠切换按钮
@@ -1070,15 +1074,25 @@ class GlobalControlPanel(QWidget):
         self.btn_monitor.setStyleSheet(f"background-color: {'#b03a3a' if self.monitoring else '#2e9a58'}; color: white; font-weight: bold; height: 26px;")
         self.btn_exit.setStyleSheet("background-color: rgba(255, 255, 255, 0.15); color: white; font-weight: bold; height: 26px;")
 
-    # 需求一：收起后只显示 开始监控、开始操作 和 退出 按钮
+    # 需求二：收起折叠逻辑（收起时隐藏多余工具控件，保留核心 3 按钮及切换键）
     def _toggle_collapse(self):
         self.is_collapsed = not self.is_collapsed
 
         self.row1_card.setVisible(not self.is_collapsed)
         self.grille_card.setVisible(not self.is_collapsed)
+        self._update_edit_buttons_visibility()
 
         self._update_button_styles()
         self.adjustSize()
+
+    def _update_edit_buttons_visibility(self):
+        if self.is_collapsed:
+            self.row2_extra_container.setVisible(False)
+        else:
+            self.row2_extra_container.setVisible(True)
+            self.btn_edit.setVisible(not self.is_editing)
+            self.btn_finish.setVisible(self.is_editing)
+            self.btn_add.setVisible(self.is_editing)
 
     def _toggle_hide_boxes(self):
         self.boxes_panel_hidden = not self.boxes_panel_hidden
@@ -1086,7 +1100,7 @@ class GlobalControlPanel(QWidget):
             box.set_panel_hidden(self.boxes_panel_hidden)
 
         self.btn_toggle_hide.setText("👁 显示框" if self.boxes_panel_hidden else "👁 隐藏框")
-        self.btn_toggle_hide.setStyleSheet("background-color: #e65100; color: white;" if self.boxes_panel_hidden else "background-color: rgba(255,255,255,0.12); color: #00ff8c;")
+        self.btn_toggle_hide.setStyleSheet("background-color: #e65100; color: white;" if self.boxes_panel_hidden else "background-color: rgba(255,255,255,0.12); color: #00ff8c; border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; padding: 0px 8px; font-size: 11px; font-weight: bold;")
 
     def _on_f12_pressed(self):
         if self.grille_thread and self.grille_thread.isRunning():
@@ -1151,13 +1165,9 @@ class GlobalControlPanel(QWidget):
         for box in self.boxes:
             box.log_interval_min = val
 
-    # 需求二 & 四：调整模式点击后切换显示“完整”与“加号”
     def _toggle_edit(self):
         self.is_editing = not self.is_editing
-
-        self.btn_edit.setVisible(not self.is_editing)
-        self.btn_finish.setVisible(self.is_editing)
-        self.btn_add.setVisible(self.is_editing)
+        self._update_edit_buttons_visibility()
 
         if not self.is_editing:
             self.save_config()
