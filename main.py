@@ -221,7 +221,7 @@ class StandaloneLogWindow(QWidget):
             self.list_widget.takeItem(self.max_count)
 
 
-# ==================== 5. 悬浮选框窗口 ====================
+# ==================== 5. 悬浮识别选框窗口（下设三排属性栏） ====================
 class OverlayRegionWidget(QWidget):
     delete_requested = Signal(object)
 
@@ -230,8 +230,8 @@ class OverlayRegionWidget(QWidget):
         self.box_id = box_id
         self.capture_x = x
         self.capture_y = y
-        self.capture_w = max(60, w)
-        self.capture_h = max(20, h)
+        self.capture_w = max(80, w)
+        self.capture_h = max(25, h)
 
         self.name = name
         self.lower = lower
@@ -256,73 +256,22 @@ class OverlayRegionWidget(QWidget):
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
 
-        # ---------------- 1. 顶部栏（报警消除/静音 或 调整上下限） ----------------
-        self.top_bar = QWidget()
-        self.top_bar.setStyleSheet("background-color: rgba(20, 20, 30, 0.92); border-top-left-radius: 4px; border-top-right-radius: 4px;")
-        top_bar_layout = QHBoxLayout(self.top_bar)
-        top_bar_layout.setContentsMargins(4, 2, 4, 2)
-        top_bar_layout.setSpacing(4)
-
-        # 上下限编辑（调整模式下显示）
-        self.lbl_lower = QLabel("下限:")
-        self.lbl_lower.setStyleSheet("color: #ffaa00; font-size: 10px; font-weight: bold;")
-        self.spin_lower = QDoubleSpinBox()
-        self.spin_lower.setButtonSymbols(QAbstractSpinBox.NoButtons)
-        self.spin_lower.setAlignment(Qt.AlignCenter)
-        self.spin_lower.setRange(-99999.0, 99999.0)
-        self.spin_lower.setValue(self.lower)
-        self.spin_lower.setFixedSize(52, 22)
-        self.spin_lower.setStyleSheet("background-color: #1a1a26; color: #ffaa00; border: 1px solid #ffaa00; font-size: 10px; border-radius: 2px;")
-        self.spin_lower.valueChanged.connect(self._on_lower_changed)
-
-        self.lbl_upper = QLabel("上限:")
-        self.lbl_upper.setStyleSheet("color: #ffaa00; font-size: 10px; font-weight: bold;")
-        self.spin_upper = QDoubleSpinBox()
-        self.spin_upper.setButtonSymbols(QAbstractSpinBox.NoButtons)
-        self.spin_upper.setAlignment(Qt.AlignCenter)
-        self.spin_upper.setRange(-99999.0, 99999.0)
-        self.spin_upper.setValue(self.upper)
-        self.spin_upper.setFixedSize(52, 22)
-        self.spin_upper.setStyleSheet("background-color: #1a1a26; color: #ffaa00; border: 1px solid #ffaa00; font-size: 10px; border-radius: 2px;")
-        self.spin_upper.valueChanged.connect(self._on_upper_changed)
-
-        self.btn_delete = QPushButton("➖")
-        self.btn_delete.setFixedSize(18, 18)
-        self.btn_delete.setStyleSheet("QPushButton { background-color: #ff3333; color: white; border: none; border-radius: 9px; font-weight: bold; font-size: 10px; } QPushButton:hover { background-color: #ff6666; }")
-        self.btn_delete.clicked.connect(lambda: self.delete_requested.emit(self))
-
-        # 报警控制（报警模式下显示）
-        self.btn_clear_alarm = QPushButton("🚨 消除")
-        self.btn_clear_alarm.setStyleSheet("QPushButton { background-color: #ff4d4d; color: white; border: none; border-radius: 3px; padding: 2px 6px; font-size: 10px; font-weight: bold; } QPushButton:hover { background-color: #ff6666; }")
-        self.btn_clear_alarm.clicked.connect(self._on_clear_alarm)
-
-        self.btn_top_mute = QPushButton("🔊")
-        self.btn_top_mute.setFixedSize(22, 20)
-        self.btn_top_mute.setStyleSheet("QPushButton { background-color: rgba(255,255,255,0.2); color: white; border: none; border-radius: 3px; font-size: 10px; } QPushButton:hover { background-color: rgba(255,255,255,0.4); }")
-        self.btn_top_mute.clicked.connect(self._toggle_mute)
-
-        top_bar_layout.addWidget(self.lbl_lower)
-        top_bar_layout.addWidget(self.spin_lower)
-        top_bar_layout.addWidget(self.lbl_upper)
-        top_bar_layout.addWidget(self.spin_upper)
-        top_bar_layout.addWidget(self.btn_clear_alarm)
-        top_bar_layout.addWidget(self.btn_top_mute)
-        top_bar_layout.addStretch()
-        top_bar_layout.addWidget(self.btn_delete)
-
-        main_layout.addWidget(self.top_bar)
-
-        # ---------------- 2. 中间识别框切片占位 ----------------
+        # ---------------- 1. 识别框区域占位 ----------------
         self.capture_spacer = QWidget()
         self.capture_spacer.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         main_layout.addWidget(self.capture_spacer)
 
-        # ---------------- 3. 底部栏（名称、记录、静音） ----------------
-        self.bottom_bar = QWidget()
-        self.bottom_bar.setStyleSheet("background-color: rgba(20, 20, 30, 0.92); border-bottom-left-radius: 4px; border-bottom-right-radius: 4px;")
-        bot_bar_layout = QHBoxLayout(self.bottom_bar)
-        bot_bar_layout.setContentsMargins(4, 2, 4, 2)
-        bot_bar_layout.setSpacing(4)
+        # ---------------- 2. 下方控制面板（共三排） ----------------
+        self.control_panel = QWidget()
+        self.control_panel.setStyleSheet("background-color: rgba(18, 18, 28, 0.92); border-bottom-left-radius: 6px; border-bottom-right-radius: 6px;")
+        panel_layout = QVBoxLayout(self.control_panel)
+        panel_layout.setContentsMargins(4, 4, 4, 4)
+        panel_layout.setSpacing(3)
+
+        # --- 第一排：名字 + 记录 + 静音 ---
+        row1_layout = QHBoxLayout()
+        row1_layout.setContentsMargins(0, 0, 0, 0)
+        row1_layout.setSpacing(4)
 
         self.lbl_title = QLabel(self.name)
         self.lbl_title.setStyleSheet("color: #00ff8c; font-size: 11px; font-weight: bold;")
@@ -333,21 +282,78 @@ class OverlayRegionWidget(QWidget):
         self.edit_title.textChanged.connect(self._on_title_changed)
 
         self.btn_toggle_log = QPushButton("📋 记录")
-        self.btn_toggle_log.setStyleSheet("QPushButton { background-color: rgba(255,255,255,0.2); color: #00ff8c; border: none; border-radius: 3px; padding: 2px 6px; font-size: 10px; font-weight: bold; } QPushButton:hover { background-color: rgba(255,255,255,0.4); }")
+        self.btn_toggle_log.setStyleSheet("QPushButton { background-color: rgba(255,255,255,0.15); color: #00ff8c; border: none; border-radius: 3px; padding: 2px 5px; font-size: 10px; font-weight: bold; } QPushButton:hover { background-color: rgba(255,255,255,0.3); }")
         self.btn_toggle_log.clicked.connect(self._toggle_log_window)
 
-        self.btn_bot_mute = QPushButton("🔊")
-        self.btn_bot_mute.setFixedSize(22, 20)
-        self.btn_bot_mute.setStyleSheet("QPushButton { background-color: rgba(255,255,255,0.2); color: white; border: none; border-radius: 3px; font-size: 10px; } QPushButton:hover { background-color: rgba(255,255,255,0.4); }")
-        self.btn_bot_mute.clicked.connect(self._toggle_mute)
+        self.btn_mute = QPushButton("🔊")
+        self.btn_mute.setFixedSize(22, 20)
+        self.btn_mute.setStyleSheet("QPushButton { background-color: rgba(255,255,255,0.15); color: white; border: none; border-radius: 3px; font-size: 10px; } QPushButton:hover { background-color: rgba(255,255,255,0.3); }")
+        self.btn_mute.clicked.connect(self._toggle_mute)
 
-        bot_bar_layout.addWidget(self.lbl_title)
-        bot_bar_layout.addWidget(self.edit_title)
-        bot_bar_layout.addStretch()
-        bot_bar_layout.addWidget(self.btn_toggle_log)
-        bot_bar_layout.addWidget(self.btn_bot_mute)
+        row1_layout.addWidget(self.lbl_title)
+        row1_layout.addWidget(self.edit_title)
+        row1_layout.addStretch()
+        row1_layout.addWidget(self.btn_toggle_log)
+        row1_layout.addWidget(self.btn_mute)
+        panel_layout.addLayout(row1_layout)
 
-        main_layout.addWidget(self.bottom_bar)
+        # --- 第二排：上下限设置 (调整模式下可调) / 报警消除 ---
+        row2_layout = QHBoxLayout()
+        row2_layout.setContentsMargins(0, 0, 0, 0)
+        row2_layout.setSpacing(4)
+
+        self.lbl_lower = QLabel("下限:")
+        self.lbl_lower.setStyleSheet("color: #ffaa00; font-size: 10px; font-weight: bold;")
+        self.spin_lower = QDoubleSpinBox()
+        self.spin_lower.setButtonSymbols(QAbstractSpinBox.NoButtons)
+        self.spin_lower.setAlignment(Qt.AlignCenter)
+        self.spin_lower.setRange(-99999.0, 99999.0)
+        self.spin_lower.setValue(self.lower)
+        self.spin_lower.setFixedSize(48, 20)
+        self.spin_lower.setStyleSheet("background-color: #1a1a26; color: #ffaa00; border: 1px solid #ffaa00; font-size: 10px; border-radius: 2px;")
+        self.spin_lower.valueChanged.connect(self._on_lower_changed)
+
+        self.lbl_upper = QLabel("上限:")
+        self.lbl_upper.setStyleSheet("color: #ffaa00; font-size: 10px; font-weight: bold;")
+        self.spin_upper = QDoubleSpinBox()
+        self.spin_upper.setButtonSymbols(QAbstractSpinBox.NoButtons)
+        self.spin_upper.setAlignment(Qt.AlignCenter)
+        self.spin_upper.setRange(-99999.0, 99999.0)
+        self.spin_upper.setValue(self.upper)
+        self.spin_upper.setFixedSize(48, 20)
+        self.spin_upper.setStyleSheet("background-color: #1a1a26; color: #ffaa00; border: 1px solid #ffaa00; font-size: 10px; border-radius: 2px;")
+        self.spin_upper.valueChanged.connect(self._on_upper_changed)
+
+        self.btn_clear_alarm = QPushButton("🚨 消除报警")
+        self.btn_clear_alarm.setStyleSheet("QPushButton { background-color: #ff4d4d; color: white; border: none; border-radius: 3px; padding: 2px 6px; font-size: 10px; font-weight: bold; } QPushButton:hover { background-color: #ff6666; }")
+        self.btn_clear_alarm.clicked.connect(self._on_clear_alarm)
+
+        self.btn_delete = QPushButton("➖ 删除框")
+        self.btn_delete.setStyleSheet("QPushButton { background-color: #ff3333; color: white; border: none; border-radius: 3px; padding: 2px 5px; font-weight: bold; font-size: 10px; } QPushButton:hover { background-color: #ff6666; }")
+        self.btn_delete.clicked.connect(lambda: self.delete_requested.emit(self))
+
+        row2_layout.addWidget(self.lbl_lower)
+        row2_layout.addWidget(self.spin_lower)
+        row2_layout.addWidget(self.lbl_upper)
+        row2_layout.addWidget(self.spin_upper)
+        row2_layout.addWidget(self.btn_clear_alarm)
+        row2_layout.addStretch()
+        row2_layout.addWidget(self.btn_delete)
+        panel_layout.addLayout(row2_layout)
+
+        # --- 第三排：实时识别结果显示 ---
+        row3_layout = QHBoxLayout()
+        row3_layout.setContentsMargins(0, 0, 0, 0)
+        row3_layout.setSpacing(4)
+
+        self.lbl_result = QLabel("🔍 识别结果: 等待检测...")
+        self.lbl_result.setStyleSheet("color: #ffffff; font-size: 11px; font-weight: bold;")
+        row3_layout.addWidget(self.lbl_result)
+        row3_layout.addStretch()
+
+        panel_layout.addLayout(row3_layout)
+
+        main_layout.addWidget(self.control_panel)
 
         self._update_bar_visibility()
         self._update_geometry()
@@ -368,60 +374,47 @@ class OverlayRegionWidget(QWidget):
         if self.log_window.isVisible():
             self.log_window.hide()
         else:
-            # 自动悬浮显示在识别框旁边（右侧）
             box_w = max(self.capture_w, 200)
             self.log_window.move(self.capture_x + box_w + 8, self.capture_y)
             self.log_window.show()
             self.log_window.raise_()
 
+    def update_result_display(self, val, raw_text=""):
+        if val is not None:
+            self.lbl_result.setText(f"🔍 识别结果: {val:.2f}")
+            self.lbl_result.setStyleSheet("color: #00ff8c; font-size: 11px; font-weight: bold;")
+        else:
+            disp = f"未检测到 ({raw_text})" if raw_text else "未检测到数值"
+            self.lbl_result.setText(f"🔍 {disp}")
+            self.lbl_result.setStyleSheet("color: #ff6666; font-size: 11px; font-weight: bold;")
+
     def add_log_val(self, time_str, val, raw_text=""):
         now_ts = time.time()
-        # 根据设置的记录间隔判断（以分为单位，第一次必记）
         if self.last_log_time == 0.0 or (now_ts - self.last_log_time >= self.log_interval_min * 60.0):
             self.last_log_time = now_ts
             if val is not None:
                 self.log_window.add_log_str(f"[{time_str}] {val:.2f} (原:'{raw_text}')")
             else:
-                raw_disp = raw_text if raw_text else "无文本"
+                raw_disp = raw_text if raw_text else "无"
                 self.log_window.add_log_str(f"[{time_str}] ❌未检测到 (原:'{raw_disp}')")
 
     def set_max_log_count(self, count):
         self.log_window.set_max_count(count)
 
     def _update_bar_visibility(self):
-        top_visible = self.is_editing or self.is_alarm
-        self.top_bar.setVisible(top_visible)
-
-        if self.is_editing:
-            self.lbl_lower.setVisible(True)
-            self.spin_lower.setVisible(True)
-            self.lbl_upper.setVisible(True)
-            self.spin_upper.setVisible(True)
-            self.btn_delete.setVisible(True)
-            self.btn_clear_alarm.setVisible(False)
-            self.btn_top_mute.setVisible(False)
-        elif self.is_alarm:
-            self.lbl_lower.setVisible(False)
-            self.spin_lower.setVisible(False)
-            self.lbl_upper.setVisible(False)
-            self.spin_upper.setVisible(False)
-            self.btn_delete.setVisible(False)
-            self.btn_clear_alarm.setVisible(True)
-            self.btn_top_mute.setVisible(True)
-
+        self.btn_delete.setVisible(self.is_editing)
+        self.spin_lower.setEnabled(self.is_editing)
+        self.spin_upper.setEnabled(self.is_editing)
         self.lbl_title.setVisible(not self.is_editing)
         self.edit_title.setVisible(self.is_editing)
+        self.btn_clear_alarm.setVisible(self.is_alarm)
 
     def _update_geometry(self):
-        total_w = max(self.capture_w, 200)
-        top_h = 26 if self.top_bar.isVisible() else 0
-        bot_h = 26
-        self.top_bar.setFixedHeight(26)
-        self.bottom_bar.setFixedHeight(bot_h)
+        total_w = max(self.capture_w, 210)
+        panel_h = 76  # 三排面板高度
         self.capture_spacer.setFixedHeight(self.capture_h)
-
-        total_h = top_h + self.capture_h + bot_h
-        self.setGeometry(self.capture_x, self.capture_y - top_h, total_w, total_h)
+        total_h = self.capture_h + panel_h
+        self.setGeometry(self.capture_x, self.capture_y, total_w, total_h)
 
     def set_edit_mode(self, enabled):
         self.is_editing = enabled
@@ -432,7 +425,6 @@ class OverlayRegionWidget(QWidget):
     def set_alarm_state(self, is_alarm):
         self.is_alarm = is_alarm
         self._update_bar_visibility()
-        self._update_geometry()
         self.update()
 
     def _on_clear_alarm(self):
@@ -441,30 +433,25 @@ class OverlayRegionWidget(QWidget):
     def _toggle_mute(self):
         self.is_muted = not self.is_muted
         btn_txt = "🔇" if self.is_muted else "🔊"
-        btn_style = "QPushButton { background-color: #e65100; color: white; border: none; border-radius: 3px; font-size: 10px; }" if self.is_muted else "QPushButton { background-color: rgba(255,255,255,0.2); color: white; border: none; border-radius: 3px; font-size: 10px; }"
-        self.btn_top_mute.setText(btn_txt)
-        self.btn_top_mute.setStyleSheet(btn_style)
-        self.btn_bot_mute.setText(btn_txt)
-        self.btn_bot_mute.setStyleSheet(btn_style)
+        btn_style = "QPushButton { background-color: #e65100; color: white; border: none; border-radius: 3px; font-size: 10px; }" if self.is_muted else "QPushButton { background-color: rgba(255,255,255,0.15); color: white; border: none; border-radius: 3px; font-size: 10px; }"
+        self.btn_mute.setText(btn_txt)
+        self.btn_mute.setStyleSheet(btn_style)
 
     def _get_hit_mode(self, pos):
-        top_h = 26 if self.top_bar.isVisible() else 0
         x, y = pos.x(), pos.y()
         m = 6
-        if y >= top_h:
-            cy = y - top_h
-            ch = self.capture_h
-            cw = self.capture_w
-            if cy > ch - m and x > cw - m: return "BR"
-            if cy > ch - m: return "B"
+        ch = self.capture_h
+        cw = self.capture_w
+        if y <= ch:
+            if y > ch - m and x > cw - m: return "BR"
+            if y > ch - m: return "B"
             if x > cw - m: return "R"
             if x < m: return "L"
         return "MOVE"
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton and self.is_editing:
-            top_h = 26 if self.top_bar.isVisible() else 0
-            self._drag_pos = event.globalPosition().toPoint() - QPoint(self.capture_x, self.capture_y - top_h)
+            self._drag_pos = event.globalPosition().toPoint() - QPoint(self.capture_x, self.capture_y)
             self._resize_mode = self._get_hit_mode(event.position().toPoint())
             event.accept()
 
@@ -480,23 +467,22 @@ class OverlayRegionWidget(QWidget):
 
         if event.buttons() & Qt.LeftButton:
             g_pos = event.globalPosition().toPoint()
-            top_h = 26 if self.top_bar.isVisible() else 0
             if self._resize_mode == "BR":
-                self.capture_w = max(60, g_pos.x() - self.capture_x)
-                self.capture_h = max(20, g_pos.y() - self.capture_y)
+                self.capture_w = max(80, g_pos.x() - self.capture_x)
+                self.capture_h = max(25, g_pos.y() - self.capture_y)
             elif self._resize_mode == "R":
-                self.capture_w = max(60, g_pos.x() - self.capture_x)
+                self.capture_w = max(80, g_pos.x() - self.capture_x)
             elif self._resize_mode == "B":
-                self.capture_h = max(20, g_pos.y() - self.capture_y)
+                self.capture_h = max(25, g_pos.y() - self.capture_y)
             elif self._resize_mode == "L":
                 diff = self.capture_x - g_pos.x()
-                if self.capture_w + diff >= 60:
+                if self.capture_w + diff >= 80:
                     self.capture_x = g_pos.x()
                     self.capture_w += diff
             elif self._resize_mode == "MOVE":
                 new_p = g_pos - self._drag_pos
                 self.capture_x = new_p.x()
-                self.capture_y = new_p.y() + top_h
+                self.capture_y = new_p.y()
 
             self._update_geometry()
             self.update()
@@ -504,8 +490,7 @@ class OverlayRegionWidget(QWidget):
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
-        top_h = 26 if self.top_bar.isVisible() else 0
-        box_rect = QRect(0, top_h, self.capture_w, self.capture_h)
+        box_rect = QRect(0, 0, self.capture_w, self.capture_h)
 
         if self.is_editing:
             pen = QPen(QColor(255, 200, 0), 2, Qt.DashLine)
@@ -596,7 +581,7 @@ class CoordinatePicker(QWidget):
             self.close()
 
 
-# ==================== 7. 后台增强识别线程 ====================
+# ==================== 7. 后台识别线程 (已修复正则非法转义) ====================
 class MonitorThread(QThread):
     value_updated = Signal(object, str, object, str)
     alarm_triggered = Signal(object, str, float)
@@ -667,9 +652,6 @@ class MonitorThread(QThread):
                         new_w, new_h = int(w * scale_factor), int(h * scale_factor)
                         scaled_bgr = cv2.resize(bgr, (new_w, new_h), interpolation=cv2.INTER_CUBIC)
 
-                        safe_name = re.sub(r'[\\/:*?"<>|]', '_', box.name)
-                        cv2.imwrite(f"debug_crop_{safe_name}.png", scaled_bgr)
-
                         attempts = []
 
                         ok1, buf1 = cv2.imencode(".png", scaled_bgr)
@@ -699,7 +681,8 @@ class MonitorThread(QThread):
                             last_raw_str = raw_text
 
                             clean_t = self._clean_digit_text(raw_text).replace(' ', '')
-                            clean_t = re.sub(r'(?<=\d)[\,\:\·\'\`\_\-\*\°\o\O\a\e\~\,\;\–\—\.\s\、]+(?=\d)', '.', clean_t)
+                            # 修复正则：移除了非法的 \o \O 转义字符，避免 bad escape 崩溃
+                            clean_t = re.sub(r'(?<=\d)[,::·\'`_\-*\°oOae~,;–—.\s、]+(?=\d)', '.', clean_t)
 
                             nums = re.findall(r'-?\d+(?:\.\d+)?', clean_t)
                             if nums:
@@ -739,6 +722,7 @@ class GlobalControlPanel(QWidget):
         self.monitoring = False
         self.is_editing = False
         self.is_collapsed = False
+        self.boxes_hidden = False
         self.reader = None
         self.config_file = "monitor_config.json"
         self.alarm_player = AlarmSoundPlayer()
@@ -751,13 +735,12 @@ class GlobalControlPanel(QWidget):
         self.f12_listener.start()
 
         main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(8, 8, 8, 8)
+        main_layout.setContentsMargins(6, 6, 6, 6)
         main_layout.setSpacing(6)
 
         self.setStyleSheet("""
             QWidget { 
-                background-color: rgba(22, 22, 32, 0.95); 
-                border-radius: 8px; 
+                border-radius: 6px; 
             }
             QLabel { 
                 color: #e0e0e0; 
@@ -824,9 +807,17 @@ class GlobalControlPanel(QWidget):
         self.row0_container.setVisible(False)
         main_layout.addWidget(self.row0_container)
 
-        # ---------- 第 1 排：主控制栏 ----------
-        self.row1_layout = QHBoxLayout()
-        self.row1_layout.setContentsMargins(0, 0, 0, 0)
+        # ---------- 第 1 排：识别监控控制栏 (卡片背景：黑色50%透明度) ----------
+        self.row1_card = QFrame()
+        self.row1_card.setStyleSheet("""
+            QFrame {
+                background-color: rgba(0, 0, 0, 0.5);
+                border: 1px solid rgba(255, 255, 255, 0.15);
+                border-radius: 6px;
+            }
+        """)
+        self.row1_layout = QHBoxLayout(self.row1_card)
+        self.row1_layout.setContentsMargins(8, 5, 8, 5)
         self.row1_layout.setSpacing(6)
 
         self.left_container = QWidget()
@@ -838,7 +829,7 @@ class GlobalControlPanel(QWidget):
         self.spin_interval = QDoubleSpinBox()
         self.spin_interval.setButtonSymbols(QAbstractSpinBox.NoButtons)
         self.spin_interval.setAlignment(Qt.AlignCenter)
-        self.spin_interval.setFixedSize(45, 26)
+        self.spin_interval.setFixedSize(42, 26)
         self.spin_interval.setRange(0.1, 10.0)
         self.spin_interval.setValue(1.0)
         self.spin_interval.setSingleStep(0.5)
@@ -849,7 +840,7 @@ class GlobalControlPanel(QWidget):
         self.spin_count = QSpinBox()
         self.spin_count.setButtonSymbols(QAbstractSpinBox.NoButtons)
         self.spin_count.setAlignment(Qt.AlignCenter)
-        self.spin_count.setFixedSize(42, 26)
+        self.spin_count.setFixedSize(40, 26)
         self.spin_count.setRange(5, 200)
         self.spin_count.setValue(30)
         self.spin_count.valueChanged.connect(self._on_count_changed)
@@ -859,17 +850,25 @@ class GlobalControlPanel(QWidget):
         self.spin_log_interval = QDoubleSpinBox()
         self.spin_log_interval.setButtonSymbols(QAbstractSpinBox.NoButtons)
         self.spin_log_interval.setAlignment(Qt.AlignCenter)
-        self.spin_log_interval.setFixedSize(45, 26)
+        self.spin_log_interval.setFixedSize(42, 26)
         self.spin_log_interval.setRange(0.0, 1440.0)
         self.spin_log_interval.setValue(1.0)
         self.spin_log_interval.setSingleStep(0.5)
         self.spin_log_interval.valueChanged.connect(self._on_log_interval_changed)
         left_layout.addWidget(self.spin_log_interval)
 
+        # ⚙️ 调整 按钮
         self.btn_edit = QPushButton("⚙️ 调整")
         self.btn_edit.setFixedHeight(26)
         self.btn_edit.clicked.connect(self._toggle_edit)
         left_layout.addWidget(self.btn_edit)
+
+        # 👁 隐藏/显示 按钮 (在调整右边)
+        self.btn_toggle_hide = QPushButton("👁 隐藏框")
+        self.btn_toggle_hide.setFixedHeight(26)
+        self.btn_toggle_hide.setStyleSheet("background-color: rgba(255,255,255,0.12); color: #00ff8c;")
+        self.btn_toggle_hide.clicked.connect(self._toggle_hide_boxes)
+        left_layout.addWidget(self.btn_toggle_hide)
 
         self.row1_layout.addWidget(self.left_container)
 
@@ -888,19 +887,19 @@ class GlobalControlPanel(QWidget):
         self.btn_exit.clicked.connect(self.close_app)
         self.row1_layout.addWidget(self.btn_exit)
 
-        main_layout.addLayout(self.row1_layout)
+        main_layout.addWidget(self.row1_card)
 
-        # ---------- 第 2 排：细格栅自动点击栏（独立黑色深色背景卡片） ----------
+        # ---------- 第 2 排：细格栅自动点击栏 (卡片背景：黑色50%透明度) ----------
         self.grille_card = QFrame()
         self.grille_card.setStyleSheet("""
             QFrame {
-                background-color: #0b0c10;
-                border: 1px solid rgba(255, 255, 255, 0.12);
+                background-color: rgba(0, 0, 0, 0.5);
+                border: 1px solid rgba(255, 255, 255, 0.15);
                 border-radius: 6px;
             }
         """)
         row2_layout = QHBoxLayout(self.grille_card)
-        row2_layout.setContentsMargins(8, 4, 8, 4)
+        row2_layout.setContentsMargins(8, 5, 8, 5)
         row2_layout.setSpacing(6)
 
         self.chk_grille = QCheckBox("细格栅")
@@ -963,6 +962,17 @@ class GlobalControlPanel(QWidget):
         self.left_container.setVisible(not self.is_collapsed)
         self._update_button_styles()
         self.adjustSize()
+
+    def _toggle_hide_boxes(self):
+        self.boxes_hidden = not self.boxes_hidden
+        for box in self.boxes:
+            if self.boxes_hidden:
+                box.hide()
+                box.log_window.hide()
+            else:
+                box.show()
+        self.btn_toggle_hide.setText("👁 显示框" if self.boxes_hidden else "👁 隐藏框")
+        self.btn_toggle_hide.setStyleSheet("background-color: #e65100; color: white;" if self.boxes_hidden else "background-color: rgba(255,255,255,0.12); color: #00ff8c;")
 
     def _on_f12_pressed(self):
         if self.grille_thread and self.grille_thread.isRunning():
@@ -1092,6 +1102,7 @@ class GlobalControlPanel(QWidget):
         self.alarm_player.stop()
 
     def _on_value_updated(self, box, time_str, val, raw_text):
+        box.update_result_display(val, raw_text)
         box.add_log_val(time_str, val, raw_text)
 
     def _on_alarm_triggered(self, box, time_str, val):
