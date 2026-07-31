@@ -33,6 +33,24 @@ except ImportError:
     PYGAME_AVAILABLE = False
 
 
+# ==================== 路径辅助函数（支持打包与开发环境） ====================
+def get_base_dir():
+    if getattr(sys, 'frozen', False):
+        return os.path.dirname(sys.executable)
+    return os.path.dirname(os.path.abspath(__file__))
+
+def get_resource_path(relative_path):
+    base_dir = get_base_dir()
+    path = os.path.join(base_dir, relative_path)
+    if os.path.exists(path):
+        return path
+    if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
+        meipass_path = os.path.join(sys._MEIPASS, relative_path)
+        if os.path.exists(meipass_path):
+            return meipass_path
+    return path
+
+
 # ==================== 0. 日志重定向辅助类与日志窗口 ====================
 class LogStream(QObject):
     """日志重定向信号源"""
@@ -53,6 +71,11 @@ class LogWindow(QWidget):
         self.setWindowTitle("屏幕数字识别报警 - 运行日志")
         self.resize(650, 400)
         self.setWindowFlags(Qt.Window | Qt.WindowStaysOnTopHint)
+
+        # 加载窗口图标
+        icon_path = get_resource_path("favicon.ico")
+        if os.path.exists(icon_path):
+            self.setWindowIcon(QIcon(icon_path))
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 8, 8, 8)
@@ -104,24 +127,6 @@ class LogWindow(QWidget):
     def _copy_log(self):
         clipboard = QApplication.clipboard()
         clipboard.setText(self.txt_log.toPlainText())
-
-
-# ==================== 路径辅助函数（支持打包与开发环境） ====================
-def get_base_dir():
-    if getattr(sys, 'frozen', False):
-        return os.path.dirname(sys.executable)
-    return os.path.dirname(os.path.abspath(__file__))
-
-def get_resource_path(relative_path):
-    base_dir = get_base_dir()
-    path = os.path.join(base_dir, relative_path)
-    if os.path.exists(path):
-        return path
-    if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
-        meipass_path = os.path.join(sys._MEIPASS, relative_path)
-        if os.path.exists(meipass_path):
-            return meipass_path
-    return path
 
 
 # ==================== 1. 自定义无冗余 .00 的 SpinBox ====================
@@ -731,7 +736,8 @@ class MonitorThread(QThread):
         scale = screen.devicePixelRatio() if screen else 1.0
         print(f"[{datetime.now().strftime('%H:%M:%S')}] 🔍 监控线程已启动 (缩放比例: {scale})...")
 
-        with mss.mss() as sct:
+        # 将 mss.mss() 更新为 mss.MSS()，消除 DeprecationWarning
+        with mss.MSS() as sct:
             while self.running:
                 if not self.reader:
                     self.msleep(200)
@@ -841,6 +847,11 @@ class GlobalControlPanel(QWidget):
         super().__init__(None)
         self.setWindowFlags(Qt.WindowStaysOnTopHint | Qt.FramelessWindowHint | Qt.Tool)
         self.setAttribute(Qt.WA_TranslucentBackground, True)
+
+        # 加载窗口图标
+        icon_path = get_resource_path("favicon.ico")
+        if os.path.exists(icon_path):
+            self.setWindowIcon(QIcon(icon_path))
 
         # 实例化运行日志窗口
         self.log_window = LogWindow()
@@ -982,7 +993,7 @@ class GlobalControlPanel(QWidget):
         self.btn_edit.clicked.connect(self._toggle_edit)
         row2_extra_layout.addWidget(self.btn_edit)
 
-        # 📜 日志 按钮 (放置于【调整窗口】后面)
+        # 📜 日志 按钮
         self.btn_sys_log = QPushButton("📜 日志")
         self.btn_sys_log.setFixedHeight(26)
         self.btn_sys_log.setStyleSheet("QPushButton { background-color: rgba(0,180,216,0.2); color: #00b4d8; border: 1px solid #00b4d8; border-radius: 4px; padding: 0px 8px; font-size: 11px; font-weight: bold; } QPushButton:hover { background-color: rgba(0,180,216,0.4); }")
@@ -1149,13 +1160,14 @@ class GlobalControlPanel(QWidget):
                     cls_dir = get_resource_path("models/ch_ppocr_mobile_v2.0_cls_infer")
 
                     print(f"[{datetime.now().strftime('%H:%M:%S')}] 📦 正在加载 PaddleOCR 模型...")
+                    
+                    # 使用最新的 PaddleOCR 参数，消除 DeprecationWarning，并移除导致报错的 show_log 参数
                     ocr_engine = PaddleOCR(
-                        use_angle_cls=True,
+                        use_textline_orientation=True,
                         lang="ch",
-                        det_model_dir=det_dir if os.path.exists(det_dir) else None,
-                        rec_model_dir=rec_dir if os.path.exists(rec_dir) else None,
-                        cls_model_dir=cls_dir if os.path.exists(cls_dir) else None,
-                        show_log=False,
+                        text_detection_model_dir=det_dir if os.path.exists(det_dir) else None,
+                        text_recognition_model_dir=rec_dir if os.path.exists(rec_dir) else None,
+                        textline_orientation_model_dir=cls_dir if os.path.exists(cls_dir) else None,
                         use_gpu=False
                     )
                     self.loaded.emit(ocr_engine)
