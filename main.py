@@ -7,10 +7,6 @@ import threading
 import ctypes
 from datetime import datetime
 
-# 开启 Windows 高 DPI 屏幕兼容支持
-os.environ["QT_ENABLE_HIGHDPI_SCALING"] = "1"
-os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "1"
-
 from PySide6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel, QLineEdit, QDoubleSpinBox, QSpinBox,
@@ -32,7 +28,7 @@ except ImportError:
     PYGAME_AVAILABLE = False
 
 
-# ==================== 1. 全局 F12 键盘监听线程 ====================
+# ==================== 1. 全局 F12 键盘监听线程（修复版） ====================
 class GlobalF12Listener(QThread):
     f12_triggered = Signal()
 
@@ -48,6 +44,7 @@ class GlobalF12Listener(QThread):
         VK_F12 = 0x7B  # F12 键码
         was_pressed = False
         while self.running:
+            # 获取 F12 键当前状态（最高位为 1 表示按下）
             state = user32.GetAsyncKeyState(VK_F12)
             is_pressed = bool(state & 0x8000)
             if is_pressed and not was_pressed:
@@ -179,7 +176,7 @@ class StandaloneLogWindow(QWidget):
         super().__init__(None)
         self.setWindowFlags(Qt.WindowStaysOnTopHint | Qt.Tool)
         self.setWindowTitle(f"数值历史 - {name}")
-        self.resize(260, 280)
+        self.resize(220, 260)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(6, 6, 6, 6)
@@ -215,8 +212,8 @@ class StandaloneLogWindow(QWidget):
         while self.list_widget.count() > self.max_count:
             self.list_widget.takeItem(self.list_widget.count() - 1)
 
-    def add_log_str(self, msg):
-        self.list_widget.insertItem(0, msg)
+    def add_log(self, time_str, val):
+        self.list_widget.insertItem(0, f"[{time_str}]  {val:.2f}")
         while self.list_widget.count() > self.max_count:
             self.list_widget.takeItem(self.max_count)
 
@@ -330,12 +327,8 @@ class OverlayRegionWidget(QWidget):
             self.log_window.show()
             self.log_window.raise_()
 
-    def add_log_val(self, time_str, val, raw_text=""):
-        if val is not None:
-            self.log_window.add_log_str(f"[{time_str}] {val:.2f} (原:'{raw_text}')")
-        else:
-            raw_disp = raw_text if raw_text else "无文本"
-            self.log_window.add_log_str(f"[{time_str}] ❌未检测到 (原:'{raw_disp}')")
+    def add_log_val(self, time_str, val):
+        self.log_window.add_log(time_str, val)
 
     def set_max_log_count(self, count):
         self.log_window.set_max_count(count)
@@ -516,9 +509,9 @@ class CoordinatePicker(QWidget):
             self.close()
 
 
-# ==================== 7. 后台增强识别线程 ====================
+# ==================== 7. 后台识别线程 ====================
 class MonitorThread(QThread):
-    value_updated = Signal(object, str, object, str) # box, time_str, val, raw_text
+    value_updated = Signal(object, str, float)
     alarm_triggered = Signal(object, str, float)
 
     def __init__(self, boxes, interval=1.0, parent=None):
@@ -537,24 +530,7 @@ class MonitorThread(QThread):
     def stop(self):
         self.running = False
 
-    def _clean_digit_text(self, text):
-        mapping = {
-            'O': '0', 'o': '0', 'D': '0',
-            'I': '1', 'l': '1', '|': '1', '!': '1',
-            'Z': '2', 'z': '2',
-            'S': '5', 's': '5',
-            'B': '8',
-        }
-        res = list(text)
-        for i, ch in enumerate(res):
-            if ch in mapping:
-                res[i] = mapping[ch]
-        return "".join(res)
-
     def run(self):
-        screen = QApplication.primaryScreen()
-        scale = screen.devicePixelRatio() if screen else 1.0
-
         with mss.mss() as sct:
             while self.running:
                 if not self.reader:
@@ -564,13 +540,7 @@ class MonitorThread(QThread):
                 start_time = time.time()
                 for box in list(self.boxes):
                     if not self.running: break
-                    
-                    # Qt 逻辑坐标 -> mss 物理像素坐标换算（解决高 DPI 偏移）
-                    x = int(box.capture_x * scale)
-                    y = int((box.capture_y + box.top_bar_height) * scale)
-                    w = int(box.capture_w * scale)
-                    h = int(box.capture_h * scale)
-
+                    x, y, w, h = box.capture_x, box.capture_y, box.capture_w, box.capture_h
                     if w <= 0 or h <= 0: continue
 
                     try:
@@ -578,84 +548,43 @@ class MonitorThread(QThread):
                         sct_img = sct.grab(bbox)
                         img_np = np.array(sct_img)
 
-                        if img_np.shape[2] == 4:
-                            bgr = cv2.cvtColor(img_np, cv2.COLOR_BGRA2BGR)
-                        else:
-                            bgr = cv2.cvtColor(img_np, cv2.COLOR_RGB2BGR)
+                        h_img, w_img = img_np.shape[:2]
+                        scaled = cv2.resize(img_np, (w_img * 3, h_img * 3), interpolation=cv2.INTER_LINEAR)
+                        gray = cv2.cvtColor(scaled, cv2.COLOR_RGBA2GRAY) if scaled.shape[2] == 4 else cv2.cvtColor(scaled, cv2.COLOR_RGB2GRAY)
 
-                        # 放大画面（便于小字识别）
-                        target_h = 100
-                        scale_factor = max(3.0, target_h / float(max(1, h)))
-                        new_w, new_h = int(w * scale_factor), int(h * scale_factor)
-                        scaled_bgr = cv2.resize(bgr, (new_w, new_h), interpolation=cv2.INTER_CUBIC)
-
-                        # 🛠️ 关键排查机制：保存调试截图，查看到底框选到了什么
-                        safe_name = re.sub(r'[\\/:*?"<>|]', '_', box.name)
-                        cv2.imwrite(f"debug_crop_{safe_name}.png", scaled_bgr)
-
-                        attempts = []
-
-                        # 1. 放大彩图
-                        ok1, buf1 = cv2.imencode(".png", scaled_bgr)
-                        if ok1: attempts.append(buf1.tobytes())
-
-                        # 2. 灰度图
-                        gray = cv2.cvtColor(scaled_bgr, cv2.COLOR_BGR2GRAY)
-                        ok2, buf2 = cv2.imencode(".png", gray)
-                        if ok2: attempts.append(buf2.tobytes())
-
-                        # 3. 图像反色（解决黑底白字识别不到问题）
-                        inverted = cv2.bitwise_not(gray)
-                        ok3, buf3 = cv2.imencode(".png", inverted)
-                        if ok3: attempts.append(buf3.tobytes())
-
-                        # 4. 对比度增强 + 自适应二值化
                         clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
                         enhanced = clahe.apply(gray)
+                        if np.mean(enhanced) < 80:
+                            enhanced = 255 - enhanced
+                            enhanced = clahe.apply(enhanced)
+
                         sharpened = cv2.filter2D(enhanced, -1, np.array([[-1,-1,-1],[-1,9,-1],[-1,-1,-1]]))
                         binary = cv2.adaptiveThreshold(sharpened, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2)
-                        ok4, buf4 = cv2.imencode(".png", binary)
-                        if ok4: attempts.append(buf4.tobytes())
 
-                        found_val = None
-                        last_raw_str = ""
+                        is_success, buffer = cv2.imencode(".png", binary)
+                        if not is_success: continue
 
-                        for buf in attempts:
-                            raw_text = str(self.reader.classification(buf))
-                            if not raw_text: continue
-                            last_raw_str = raw_text
+                        text = self.reader.classification(buffer.tobytes())
+                        nums = re.findall(r'-?\d+\.?\d*', text)
 
-                            clean_t = self._clean_digit_text(raw_text).replace(' ', '')
-                            clean_t = re.sub(r'(?<=\d)[\,\:\·\'\`\_\-\*\°\o\O\a\e\~\,\;\–\—\.\s\、]+(?=\d)', '.', clean_t)
+                        if nums:
+                            val = float(nums[0])
+                            now_str = datetime.now().strftime("%H:%M:%S")
+                            self.value_updated.emit(box, now_str, val)
 
-                            nums = re.findall(r'-?\d+(?:\.\d+)?', clean_t)
-                            if nums:
-                                try:
-                                    found_val = float(nums[0])
-                                    break
-                                except ValueError:
-                                    pass
-
-                        now_str = datetime.now().strftime("%H:%M:%S")
-                        if found_val is not None:
-                            self.value_updated.emit(box, now_str, found_val, last_raw_str)
-                            if found_val < box.lower or found_val > box.upper:
-                                self.alarm_triggered.emit(box, now_str, found_val)
+                            if val < box.lower or val > box.upper:
+                                self.alarm_triggered.emit(box, now_str, val)
                             else:
                                 box.set_alarm_state(False)
-                        else:
-                            self.value_updated.emit(box, now_str, None, last_raw_str)
-
-                    except Exception as e:
-                        now_str = datetime.now().strftime("%H:%M:%S")
-                        self.value_updated.emit(box, now_str, None, f"异常:{e}")
+                    except Exception:
+                        pass
 
                 elapsed = time.time() - start_time
                 sleep_needed = max(0.01, self.interval - elapsed)
                 self.msleep(int(sleep_needed * 1000))
 
 
-# ==================== 8. 全局控制面板 ====================
+# ==================== 8. 全局控制面板（完全重构与高质感对齐） ====================
 class GlobalControlPanel(QWidget):
     def __init__(self):
         super().__init__(None)
@@ -673,6 +602,7 @@ class GlobalControlPanel(QWidget):
 
         self._drag_pos = None
 
+        # 启动可靠的底层键盘 F12 监听线程
         self.f12_listener = GlobalF12Listener()
         self.f12_listener.f12_triggered.connect(self._on_f12_pressed)
         self.f12_listener.start()
@@ -681,6 +611,7 @@ class GlobalControlPanel(QWidget):
         main_layout.setContentsMargins(8, 8, 8, 8)
         main_layout.setSpacing(6)
 
+        # 全局统一样式定义（统一高度26px、字号、圆角、边框与配色）
         self.setStyleSheet("""
             QWidget { 
                 background-color: rgba(22, 22, 32, 0.95); 
@@ -738,7 +669,7 @@ class GlobalControlPanel(QWidget):
             }
         """)
 
-        # 第 0 排：添加选框栏
+        # ---------- 第 0 排：添加选框栏 ----------
         self.row0_container = QWidget()
         row0_layout = QHBoxLayout(self.row0_container)
         row0_layout.setContentsMargins(0, 0, 0, 0)
@@ -751,11 +682,12 @@ class GlobalControlPanel(QWidget):
         self.row0_container.setVisible(False)
         main_layout.addWidget(self.row0_container)
 
-        # 第 1 排：主控制栏
+        # ---------- 第 1 排：主控制栏 ----------
         self.row1_layout = QHBoxLayout()
         self.row1_layout.setContentsMargins(0, 0, 0, 0)
         self.row1_layout.setSpacing(6)
 
+        # 左侧可折叠的参数配置容器
         self.left_container = QWidget()
         left_layout = QHBoxLayout(self.left_container)
         left_layout.setContentsMargins(0, 0, 0, 0)
@@ -789,16 +721,19 @@ class GlobalControlPanel(QWidget):
 
         self.row1_layout.addWidget(self.left_container)
 
+        # 折叠/展开按钮
         self.btn_collapse = QPushButton("◀ 收起")
         self.btn_collapse.setFixedHeight(26)
         self.btn_collapse.clicked.connect(self._toggle_collapse)
         self.row1_layout.addWidget(self.btn_collapse)
 
+        # 开始/停止监控按钮
         self.btn_monitor = QPushButton("▶ 开始监控")
         self.btn_monitor.setFixedHeight(26)
         self.btn_monitor.clicked.connect(self._toggle_monitor)
         self.row1_layout.addWidget(self.btn_monitor)
 
+        # 退出程序按钮
         self.btn_exit = QPushButton("❌ 退出")
         self.btn_exit.setFixedHeight(26)
         self.btn_exit.clicked.connect(self.close_app)
@@ -806,7 +741,7 @@ class GlobalControlPanel(QWidget):
 
         main_layout.addLayout(self.row1_layout)
 
-        # 第 2 排：细格栅自动点击栏
+        # ---------- 第 2 排：细格栅自动点击栏 ----------
         row2_layout = QHBoxLayout()
         row2_layout.setContentsMargins(0, 0, 0, 0)
         row2_layout.setSpacing(6)
@@ -841,6 +776,7 @@ class GlobalControlPanel(QWidget):
         self._init_ocr()
         self.load_config()
 
+    # ---------- 鼠标拖动面板 ----------
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
             self._drag_pos = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
@@ -854,6 +790,7 @@ class GlobalControlPanel(QWidget):
     def mouseReleaseEvent(self, event):
         self._drag_pos = None
 
+    # ---------- 动态对齐更新 ----------
     def _update_button_styles(self):
         if self.is_collapsed:
             pad = "padding: 0px 4px; min-width: 32px; font-size: 10px; height: 26px;"
@@ -872,10 +809,12 @@ class GlobalControlPanel(QWidget):
         self._update_button_styles()
         self.adjustSize()
 
+    # ---------- F12 全局快捷键响应（直接触发停止） ----------
     def _on_f12_pressed(self):
         if self.grille_thread and self.grille_thread.isRunning():
             self.stop_grille()
 
+    # ---------- 细格栅自动点击控制 ----------
     def _on_grille_interval_changed(self, val):
         if self.grille_thread and self.grille_thread.isRunning():
             self.grille_thread.set_interval(val)
@@ -994,8 +933,8 @@ class GlobalControlPanel(QWidget):
         self._update_button_styles()
         self.alarm_player.stop()
 
-    def _on_value_updated(self, box, time_str, val, raw_text):
-        box.add_log_val(time_str, val, raw_text)
+    def _on_value_updated(self, box, time_str, val):
+        box.add_log_val(time_str, val)
 
     def _on_alarm_triggered(self, box, time_str, val):
         box.set_alarm_state(True)
