@@ -685,10 +685,11 @@ class OverlayRegionWidget(QWidget):
         self.update()
 
     def set_alarm_state(self, is_alarm):
-        self.is_alarm = is_alarm
-        self._update_bar_visibility()
-        self._update_geometry()
-        self.update()
+        if self.is_alarm != is_alarm:
+            self.is_alarm = is_alarm
+            self._update_bar_visibility()
+            self._update_geometry()
+            self.update()
 
     def _on_clear_alarm(self):
         self.user_cleared_alarm = True
@@ -842,29 +843,30 @@ class CoordinatePicker(QWidget):
             self.close()
 
 
-# ==================== 7. 后台识别线程 ====================
+# ==================== 7. 后台识别线程 (纯计算，不跨线程调用GUI) ====================
 class MonitorThread(QThread):
     value_updated = Signal(object, str, object, str)
-    alarm_triggered = Signal(object, str, float)
-    alarm_state_cleared = Signal()
     countdown_tick = Signal(float)
 
-    def __init__(self, boxes, interval=1.0, ocr_params=None, parent=None):
+    def __init__(self, boxes, interval=1.0, ocr_params=None, scale=1.0, parent=None):
         super().__init__(parent)
         self.boxes = boxes
         self.interval = max(0.1, interval)
         self.ocr_params = ocr_params or {'scale': 3.0, 'clahe': 2.0, 'thresh_block': 11, 'thresh_c': 2}
+        self.scale = scale
         self.running = True
         self.reader = None
 
     def set_reader(self, reader):
         self.reader = reader
 
-    def update_params(self, interval=None, ocr_params=None):
+    def update_params(self, interval=None, ocr_params=None, scale=None):
         if interval is not None:
             self.interval = max(0.1, interval)
         if ocr_params is not None:
             self.ocr_params = ocr_params
+        if scale is not None:
+            self.scale = scale
 
     def stop(self):
         self.running = False
@@ -884,8 +886,7 @@ class MonitorThread(QThread):
         return "".join(res)
 
     def run(self):
-        screen = QApplication.primaryScreen()
-        scale = screen.devicePixelRatio() if screen else 1.0
+        scale = self.scale
 
         with mss.mss() as sct:
             while self.running:
@@ -894,13 +895,21 @@ class MonitorThread(QThread):
                     continue
 
                 start_time = time.time()
-                for box in list(self.boxes):
+                box_list = list(self.boxes)
+
+                for box in box_list:
                     if not self.running: break
                     
-                    x = int(box.capture_x * scale)
-                    y = int(box.capture_y * scale)
-                    w = int(box.capture_w * scale)
-                    h = int(box.capture_h * scale)
+                    capture_x = getattr(box, 'capture_x', 0)
+                    capture_y = getattr(box, 'capture_y', 0)
+                    capture_w = getattr(box, 'capture_w', 0)
+                    capture_h = getattr(box, 'capture_h', 0)
+                    dp = getattr(box, 'decimal_places', 0)
+
+                    x = int(capture_x * scale)
+                    y = int(capture_y * scale)
+                    w = int(capture_w * scale)
+                    h = int(capture_h * scale)
 
                     if w <= 0 or h <= 0: continue
 
@@ -950,6 +959,7 @@ class MonitorThread(QThread):
                         last_raw_str = ""
 
                         for buf in attempts:
+                            if not self.running: break
                             raw_text = str(self.reader.classification(buf))
                             if not raw_text: continue
                             last_raw_str = raw_text
@@ -957,7 +967,6 @@ class MonitorThread(QThread):
                             clean_t = self._clean_digit_text(raw_text).replace(' ', '')
                             clean_t = re.sub(r'(?<=\d)[,::·\'`_\-*\°ae~,;–—.\s、]+(?=\d)', '.', clean_t)
 
-                            dp = getattr(box, 'decimal_places', 0)
                             if dp > 0:
                                 digits = re.sub(r'\D', '', clean_t)
                                 if digits:
@@ -980,29 +989,13 @@ class MonitorThread(QThread):
                                         pass
 
                         now_str = datetime.now().strftime("%H:%M:%S")
-                        self.value_updated.emit(box, now_str, found_val, last_raw_str)
-
-                        if found_val is not None:
-                            is_out_of_bounds = (found_val < box.lower or found_val > box.upper)
-                            
-                            if is_out_of_bounds:
-                                val_changed = (box.last_alarm_val is None) or (abs(found_val - box.last_alarm_val) > 1e-4)
-                                if val_changed:
-                                    box.user_cleared_alarm = False
-                                    box.last_alarm_val = found_val
-
-                                if not box.user_cleared_alarm:
-                                    self.alarm_triggered.emit(box, now_str, found_val)
-                            else:
-                                box.user_cleared_alarm = False
-                                box.last_alarm_val = None
-                                if box.is_alarm:
-                                    box.set_alarm_state(False)
-                                    self.alarm_state_cleared.emit()
+                        if self.running:
+                            self.value_updated.emit(box, now_str, found_val, last_raw_str)
 
                     except Exception as e:
                         now_str = datetime.now().strftime("%H:%M:%S")
-                        self.value_updated.emit(box, now_str, None, f"异常:{e}")
+                        if self.running:
+                            self.value_updated.emit(box, now_str, None, f"异常:{e}")
 
                 elapsed = time.time() - start_time
                 sleep_needed = max(0.05, self.interval - elapsed)
@@ -1089,7 +1082,7 @@ MOBILE_HTML_TEMPLATE = """
     </div>
 
     <script>
-        const collapsedMap = {}; // 记录折叠状态
+        const collapsedMap = {};
         let webSoundEnabled = true;
         let audioCtx = null;
         let alarmTimer = null;
@@ -1238,7 +1231,6 @@ MOBILE_HTML_TEMPLATE = """
                     valEl.className = b.is_alarm ? 'val-text alarm-text' : 'val-text';
                 }
 
-                // 核心修复：当 input 处于焦点状态（手机正在输入）时不更新 input 的 value，防止销毁 focus 失去键盘 (需求三)
                 const lowerInput = document.getElementById(`input-lower-${b.id}`);
                 const upperInput = document.getElementById(`input-upper-${b.id}`);
 
@@ -1267,7 +1259,6 @@ MOBILE_HTML_TEMPLATE = """
                 const statusEl = document.getElementById('status');
                 statusEl.innerText = data.time;
 
-                // 监控按钮不显示倒计时 (需求二)
                 const btnMonitor = document.getElementById('btn-monitor');
                 if (data.monitoring) {
                     btnMonitor.className = 'btn-top active';
@@ -1300,7 +1291,6 @@ MOBILE_HTML_TEMPLATE = """
                 let hasAnyWebAlarm = false;
 
                 data.boxes.forEach(b => {
-                    // 默认全部展开 (需求四)
                     if (collapsedMap[b.id] === undefined) {
                         collapsedMap[b.id] = false;
                     }
@@ -1320,7 +1310,6 @@ MOBILE_HTML_TEMPLATE = """
                     const isCollapsed = collapsedMap[b.id];
                     cardEl.className = isAlarm ? 'card alarm' : 'card';
 
-                    // 局部更新渲染，避免重置 input 导致键盘收回 (需求三)
                     renderCardDOM(cardEl, b, isCollapsed);
                 });
 
@@ -1358,7 +1347,6 @@ class WebServerThread(QThread):
         def index():
             return render_template_string(MOBILE_HTML_TEMPLATE)
 
-        # 支持读取同目录下的 favicon.ico (需求一)
         @app.route('/favicon.ico')
         def favicon():
             script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -1770,9 +1758,13 @@ class GlobalControlPanel(QWidget):
 
     def stop_grille(self):
         if self.grille_thread:
-            self.grille_thread.stop()
-            self.grille_thread.wait()
+            thread = self.grille_thread
             self.grille_thread = None
+            thread.stop()
+            thread.quit()
+            if not thread.wait(1000):
+                thread.terminate()
+                thread.wait()
         self.curr_grille_cd = 0.0
         self.lbl_grille_countdown.setText("⏳ --")
         self.btn_grille_start.setText("▶ 开始操作")
@@ -1803,6 +1795,8 @@ class GlobalControlPanel(QWidget):
 
     def _on_ocr_loaded(self, reader):
         self.reader = reader
+        if hasattr(self, 'monitor_thread') and self.monitor_thread:
+            self.monitor_thread.set_reader(reader)
 
     def _on_interval_changed(self, val):
         if hasattr(self, 'monitor_thread') and self.monitor_thread:
@@ -1864,31 +1858,44 @@ class GlobalControlPanel(QWidget):
     def start_monitor(self):
         if not self.boxes: return
         
-        if hasattr(self, 'monitor_thread') and self.monitor_thread:
-            self.monitor_thread.stop()
-            self.monitor_thread.wait()
-            self.monitor_thread = None
+        # 1. 安全地彻底停止旧线程
+        if hasattr(self, 'monitor_thread') and self.monitor_thread is not None:
+            self.stop_monitor()
 
-        # 开始监控时不再显示倒计时 (需求二)
         self.btn_monitor.setText("⏹ 停止监控")
         self.monitoring = True
         self._update_button_styles()
 
-        self.monitor_thread = MonitorThread(self.boxes, interval=self.spin_interval.value(), ocr_params=self.ocr_params)
+        # 2. 在主线程提前获取 DPI 缩放比例
+        screen = QApplication.primaryScreen()
+        scale = screen.devicePixelRatio() if screen else 1.0
+
+        # 3. 重新创建并启动新线程
+        self.monitor_thread = MonitorThread(
+            self.boxes, 
+            interval=self.spin_interval.value(), 
+            ocr_params=self.ocr_params,
+            scale=scale
+        )
         if self.reader:
             self.monitor_thread.set_reader(self.reader)
+
         self.monitor_thread.value_updated.connect(self._on_value_updated)
-        self.monitor_thread.alarm_triggered.connect(self._on_alarm_triggered)
-        self.monitor_thread.alarm_state_cleared.connect(self.check_and_update_alarm_sound)
         self.monitor_thread.countdown_tick.connect(self._on_countdown_tick)
         self.monitor_thread.start()
 
     def stop_monitor(self):
-        if hasattr(self, 'monitor_thread') and self.monitor_thread:
-            self.monitor_thread.stop()
-            self.monitor_thread.wait()
-            self.monitor_thread = None
         self.monitoring = False
+        if hasattr(self, 'monitor_thread') and self.monitor_thread is not None:
+            thread = self.monitor_thread
+            self.monitor_thread = None  # 置空引用，防重复进入
+            thread.stop()
+            thread.quit()
+            # 设置 1 秒超时强关防死锁
+            if not thread.wait(1000):
+                thread.terminate()
+                thread.wait()
+
         self.curr_monitor_cd = 0.0
         self.btn_monitor.setText("▶ 开始监控")
         self._update_button_styles()
@@ -1896,11 +1903,30 @@ class GlobalControlPanel(QWidget):
 
     def _on_countdown_tick(self, rem):
         self.curr_monitor_cd = rem
-        # 移除了更新按钮文本倒计时的逻辑 (需求二)
 
     def _on_value_updated(self, box, time_str, val, raw_text):
+        """完全在主线程中处理数值更新与报警状态判断（100% 线程安全）"""
         box.update_result_display(val, raw_text)
         box.add_log_val(time_str, val, raw_text)
+
+        if val is not None:
+            is_out_of_bounds = (val < box.lower or val > box.upper)
+            
+            if is_out_of_bounds:
+                val_changed = (box.last_alarm_val is None) or (abs(val - box.last_alarm_val) > 1e-4)
+                if val_changed:
+                    box.user_cleared_alarm = False
+                    box.last_alarm_val = val
+
+                if not box.user_cleared_alarm:
+                    box.set_alarm_state(True)
+                    self.check_and_update_alarm_sound()
+            else:
+                box.user_cleared_alarm = False
+                box.last_alarm_val = None
+                if box.is_alarm:
+                    box.set_alarm_state(False)
+                    self.check_and_update_alarm_sound()
 
     def check_and_update_alarm_sound(self):
         should_play = any(b.is_alarm and not b.is_muted for b in self.boxes)
@@ -1908,10 +1934,6 @@ class GlobalControlPanel(QWidget):
             self.alarm_player.play()
         else:
             self.alarm_player.stop()
-
-    def _on_alarm_triggered(self, box, time_str, val):
-        box.set_alarm_state(True)
-        self.check_and_update_alarm_sound()
 
     def save_config(self):
         data = {
@@ -1993,7 +2015,6 @@ if __name__ == "__main__":
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
     
-    # 自动加载同目录下的 favicon.ico 作为软件窗口图标 (需求一)
     script_dir = os.path.dirname(os.path.abspath(__file__))
     icon_path = os.path.join(script_dir, "favicon.ico")
     if os.path.exists(icon_path):
