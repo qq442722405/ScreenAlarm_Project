@@ -1014,61 +1014,142 @@ class MonitorThread(QThread):
                     self.msleep(50)
 
 
-# ==================== 8. Flask 手机端 Web 互动界面 ====================
+# ==================== 8. Flask 网页/手机端 WEB 交互界面 ====================
 MOBILE_HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>📱 屏显数据手机交互控制面板</title>
+    <title>📱 屏显数据控制面板</title>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body { background: #121218; color: #e0e0e0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 12px; }
-        .header { display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; background: #1a1a26; border-radius: 10px; margin-bottom: 12px; border: 1px solid rgba(255,255,255,0.1); }
-        .title { font-size: 15px; font-weight: bold; color: #00ff8c; }
-        .status { font-size: 12px; padding: 4px 10px; border-radius: 12px; font-weight: bold; }
-        .status.active { background: rgba(0, 255, 140, 0.2); color: #00ff8c; border: 1px solid #00ff8c; }
-        .status.idle { background: rgba(255, 255, 255, 0.1); color: #aaa; }
         
-        .card { background: #1a1a26; border-radius: 12px; padding: 14px; margin-bottom: 12px; border: 1px solid rgba(255,255,255,0.1); transition: all 0.3s; }
+        /* 限制最大宽度，防止电脑大屏无限拉长 */
+        .container { max-width: 600px; margin: 0 auto; width: 100%; }
+
+        .header { display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; background: #1a1a26; border-radius: 10px; margin-bottom: 12px; border: 1px solid rgba(255,255,255,0.1); flex-wrap: wrap; gap: 8px; }
+        .header-title-box { display: flex; flex-direction: column; gap: 2px; }
+        .title { font-size: 15px; font-weight: bold; color: #00ff8c; }
+        .status { font-size: 11px; color: #aaa; font-weight: bold; }
+
+        .header-actions { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+        .btn-top { background: #2e9a58; color: #fff; border: none; border-radius: 6px; padding: 6px 10px; font-size: 12px; font-weight: bold; cursor: pointer; transition: background 0.2s; }
+        .btn-top:active { opacity: 0.8; }
+        .btn-top.active { background: #b03a3a; }
+        .btn-top.btn-grille { background: #0088cc; }
+        .btn-top.btn-grille.active { background: #cc3333; }
+        .btn-sound { background: rgba(255,255,255,0.15); color: #00ff8c; border: 1px solid rgba(255,255,255,0.2); border-radius: 6px; padding: 6px 8px; font-size: 12px; font-weight: bold; cursor: pointer; }
+
+        .card { background: #1a1a26; border-radius: 12px; padding: 12px 14px; margin-bottom: 10px; border: 1px solid rgba(255,255,255,0.1); transition: all 0.3s; }
         .card.alarm { border: 2px solid #ff4d4d; background: rgba(255, 77, 77, 0.08); animation: blink 1s infinite alternate; }
         @keyframes blink { from { box-shadow: 0 0 5px rgba(255,77,77,0.3); } to { box-shadow: 0 0 15px rgba(255,77,77,0.8); } }
-        
-        .card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; font-size: 13px; color: #888; font-weight: bold; }
-        .card-title-box { display: flex; align-items: center; gap: 8px; cursor: pointer; }
-        .card-title { color: #ffffff; font-size: 16px; font-weight: bold; }
-        
+
+        .card-header { display: flex; justify-content: space-between; align-items: center; font-size: 13px; color: #888; font-weight: bold; }
+        .card-title-box { display: flex; align-items: center; gap: 8px; cursor: pointer; flex-grow: 1; }
+        .card-title { color: #ffffff; font-size: 15px; font-weight: bold; }
+
         .btn-action { background: rgba(255,255,255,0.1); color: #fff; border: 1px solid rgba(255,255,255,0.2); border-radius: 6px; padding: 4px 8px; font-size: 11px; font-weight: bold; cursor: pointer; }
         .btn-action:active { background: rgba(255,255,255,0.3); }
         .btn-clear { background: #ff4d4d; color: white; border: none; }
-        .btn-clear:active { background: #ff6666; }
-        
+
         .value-box { text-align: center; margin: 8px 0; }
-        .val-text { font-size: 36px; font-weight: bold; color: #00ff8c; font-family: monospace; }
+        .val-text { font-size: 32px; font-weight: bold; color: #00ff8c; font-family: monospace; }
         .val-text.alarm-text { color: #ff4d4d; }
-        
-        .fold-body { margin-top: 10px; border-top: 1px dashed rgba(255,255,255,0.1); padding-top: 10px; }
-        .fold-body.hidden { display: none; }
-        
-        .setting-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font-size: 12px; }
+
+        .fold-body { margin-top: 8px; border-top: 1px dashed rgba(255,255,255,0.1); padding-top: 8px; }
+
+        .setting-row { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; font-size: 12px; }
         .setting-row label { color: #ffaa00; font-weight: bold; }
-        .setting-input { background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; color: #00ff8c; font-weight: bold; padding: 4px 6px; width: 65px; text-align: center; font-size: 12px; }
-        
-        .log-title { margin-top: 10px; font-size: 11px; color: #888; font-weight: bold; }
-        .log-list { margin-top: 4px; background: rgba(0,0,0,0.4); border-radius: 6px; padding: 8px; font-size: 11px; font-family: monospace; max-height: 80px; overflow-y: auto; color: #00ff8c; }
-        .log-item { padding: 2px 0; border-bottom: 1px solid rgba(255,255,255,0.05); }
+        /* 数字输入框支持键盘上下键微调 */
+        .setting-input { background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; color: #00ff8c; font-weight: bold; padding: 4px 6px; width: 70px; text-align: center; font-size: 12px; }
+
+        .log-title { margin-top: 6px; font-size: 11px; color: #888; font-weight: bold; }
+        /* 日志显示约5条，支持滑动查看更多 */
+        .log-list { margin-top: 4px; background: rgba(0,0,0,0.4); border-radius: 6px; padding: 6px 8px; font-size: 11px; font-family: monospace; height: 110px; overflow-y: auto; color: #00ff8c; }
+        .log-list::-webkit-scrollbar { width: 4px; }
+        .log-list::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); border-radius: 2px; }
+        .log-item { padding: 2px 0; border-bottom: 1px solid rgba(255,255,255,0.05); white-space: nowrap; }
     </style>
 </head>
 <body>
-    <div class="header">
-        <div class="title">📱 实时控制面板</div>
-        <div id="status" class="status idle">初始化...</div>
+    <div class="container">
+        <div class="header">
+            <div class="header-title-box">
+                <div class="title">📱 实时控制面板</div>
+                <div id="status" class="status">初始化...</div>
+            </div>
+            <div class="header-actions">
+                <button id="btn-sound" class="btn-sound" onclick="toggleWebSound()">🔊 网页声音</button>
+                <button id="btn-monitor" class="btn-top" onclick="postAction('toggle_monitor', -1)">▶ 开始监控</button>
+                <button id="btn-grille" class="btn-top btn-grille" onclick="postAction('toggle_grille', -1)">▶ 开始操作</button>
+            </div>
+        </div>
+        <div id="cards-container"></div>
     </div>
-    <div id="cards-container"></div>
 
     <script>
-        const collapsedMap = {}; // 记录各个卡片的折叠状态
+        const collapsedMap = {}; // 记录折叠状态
+        let webSoundEnabled = true; // 网页端声音默认开启
+        let audioCtx = null;
+        let alarmTimer = null;
+
+        function initAudio() {
+            if (!audioCtx) {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            }
+            if (audioCtx.state === 'suspended') {
+                audioCtx.resume();
+            }
+        }
+        document.addEventListener('click', initAudio, { once: false });
+
+        function toggleWebSound() {
+            webSoundEnabled = !webSoundEnabled;
+            const btn = document.getElementById('btn-sound');
+            if (webSoundEnabled) {
+                btn.innerText = "🔊 网页声音";
+                btn.style.color = "#00ff8c";
+            } else {
+                btn.innerText = "🔇 网页静音";
+                btn.style.color = "#aaa";
+                stopWebAlarmSound();
+            }
+        }
+
+        // 网页警报发声调谐（网页端警报声发声引擎）
+        function triggerAlarmSoundLoop(play) {
+            if (play && webSoundEnabled) {
+                if (!alarmTimer) {
+                    alarmTimer = setInterval(() => {
+                        if (!webSoundEnabled) return;
+                        try {
+                            initAudio();
+                            const osc = audioCtx.createOscillator();
+                            const gain = audioCtx.createGain();
+                            osc.type = 'sawtooth';
+                            osc.frequency.setValueAtTime(850, audioCtx.currentTime);
+                            gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
+                            gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.25);
+                            osc.connect(gain);
+                            gain.connect(audioCtx.destination);
+                            osc.start();
+                            osc.stop(audioCtx.currentTime + 0.25);
+                        } catch(e) {}
+                    }, 400);
+                }
+            } else {
+                stopWebAlarmSound();
+            }
+        }
+
+        function stopWebAlarmSound() {
+            if (alarmTimer) {
+                clearInterval(alarmTimer);
+                alarmTimer = null;
+            }
+        }
 
         async function postAction(action, boxId, data = {}) {
             try {
@@ -1085,17 +1166,7 @@ MOBILE_HTML_TEMPLATE = """
 
         function toggleFold(boxId) {
             collapsedMap[boxId] = !collapsedMap[boxId];
-            const bodyEl = document.getElementById(`fold-body-${boxId}`);
-            const iconEl = document.getElementById(`fold-icon-${boxId}`);
-            if (bodyEl) {
-                if (collapsedMap[boxId]) {
-                    bodyEl.classList.add('hidden');
-                    if (iconEl) iconEl.innerText = '▼';
-                } else {
-                    bodyEl.classList.remove('hidden');
-                    if (iconEl) iconEl.innerText = '▲';
-                }
-            }
+            refreshData();
         }
 
         function saveLimits(boxId) {
@@ -1112,74 +1183,114 @@ MOBILE_HTML_TEMPLATE = """
             try {
                 const res = await fetch('/api/data');
                 const data = await res.json();
-                
+
                 const statusEl = document.getElementById('status');
+                statusEl.innerText = data.time;
+
+                // 监控按钮与倒计时更新 (需求五)
+                const btnMonitor = document.getElementById('btn-monitor');
                 if (data.monitoring) {
-                    statusEl.className = 'status active';
-                    statusEl.innerText = '🟢 监控中 ' + data.time;
+                    btnMonitor.className = 'btn-top active';
+                    btnMonitor.innerText = `⏹ 停止监控 (${data.monitor_cd.toFixed(1)}s)`;
                 } else {
-                    statusEl.className = 'status idle';
-                    statusEl.innerText = '⚪ 暂停监控';
+                    btnMonitor.className = 'btn-top';
+                    btnMonitor.innerText = '▶ 开始监控';
+                }
+
+                // 操作按钮与倒计时更新 (需求五)
+                const btnGrille = document.getElementById('btn-grille');
+                if (data.grille_running) {
+                    btnGrille.className = 'btn-top btn-grille active';
+                    const m = Math.floor(data.grille_cd / 60);
+                    const s = Math.floor(data.grille_cd % 60);
+                    const timeStr = String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0');
+                    btnGrille.innerText = `⏹ 停止操作 (${timeStr})`;
+                } else {
+                    btnGrille.className = 'btn-top btn-grille';
+                    btnGrille.innerText = '▶ 开始操作';
                 }
 
                 const container = document.getElementById('cards-container');
 
                 if (!data.boxes || data.boxes.length === 0) {
                     container.innerHTML = '<div style="text-align:center; padding: 40px; color: #666;">未添加监控选框</div>';
+                    stopWebAlarmSound();
                     return;
                 }
 
-                data.boxes.forEach(b => {
-                    let cardEl = document.getElementById(`card-${b.id}`);
-                    const isAlarm = b.is_alarm;
-                    const isCollapsed = !!collapsedMap[b.id];
+                let hasAnyWebAlarm = false;
 
+                data.boxes.forEach(b => {
+                    // 单个识别点默认收起只显示名称 (需求二)
+                    if (collapsedMap[b.id] === undefined) {
+                        collapsedMap[b.id] = true;
+                    }
+
+                    if (b.is_alarm && !b.is_muted) {
+                        hasAnyWebAlarm = true;
+                    }
+
+                    let cardEl = document.getElementById(`card-${b.id}`);
                     if (!cardEl) {
-                        // 创建全新卡片
                         cardEl = document.createElement('div');
                         cardEl.id = `card-${b.id}`;
                         container.appendChild(cardEl);
                     }
 
+                    const isAlarm = b.is_alarm;
+                    const isCollapsed = collapsedMap[b.id];
                     cardEl.className = isAlarm ? 'card alarm' : 'card';
 
-                    let logsHtml = (b.logs && b.logs.length > 0)
-                        ? b.logs.map(l => `<div class="log-item">${l}</div>`).join('')
-                        : '<div class="log-item">无历史记录</div>';
-
-                    // 如果用户当前正在输入框输入，不更新输入框的值，避免打断输入
-                    const lowerInput = document.getElementById(`input-lower-${b.id}`);
-                    const upperInput = document.getElementById(`input-upper-${b.id}`);
-                    const isFocusingInput = (document.activeElement === lowerInput || document.activeElement === upperInput);
-
-                    cardEl.innerHTML = `
-                        <div class="card-header">
-                            <div class="card-title-box" onclick="toggleFold(${b.id})">
+                    if (isCollapsed) {
+                        // 收起状态：只显示一个名称，其他什么都不显示 (需求二)
+                        cardEl.innerHTML = `
+                            <div class="card-header" onclick="toggleFold(${b.id})" style="cursor:pointer; padding: 2px 0;">
                                 <span class="card-title">${b.name}</span>
-                                <span id="fold-icon-${b.id}">${isCollapsed ? '▼' : '▲'}</span>
+                                <span style="font-size:12px; color:#888;">▶</span>
                             </div>
-                            <div style="display: flex; gap: 6px; align-items: center;">
-                                ${isAlarm ? `<button class="btn-action btn-clear" onclick="postAction('clear_alarm', ${b.id})">🚨 消除报警</button>` : ''}
-                                <button class="btn-action" onclick="postAction('toggle_mute', ${b.id})">${b.is_muted ? '🔇 静音中' : '🔊 警报响'}</button>
+                        `;
+                    } else {
+                        // 展开状态
+                        let logsHtml = (b.logs && b.logs.length > 0)
+                            ? b.logs.map(l => `<div class="log-item">${l}</div>`).join('')
+                            : '<div class="log-item">无历史记录</div>';
+
+                        const lowerInput = document.getElementById(`input-lower-${b.id}`);
+                        const upperInput = document.getElementById(`input-upper-${b.id}`);
+                        const isFocusingInput = (document.activeElement === lowerInput || document.activeElement === upperInput);
+
+                        // 按钮名称修改：未静音时显示"报警开"，点下后变为"报警关" (需求二)
+                        cardEl.innerHTML = `
+                            <div class="card-header">
+                                <div class="card-title-box" onclick="toggleFold(${b.id})">
+                                    <span class="card-title">${b.name}</span>
+                                    <span style="font-size:12px; color:#888;">▼</span>
+                                </div>
+                                <div style="display: flex; gap: 6px; align-items: center;">
+                                    ${isAlarm ? `<button class="btn-action btn-clear" onclick="postAction('clear_alarm', ${b.id})">🚨 消除报警</button>` : ''}
+                                    <button class="btn-action" onclick="postAction('toggle_mute', ${b.id})">${b.is_muted ? '报警关' : '报警开'}</button>
+                                </div>
                             </div>
-                        </div>
-                        <div class="value-box">
-                            <div class="val-text ${isAlarm ? 'alarm-text' : ''}">${b.value}</div>
-                        </div>
-                        
-                        <div id="fold-body-${b.id}" class="fold-body ${isCollapsed ? 'hidden' : ''}">
-                            <div class="setting-row">
-                                <label>下限:</label>
-                                <input id="input-lower-${b.id}" class="setting-input" type="number" step="any" value="${isFocusingInput && lowerInput ? lowerInput.value : b.lower}">
-                                <label style="margin-left:8px;">上限:</label>
-                                <input id="input-upper-${b.id}" class="setting-input" type="number" step="any" value="${isFocusingInput && upperInput ? upperInput.value : b.upper}">
-                                <button class="btn-action" style="background:#0088cc; color:white; margin-left:auto;" onclick="saveLimits(${b.id})">💾 保存</button>
+                            <div class="value-box">
+                                <div class="val-text ${isAlarm ? 'alarm-text' : ''}">${b.value}</div>
                             </div>
-                            <div class="log-title">📜 历史日志:</div>
-                            <div class="log-list">${logsHtml}</div>
-                        </div>
-                    `;
+                            <div class="fold-body">
+                                <div class="setting-row">
+                                    <label>下限:</label>
+                                    <input id="input-lower-${b.id}" class="setting-input" type="number" step="0.1" value="${isFocusingInput && lowerInput ? lowerInput.value : b.lower}">
+                                    <label style="margin-left:8px;">上限:</label>
+                                    <input id="input-upper-${b.id}" class="setting-input" type="number" step="0.1" value="${isFocusingInput && upperInput ? upperInput.value : b.upper}">
+                                    <button class="btn-action" style="background:#0088cc; color:white; margin-left:auto;" onclick="saveLimits(${b.id})">💾 保存</button>
+                                </div>
+                                <div class="log-title">📜 历史日志:</div>
+                                <div class="log-list">${logsHtml}</div>
+                            </div>
+                        `;
+                    }
                 });
+
+                // 网页端发出警报声控制 (需求六)
+                triggerAlarmSoundLoop(hasAnyWebAlarm);
 
             } catch(e) {
                 console.error("加载失败:", e);
@@ -1218,7 +1329,7 @@ class WebServerThread(QThread):
             boxes_data = []
             for b in self.main_panel.boxes:
                 logs = []
-                for i in range(min(10, b.list_widget.count())):
+                for i in range(min(30, b.list_widget.count())):
                     logs.append(b.list_widget.item(i).text())
 
                 boxes_data.append({
@@ -1231,8 +1342,14 @@ class WebServerThread(QThread):
                     'is_muted': b.is_muted,
                     'logs': logs
                 })
+
+            grille_running = bool(self.main_panel.grille_thread and self.main_panel.grille_thread.isRunning())
+
             return jsonify({
                 'monitoring': self.main_panel.monitoring,
+                'monitor_cd': getattr(self.main_panel, 'curr_monitor_cd', 0.0),
+                'grille_running': grille_running,
+                'grille_cd': getattr(self.main_panel, 'curr_grille_cd', 0.0),
                 'time': datetime.now().strftime("%H:%M:%S"),
                 'boxes': boxes_data
             })
@@ -1244,8 +1361,8 @@ class WebServerThread(QThread):
             box_id = data.get('id')
             payload = data.get('data', {})
 
-            if action and box_id is not None:
-                self.action_requested.emit(action, box_id, payload)
+            if action:
+                self.action_requested.emit(action, box_id if box_id is not None else -1, payload)
                 return jsonify({'status': 'ok'})
             return jsonify({'status': 'error', 'message': 'Invalid parameters'}), 400
 
@@ -1283,6 +1400,9 @@ class GlobalControlPanel(QWidget):
         self.monitor_thread = None
         self.web_thread = None
 
+        self.curr_monitor_cd = 0.0
+        self.curr_grille_cd = 0.0
+
         self.ocr_params = {'scale': 3.0, 'clahe': 2.0, 'thresh_block': 11, 'thresh_c': 2}
         self._drag_pos = None
 
@@ -1293,6 +1413,9 @@ class GlobalControlPanel(QWidget):
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(6, 6, 6, 6)
         main_layout.setSpacing(6)
+
+        # 限制 PC 端控制面板最大宽度，防止界面无限拉长 (需求四)
+        self.setMaximumWidth(520)
 
         self.setStyleSheet("""
             QWidget { border-radius: 6px; }
@@ -1490,7 +1613,14 @@ class GlobalControlPanel(QWidget):
         self.load_config()
 
     def _handle_web_action(self, action, box_id, data):
-        """处理来自 Web 手机端的操控请求"""
+        """处理来自 Web 手机/网页端的操控请求 (需求五)"""
+        if action == 'toggle_monitor':
+            self._toggle_monitor()
+            return
+        if action == 'toggle_grille':
+            self._toggle_grille()
+            return
+
         target_box = next((b for b in self.boxes if b.box_id == box_id), None)
         if not target_box:
             return
@@ -1515,7 +1645,7 @@ class GlobalControlPanel(QWidget):
 
             local_ip = get_local_ip()
             url_str = f"http://{local_ip}:5000"
-            self.lbl_web_url.setText(f"📱 手机浏览器打开: {url_str}")
+            self.lbl_web_url.setText(f"📱 浏览器打开: {url_str}")
             self.lbl_web_url.setStyleSheet("color: #00ff8c; font-weight: bold;")
 
             self.web_thread = WebServerThread(self, host='0.0.0.0', port=5000)
@@ -1605,11 +1735,13 @@ class GlobalControlPanel(QWidget):
             self.grille_thread.stop()
             self.grille_thread.wait()
             self.grille_thread = None
+        self.curr_grille_cd = 0.0
         self.lbl_grille_countdown.setText("⏳ --")
         self.btn_grille_start.setText("▶ 开始操作")
         self.btn_grille_start.setStyleSheet("background-color: #0088cc; color: white; font-weight: bold; height: 26px;")
 
     def _on_grille_countdown_tick(self, rem_sec):
+        self.curr_grille_cd = rem_sec
         m, s = divmod(int(rem_sec), 60)
         self.lbl_grille_countdown.setText(f"⏳ {m:02d}:{s:02d}")
 
@@ -1718,11 +1850,13 @@ class GlobalControlPanel(QWidget):
             self.monitor_thread.wait()
             self.monitor_thread = None
         self.monitoring = False
+        self.curr_monitor_cd = 0.0
         self.btn_monitor.setText("▶ 开始监控")
         self._update_button_styles()
         self.alarm_player.stop()
 
     def _on_countdown_tick(self, rem):
+        self.curr_monitor_cd = rem
         if self.monitoring:
             self.btn_monitor.setText(f"⏹ 停止 {rem:.1f}s")
 
