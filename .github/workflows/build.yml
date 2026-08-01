@@ -28,14 +28,14 @@ jobs:
 
     - name: 🔨 使用 PyInstaller 打包应用
       run: |
-        pyinstaller --noconfirm --onedir --windowed --name="屏幕数值监控软件" --collect-all ddddocr --add-data "警报声.mp3;." main.py
+        pyinstaller --noconfirm --onedir --windowed --name="屏幕数值监控报警" --collect-all ddddocr --add-data "警报声.mp3;." main.py
 
     - name: 🗜️ 压缩打包好的软件文件夹
       run: |
-        Powershell Compress-Archive -Path dist/屏幕数值监控软件/* -DestinationPath dist/ScreenMonitor-Windows.zip
+        Powershell Compress-Archive -Path dist/屏幕数值监控报警/* -DestinationPath dist/屏幕数值监控报警-Windows.zip
 
     - name: 📤 上传打包后的文件 (Artifacts)
       uses: actions/upload-artifact@v4
       with:
-        name: ScreenMonitor-Windows-EXE
-        path: dist/ScreenMonitor-Windows.zip
+        name: 屏幕数值监控报警-Windows-EXE
+        path: dist/屏幕数值监控报警-Windows.zip
