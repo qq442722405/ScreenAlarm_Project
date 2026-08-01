@@ -34,7 +34,7 @@ except ImportError:
     PYGAME_AVAILABLE = False
 
 try:
-    from flask import Flask, jsonify, render_template_string, request
+    from flask import Flask, jsonify, render_template_string, request, send_from_directory
     FLASK_AVAILABLE = True
 except ImportError:
     FLASK_AVAILABLE = False
@@ -1021,12 +1021,13 @@ MOBILE_HTML_TEMPLATE = """
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" href="/favicon.ico" type="image/x-icon">
+    <link rel="shortcut icon" href="/favicon.ico" type="image/x-icon">
     <title>📱 屏显数据控制面板</title>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body { background: #121218; color: #e0e0e0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 12px; }
         
-        /* 限制最大宽度，防止电脑大屏无限拉长 */
         .container { max-width: 600px; margin: 0 auto; width: 100%; }
 
         .header { display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; background: #1a1a26; border-radius: 10px; margin-bottom: 12px; border: 1px solid rgba(255,255,255,0.1); flex-wrap: wrap; gap: 8px; }
@@ -1062,11 +1063,9 @@ MOBILE_HTML_TEMPLATE = """
 
         .setting-row { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; font-size: 12px; }
         .setting-row label { color: #ffaa00; font-weight: bold; }
-        /* 数字输入框支持键盘上下键微调 */
         .setting-input { background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; color: #00ff8c; font-weight: bold; padding: 4px 6px; width: 70px; text-align: center; font-size: 12px; }
 
         .log-title { margin-top: 6px; font-size: 11px; color: #888; font-weight: bold; }
-        /* 日志显示约5条，支持滑动查看更多 */
         .log-list { margin-top: 4px; background: rgba(0,0,0,0.4); border-radius: 6px; padding: 6px 8px; font-size: 11px; font-family: monospace; height: 110px; overflow-y: auto; color: #00ff8c; }
         .log-list::-webkit-scrollbar { width: 4px; }
         .log-list::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); border-radius: 2px; }
@@ -1091,7 +1090,7 @@ MOBILE_HTML_TEMPLATE = """
 
     <script>
         const collapsedMap = {}; // 记录折叠状态
-        let webSoundEnabled = true; // 网页端声音默认开启
+        let webSoundEnabled = true;
         let audioCtx = null;
         let alarmTimer = null;
 
@@ -1118,7 +1117,6 @@ MOBILE_HTML_TEMPLATE = """
             }
         }
 
-        // 网页警报发声调谐（网页端警报声发声引擎）
         function triggerAlarmSoundLoop(play) {
             if (play && webSoundEnabled) {
                 if (!alarmTimer) {
@@ -1179,6 +1177,88 @@ MOBILE_HTML_TEMPLATE = """
             }
         }
 
+        function renderCardDOM(cardEl, b, isCollapsed) {
+            const currentFoldState = cardEl.getAttribute('data-collapsed');
+            const stateChanged = (currentFoldState !== String(isCollapsed));
+
+            if (stateChanged) {
+                cardEl.setAttribute('data-collapsed', String(isCollapsed));
+                if (isCollapsed) {
+                    cardEl.innerHTML = `
+                        <div class="card-header" onclick="toggleFold(${b.id})" style="cursor:pointer; padding: 2px 0;">
+                            <span class="card-title">${b.name}</span>
+                            <span style="font-size:12px; color:#888;">▶</span>
+                        </div>
+                    `;
+                    return;
+                } else {
+                    let logsHtml = (b.logs && b.logs.length > 0)
+                        ? b.logs.map(l => `<div class="log-item">${l}</div>`).join('')
+                        : '<div class="log-item">无历史记录</div>';
+
+                    cardEl.innerHTML = `
+                        <div class="card-header">
+                            <div class="card-title-box" onclick="toggleFold(${b.id})">
+                                <span class="card-title">${b.name}</span>
+                                <span style="font-size:12px; color:#888;">▼</span>
+                            </div>
+                            <div style="display: flex; gap: 6px; align-items: center;" id="action-btns-${b.id}">
+                            </div>
+                        </div>
+                        <div class="value-box">
+                            <div class="val-text" id="val-text-${b.id}">${b.value}</div>
+                        </div>
+                        <div class="fold-body">
+                            <div class="setting-row">
+                                <label>下限:</label>
+                                <input id="input-lower-${b.id}" class="setting-input" type="number" step="0.1" value="${b.lower}">
+                                <label style="margin-left:8px;">上限:</label>
+                                <input id="input-upper-${b.id}" class="setting-input" type="number" step="0.1" value="${b.upper}">
+                                <button class="btn-action" style="background:#0088cc; color:white; margin-left:auto;" onclick="saveLimits(${b.id})">💾 保存</button>
+                            </div>
+                            <div class="log-title">📜 历史日志:</div>
+                            <div class="log-list" id="log-list-${b.id}">${logsHtml}</div>
+                        </div>
+                    `;
+                }
+            }
+
+            if (!isCollapsed) {
+                const actionBtns = document.getElementById(`action-btns-${b.id}`);
+                if (actionBtns) {
+                    actionBtns.innerHTML = `
+                        ${b.is_alarm ? `<button class="btn-action btn-clear" onclick="postAction('clear_alarm', ${b.id})">🚨 消除报警</button>` : ''}
+                        <button class="btn-action" onclick="postAction('toggle_mute', ${b.id})">${b.is_muted ? '报警关' : '报警开'}</button>
+                    `;
+                }
+
+                const valEl = document.getElementById(`val-text-${b.id}`);
+                if (valEl) {
+                    valEl.innerText = b.value;
+                    valEl.className = b.is_alarm ? 'val-text alarm-text' : 'val-text';
+                }
+
+                // 核心修复：当 input 处于焦点状态（手机正在输入）时不更新 input 的 value，防止销毁 focus 失去键盘 (需求三)
+                const lowerInput = document.getElementById(`input-lower-${b.id}`);
+                const upperInput = document.getElementById(`input-upper-${b.id}`);
+
+                if (lowerInput && document.activeElement !== lowerInput) {
+                    lowerInput.value = b.lower;
+                }
+                if (upperInput && document.activeElement !== upperInput) {
+                    upperInput.value = b.upper;
+                }
+
+                const logListEl = document.getElementById(`log-list-${b.id}`);
+                if (logListEl) {
+                    let logsHtml = (b.logs && b.logs.length > 0)
+                        ? b.logs.map(l => `<div class="log-item">${l}</div>`).join('')
+                        : '<div class="log-item">无历史记录</div>';
+                    logListEl.innerHTML = logsHtml;
+                }
+            }
+        }
+
         async function refreshData() {
             try {
                 const res = await fetch('/api/data');
@@ -1187,17 +1267,16 @@ MOBILE_HTML_TEMPLATE = """
                 const statusEl = document.getElementById('status');
                 statusEl.innerText = data.time;
 
-                // 监控按钮与倒计时更新 (需求五)
+                // 监控按钮不显示倒计时 (需求二)
                 const btnMonitor = document.getElementById('btn-monitor');
                 if (data.monitoring) {
                     btnMonitor.className = 'btn-top active';
-                    btnMonitor.innerText = `⏹ 停止监控 (${data.monitor_cd.toFixed(1)}s)`;
+                    btnMonitor.innerText = '⏹ 停止监控';
                 } else {
                     btnMonitor.className = 'btn-top';
                     btnMonitor.innerText = '▶ 开始监控';
                 }
 
-                // 操作按钮与倒计时更新 (需求五)
                 const btnGrille = document.getElementById('btn-grille');
                 if (data.grille_running) {
                     btnGrille.className = 'btn-top btn-grille active';
@@ -1221,9 +1300,9 @@ MOBILE_HTML_TEMPLATE = """
                 let hasAnyWebAlarm = false;
 
                 data.boxes.forEach(b => {
-                    // 单个识别点默认收起只显示名称 (需求二)
+                    // 默认全部展开 (需求四)
                     if (collapsedMap[b.id] === undefined) {
-                        collapsedMap[b.id] = true;
+                        collapsedMap[b.id] = false;
                     }
 
                     if (b.is_alarm && !b.is_muted) {
@@ -1241,55 +1320,10 @@ MOBILE_HTML_TEMPLATE = """
                     const isCollapsed = collapsedMap[b.id];
                     cardEl.className = isAlarm ? 'card alarm' : 'card';
 
-                    if (isCollapsed) {
-                        // 收起状态：只显示一个名称，其他什么都不显示 (需求二)
-                        cardEl.innerHTML = `
-                            <div class="card-header" onclick="toggleFold(${b.id})" style="cursor:pointer; padding: 2px 0;">
-                                <span class="card-title">${b.name}</span>
-                                <span style="font-size:12px; color:#888;">▶</span>
-                            </div>
-                        `;
-                    } else {
-                        // 展开状态
-                        let logsHtml = (b.logs && b.logs.length > 0)
-                            ? b.logs.map(l => `<div class="log-item">${l}</div>`).join('')
-                            : '<div class="log-item">无历史记录</div>';
-
-                        const lowerInput = document.getElementById(`input-lower-${b.id}`);
-                        const upperInput = document.getElementById(`input-upper-${b.id}`);
-                        const isFocusingInput = (document.activeElement === lowerInput || document.activeElement === upperInput);
-
-                        // 按钮名称修改：未静音时显示"报警开"，点下后变为"报警关" (需求二)
-                        cardEl.innerHTML = `
-                            <div class="card-header">
-                                <div class="card-title-box" onclick="toggleFold(${b.id})">
-                                    <span class="card-title">${b.name}</span>
-                                    <span style="font-size:12px; color:#888;">▼</span>
-                                </div>
-                                <div style="display: flex; gap: 6px; align-items: center;">
-                                    ${isAlarm ? `<button class="btn-action btn-clear" onclick="postAction('clear_alarm', ${b.id})">🚨 消除报警</button>` : ''}
-                                    <button class="btn-action" onclick="postAction('toggle_mute', ${b.id})">${b.is_muted ? '报警关' : '报警开'}</button>
-                                </div>
-                            </div>
-                            <div class="value-box">
-                                <div class="val-text ${isAlarm ? 'alarm-text' : ''}">${b.value}</div>
-                            </div>
-                            <div class="fold-body">
-                                <div class="setting-row">
-                                    <label>下限:</label>
-                                    <input id="input-lower-${b.id}" class="setting-input" type="number" step="0.1" value="${isFocusingInput && lowerInput ? lowerInput.value : b.lower}">
-                                    <label style="margin-left:8px;">上限:</label>
-                                    <input id="input-upper-${b.id}" class="setting-input" type="number" step="0.1" value="${isFocusingInput && upperInput ? upperInput.value : b.upper}">
-                                    <button class="btn-action" style="background:#0088cc; color:white; margin-left:auto;" onclick="saveLimits(${b.id})">💾 保存</button>
-                                </div>
-                                <div class="log-title">📜 历史日志:</div>
-                                <div class="log-list">${logsHtml}</div>
-                            </div>
-                        `;
-                    }
+                    // 局部更新渲染，避免重置 input 导致键盘收回 (需求三)
+                    renderCardDOM(cardEl, b, isCollapsed);
                 });
 
-                // 网页端发出警报声控制 (需求六)
                 triggerAlarmSoundLoop(hasAnyWebAlarm);
 
             } catch(e) {
@@ -1323,6 +1357,12 @@ class WebServerThread(QThread):
         @app.route('/')
         def index():
             return render_template_string(MOBILE_HTML_TEMPLATE)
+
+        # 支持读取同目录下的 favicon.ico (需求一)
+        @app.route('/favicon.ico')
+        def favicon():
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+            return send_from_directory(script_dir, 'favicon.ico', mimetype='image/vnd.microsoft.icon')
 
         @app.route('/api/data')
         def get_data():
@@ -1414,7 +1454,6 @@ class GlobalControlPanel(QWidget):
         main_layout.setContentsMargins(6, 6, 6, 6)
         main_layout.setSpacing(6)
 
-        # 限制 PC 端控制面板最大宽度，防止界面无限拉长 (需求四)
         self.setMaximumWidth(520)
 
         self.setStyleSheet("""
@@ -1613,7 +1652,6 @@ class GlobalControlPanel(QWidget):
         self.load_config()
 
     def _handle_web_action(self, action, box_id, data):
-        """处理来自 Web 手机/网页端的操控请求 (需求五)"""
         if action == 'toggle_monitor':
             self._toggle_monitor()
             return
@@ -1831,7 +1869,8 @@ class GlobalControlPanel(QWidget):
             self.monitor_thread.wait()
             self.monitor_thread = None
 
-        self.btn_monitor.setText("⏹ 停止 0.0s")
+        # 开始监控时不再显示倒计时 (需求二)
+        self.btn_monitor.setText("⏹ 停止监控")
         self.monitoring = True
         self._update_button_styles()
 
@@ -1857,8 +1896,7 @@ class GlobalControlPanel(QWidget):
 
     def _on_countdown_tick(self, rem):
         self.curr_monitor_cd = rem
-        if self.monitoring:
-            self.btn_monitor.setText(f"⏹ 停止 {rem:.1f}s")
+        # 移除了更新按钮文本倒计时的逻辑 (需求二)
 
     def _on_value_updated(self, box, time_str, val, raw_text):
         box.update_result_display(val, raw_text)
@@ -1954,6 +1992,13 @@ class GlobalControlPanel(QWidget):
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
+    
+    # 自动加载同目录下的 favicon.ico 作为软件窗口图标 (需求一)
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    icon_path = os.path.join(script_dir, "favicon.ico")
+    if os.path.exists(icon_path):
+        app.setWindowIcon(QIcon(icon_path))
+        
     panel = GlobalControlPanel()
     panel.show()
     sys.exit(app.exec())
