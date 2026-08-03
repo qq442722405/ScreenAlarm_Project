@@ -421,7 +421,7 @@ class OverlayRegionWidget(QWidget):
     alarm_cleared = Signal()
     mute_toggled = Signal()
 
-    def __init__(self, box_id, x, y, w, h, name="区域", lower=0.0, upper=100.0, decimal_places=0, parent=None):
+    def __init__(self, box_id, x, y, w, h, name="区域", lower=0.0, mid_val=50.0, upper=100.0, decimal_places=0, parent=None):
         super().__init__(None)
         self.box_id = box_id
         self.capture_x = x
@@ -431,6 +431,7 @@ class OverlayRegionWidget(QWidget):
 
         self.name = name
         self.lower = lower
+        self.mid_val = mid_val  # 四：新增中间值
         self.upper = upper
         self.decimal_places = decimal_places
 
@@ -492,7 +493,7 @@ class OverlayRegionWidget(QWidget):
         self.row2_container = QWidget()
         row2_layout = QHBoxLayout(self.row2_container)
         row2_layout.setContentsMargins(0, 0, 0, 0)
-        row2_layout.setSpacing(4)
+        row2_layout.setSpacing(3)
 
         self.lbl_lower = QLabel("下限:")
         self.lbl_lower.setStyleSheet("color: #ffaa00; font-size: 10px; font-weight: bold;")
@@ -501,9 +502,21 @@ class OverlayRegionWidget(QWidget):
         self.spin_lower.setAlignment(Qt.AlignCenter)
         self.spin_lower.setRange(-99999.0, 99999.0)
         self.spin_lower.setValue(self.lower)
-        self.spin_lower.setFixedSize(48, 20)
+        self.spin_lower.setFixedSize(36, 20)
         self.spin_lower.setStyleSheet("background-color: rgba(26, 26, 38, 0.5); color: #ffaa00; border: 1px solid #ffaa00; font-size: 10px; border-radius: 2px;")
         self.spin_lower.valueChanged.connect(self._on_lower_changed)
+
+        # 四：界面添加中间值设置框
+        self.lbl_mid = QLabel("中值:")
+        self.lbl_mid.setStyleSheet("color: #ffaa00; font-size: 10px; font-weight: bold;")
+        self.spin_mid = CleanDoubleSpinBox()
+        self.spin_mid.setButtonSymbols(QAbstractSpinBox.NoButtons)
+        self.spin_mid.setAlignment(Qt.AlignCenter)
+        self.spin_mid.setRange(-99999.0, 99999.0)
+        self.spin_mid.setValue(self.mid_val)
+        self.spin_mid.setFixedSize(36, 20)
+        self.spin_mid.setStyleSheet("background-color: rgba(26, 26, 38, 0.5); color: #ffaa00; border: 1px solid #ffaa00; font-size: 10px; border-radius: 2px;")
+        self.spin_mid.valueChanged.connect(self._on_mid_changed)
 
         self.lbl_upper = QLabel("上限:")
         self.lbl_upper.setStyleSheet("color: #ffaa00; font-size: 10px; font-weight: bold;")
@@ -512,17 +525,19 @@ class OverlayRegionWidget(QWidget):
         self.spin_upper.setAlignment(Qt.AlignCenter)
         self.spin_upper.setRange(-99999.0, 99999.0)
         self.spin_upper.setValue(self.upper)
-        self.spin_upper.setFixedSize(48, 20)
+        self.spin_upper.setFixedSize(36, 20)
         self.spin_upper.setStyleSheet("background-color: rgba(26, 26, 38, 0.5); color: #ffaa00; border: 1px solid #ffaa00; font-size: 10px; border-radius: 2px;")
         self.spin_upper.valueChanged.connect(self._on_upper_changed)
 
         self.btn_delete = QPushButton("❌")
-        self.btn_delete.setFixedSize(22, 20)
+        self.btn_delete.setFixedSize(20, 20)
         self.btn_delete.setStyleSheet("QPushButton { background-color: #ff3333; color: white; border: none; border-radius: 3px; font-weight: bold; font-size: 10px; } QPushButton:hover { background-color: #ff6666; }")
         self.btn_delete.clicked.connect(lambda: self.delete_requested.emit(self))
 
         row2_layout.addWidget(self.lbl_lower)
         row2_layout.addWidget(self.spin_lower)
+        row2_layout.addWidget(self.lbl_mid)
+        row2_layout.addWidget(self.spin_mid)
         row2_layout.addWidget(self.lbl_upper)
         row2_layout.addWidget(self.spin_upper)
         row2_layout.addStretch()
@@ -595,6 +610,9 @@ class OverlayRegionWidget(QWidget):
     def _on_lower_changed(self, val):
         self.lower = val
 
+    def _on_mid_changed(self, val):
+        self.mid_val = val
+
     def _on_upper_changed(self, val):
         self.upper = val
 
@@ -608,7 +626,13 @@ class OverlayRegionWidget(QWidget):
     def update_result_display(self, val, raw_text=""):
         if val is not None:
             self.lbl_result.setText(f"{val:.2f}")
-            self.lbl_result.setStyleSheet("color: #00ff8c; font-size: 11px; font-weight: bold; margin-left: 2px;")
+            # 四：中值判断色（无声提醒）
+            if val > self.upper or val < self.lower:
+                self.lbl_result.setStyleSheet("color: #ff4d4d; font-size: 11px; font-weight: bold; margin-left: 2px;")
+            elif val > self.mid_val:
+                self.lbl_result.setStyleSheet("color: #ffaa00; font-size: 11px; font-weight: bold; margin-left: 2px;")
+            else:
+                self.lbl_result.setStyleSheet("color: #00ff8c; font-size: 11px; font-weight: bold; margin-left: 2px;")
         else:
             disp = f"({raw_text})" if raw_text else "--"
             self.lbl_result.setText(f"{disp}")
@@ -663,6 +687,7 @@ class OverlayRegionWidget(QWidget):
 
             self.btn_delete.setVisible(self.is_editing)
             self.spin_lower.setEnabled(self.is_editing)
+            self.spin_mid.setEnabled(self.is_editing)
             self.spin_upper.setEnabled(self.is_editing)
             self.lbl_title.setVisible(not self.is_editing)
             self.edit_title.setVisible(self.is_editing)
@@ -843,7 +868,7 @@ class CoordinatePicker(QWidget):
             self.close()
 
 
-# ==================== 7. 后台识别线程 (纯计算，不跨线程调用GUI) ====================
+# ==================== 7. 后台识别线程 ====================
 class MonitorThread(QThread):
     value_updated = Signal(object, str, object, str)
     countdown_tick = Signal(float)
@@ -1036,27 +1061,41 @@ MOBILE_HTML_TEMPLATE = """
         .btn-top.btn-grille.active { background: #cc3333; }
         .btn-sound { background: rgba(255,255,255,0.15); color: #00ff8c; border: 1px solid rgba(255,255,255,0.2); border-radius: 6px; padding: 6px 8px; font-size: 12px; font-weight: bold; cursor: pointer; }
 
+        /* 一. 全部收起/全部展开 顶部按钮样式 */
+        .btn-fold-tool { background: rgba(255,255,255,0.1); color: #00ff8c; border: 1px solid rgba(0,255,140,0.3); border-radius: 6px; padding: 6px 8px; font-size: 12px; font-weight: bold; cursor: pointer; }
+        .btn-fold-tool:active { background: rgba(0,255,140,0.2); }
+
         .card { background: #1a1a26; border-radius: 12px; padding: 12px 14px; margin-bottom: 10px; border: 1px solid rgba(255,255,255,0.1); transition: all 0.3s; }
+        
+        /* 报警色：红色高亮 */
         .card.alarm { border: 2px solid #ff4d4d; background: rgba(255, 77, 77, 0.08); animation: blink 1s infinite alternate; }
         @keyframes blink { from { box-shadow: 0 0 5px rgba(255,77,77,0.3); } to { box-shadow: 0 0 15px rgba(255,77,77,0.8); } }
+
+        /* 四. 预警色：黄色无声提醒 */
+        .card.warning { border: 2px solid #ffaa00; background: rgba(255, 170, 0, 0.08); }
 
         .card-header { display: flex; justify-content: space-between; align-items: center; font-size: 13px; color: #888; font-weight: bold; }
         .card-title-box { display: flex; align-items: center; gap: 8px; cursor: pointer; flex-grow: 1; }
         .card-title { color: #ffffff; font-size: 15px; font-weight: bold; }
 
-        .btn-action { background: rgba(255,255,255,0.1); color: #fff; border: 1px solid rgba(255,255,255,0.2); border-radius: 6px; padding: 4px 8px; font-size: 11px; font-weight: bold; cursor: pointer; }
-        .btn-action:active { background: rgba(255,255,255,0.3); }
-        .btn-clear { background: #ff4d4d; color: white; border: none; }
+        .btn-action { color: #fff; border-radius: 6px; padding: 4px 8px; font-size: 11px; font-weight: bold; cursor: pointer; border: none; }
+        .btn-action:active { opacity: 0.8; }
+        .btn-clear { background: #ff4d4d; color: white; }
+
+        /* 三. 报警开 / 报警关 两种不同颜色样式 */
+        .btn-alarm-on { background: #2e9a58; color: #ffffff; border: 1px solid #3fb950; }  /* 报警开：绿色高亮 */
+        .btn-alarm-off { background: #4a4d52; color: #cccccc; border: 1px solid #666666; } /* 报警关：暗灰色 */
 
         .value-box { text-align: center; margin: 8px 0; }
         .val-text { font-size: 32px; font-weight: bold; color: #00ff8c; font-family: monospace; }
         .val-text.alarm-text { color: #ff4d4d; }
+        .val-text.warning-text { color: #ffaa00; } /* 黄色预警数值 */
 
         .fold-body { margin-top: 8px; border-top: 1px dashed rgba(255,255,255,0.1); padding-top: 8px; }
 
-        .setting-row { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; font-size: 12px; }
+        .setting-row { display: flex; align-items: center; gap: 4px; margin-bottom: 8px; font-size: 11px; flex-wrap: wrap; }
         .setting-row label { color: #ffaa00; font-weight: bold; }
-        .setting-input { background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; color: #00ff8c; font-weight: bold; padding: 4px 6px; width: 70px; text-align: center; font-size: 12px; }
+        .setting-input { background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; color: #00ff8c; font-weight: bold; padding: 4px 2px; width: 50px; text-align: center; font-size: 11px; }
 
         .log-title { margin-top: 6px; font-size: 11px; color: #888; font-weight: bold; }
         .log-list { margin-top: 4px; background: rgba(0,0,0,0.4); border-radius: 6px; padding: 6px 8px; font-size: 11px; font-family: monospace; height: 110px; overflow-y: auto; color: #00ff8c; }
@@ -1073,6 +1112,10 @@ MOBILE_HTML_TEMPLATE = """
                 <div id="status" class="status">初始化...</div>
             </div>
             <div class="header-actions">
+                <!-- 一. 全部展开 / 全部收起 按钮 -->
+                <button class="btn-fold-tool" onclick="collapseAll(false)">📂 全部展开</button>
+                <button class="btn-fold-tool" onclick="collapseAll(true)">📁 全部收起</button>
+
                 <button id="btn-sound" class="btn-sound" onclick="toggleWebSound()">🔊 网页声音</button>
                 <button id="btn-monitor" class="btn-top" onclick="postAction('toggle_monitor', -1)">▶ 开始监控</button>
                 <button id="btn-grille" class="btn-top btn-grille" onclick="postAction('toggle_grille', -1)">▶ 开始操作</button>
@@ -1086,6 +1129,7 @@ MOBILE_HTML_TEMPLATE = """
         let webSoundEnabled = true;
         let audioCtx = null;
         let alarmTimer = null;
+        let cachedBoxes = [];
 
         function initAudio() {
             if (!audioCtx) {
@@ -1096,6 +1140,14 @@ MOBILE_HTML_TEMPLATE = """
             }
         }
         document.addEventListener('click', initAudio, { once: false });
+
+        // 一. 全部收起/全部展开 触发逻辑
+        function collapseAll(collapse) {
+            cachedBoxes.forEach(b => {
+                collapsedMap[b.id] = collapse;
+            });
+            refreshData();
+        }
 
         function toggleWebSound() {
             webSoundEnabled = !webSoundEnabled;
@@ -1162,25 +1214,39 @@ MOBILE_HTML_TEMPLATE = """
 
         function saveLimits(boxId) {
             const lowerVal = parseFloat(document.getElementById(`input-lower-${boxId}`).value);
+            const midVal = parseFloat(document.getElementById(`input-mid-${boxId}`).value);
             const upperVal = parseFloat(document.getElementById(`input-upper-${boxId}`).value);
-            if (!isNaN(lowerVal) && !isNaN(upperVal)) {
-                postAction('set_limits', boxId, { lower: lowerVal, upper: upperVal });
+            if (!isNaN(lowerVal) && !isNaN(midVal) && !isNaN(upperVal)) {
+                postAction('set_limits', boxId, { lower: lowerVal, mid_val: midVal, upper: upperVal });
             } else {
                 alert("请输入有效的数值！");
             }
         }
 
-        function renderCardDOM(cardEl, b, isCollapsed) {
+        function renderCardDOM(cardEl, b, isCollapsed, isWarning) {
             const currentFoldState = cardEl.getAttribute('data-collapsed');
             const stateChanged = (currentFoldState !== String(isCollapsed));
 
+            // 确定颜色状态值
+            let valColor = '#00ff8c';
+            if (b.is_alarm) {
+                valColor = '#ff4d4d'; // 红色报警
+            } else if (isWarning) {
+                valColor = '#ffaa00'; // 黄色预警
+            }
+
             if (stateChanged) {
                 cardEl.setAttribute('data-collapsed', String(isCollapsed));
+                
+                // 二. 收起后在右边显示数值
                 if (isCollapsed) {
                     cardEl.innerHTML = `
                         <div class="card-header" onclick="toggleFold(${b.id})" style="cursor:pointer; padding: 2px 0;">
                             <span class="card-title">${b.name}</span>
-                            <span style="font-size:12px; color:#888;">▶</span>
+                            <div style="display: flex; align-items: center; gap: 8px;">
+                                <span id="collapsed-val-${b.id}" style="font-size: 15px; font-weight: bold; font-family: monospace; color: ${valColor};">${b.value}</span>
+                                <span style="font-size:12px; color:#888;">▶</span>
+                            </div>
                         </div>
                     `;
                     return;
@@ -1202,10 +1268,13 @@ MOBILE_HTML_TEMPLATE = """
                             <div class="val-text" id="val-text-${b.id}">${b.value}</div>
                         </div>
                         <div class="fold-body">
+                            <!-- 四. 加一个中间值设置 -->
                             <div class="setting-row">
                                 <label>下限:</label>
                                 <input id="input-lower-${b.id}" class="setting-input" type="number" step="0.1" value="${b.lower}">
-                                <label style="margin-left:8px;">上限:</label>
+                                <label>中值:</label>
+                                <input id="input-mid-${b.id}" class="setting-input" type="number" step="0.1" value="${b.mid_val}">
+                                <label>上限:</label>
                                 <input id="input-upper-${b.id}" class="setting-input" type="number" step="0.1" value="${b.upper}">
                                 <button class="btn-action" style="background:#0088cc; color:white; margin-left:auto;" onclick="saveLimits(${b.id})">💾 保存</button>
                             </div>
@@ -1216,30 +1285,45 @@ MOBILE_HTML_TEMPLATE = """
                 }
             }
 
-            if (!isCollapsed) {
+            // 更新折叠右侧的实时数值
+            if (isCollapsed) {
+                const cValEl = document.getElementById(`collapsed-val-${b.id}`);
+                if (cValEl) {
+                    cValEl.innerText = b.value;
+                    cValEl.style.color = valColor;
+                }
+            } else {
+                // 三. 报警开 和 报警关 弄两个颜色
                 const actionBtns = document.getElementById(`action-btns-${b.id}`);
                 if (actionBtns) {
                     actionBtns.innerHTML = `
                         ${b.is_alarm ? `<button class="btn-action btn-clear" onclick="postAction('clear_alarm', ${b.id})">🚨 消除报警</button>` : ''}
-                        <button class="btn-action" onclick="postAction('toggle_mute', ${b.id})">${b.is_muted ? '报警关' : '报警开'}</button>
+                        <button class="btn-action ${b.is_muted ? 'btn-alarm-off' : 'btn-alarm-on'}" onclick="postAction('toggle_mute', ${b.id})">
+                            ${b.is_muted ? '🔕 报警关' : '🔔 报警开'}
+                        </button>
                     `;
                 }
 
+                // 四. 展开时的大字数值状态判断
                 const valEl = document.getElementById(`val-text-${b.id}`);
                 if (valEl) {
                     valEl.innerText = b.value;
-                    valEl.className = b.is_alarm ? 'val-text alarm-text' : 'val-text';
+                    if (b.is_alarm) {
+                        valEl.className = 'val-text alarm-text';
+                    } else if (isWarning) {
+                        valEl.className = 'val-text warning-text';
+                    } else {
+                        valEl.className = 'val-text';
+                    }
                 }
 
                 const lowerInput = document.getElementById(`input-lower-${b.id}`);
+                const midInput = document.getElementById(`input-mid-${b.id}`);
                 const upperInput = document.getElementById(`input-upper-${b.id}`);
 
-                if (lowerInput && document.activeElement !== lowerInput) {
-                    lowerInput.value = b.lower;
-                }
-                if (upperInput && document.activeElement !== upperInput) {
-                    upperInput.value = b.upper;
-                }
+                if (lowerInput && document.activeElement !== lowerInput) lowerInput.value = b.lower;
+                if (midInput && document.activeElement !== midInput) midInput.value = b.mid_val;
+                if (upperInput && document.activeElement !== upperInput) upperInput.value = b.upper;
 
                 const logListEl = document.getElementById(`log-list-${b.id}`);
                 if (logListEl) {
@@ -1288,6 +1372,7 @@ MOBILE_HTML_TEMPLATE = """
                     return;
                 }
 
+                cachedBoxes = data.boxes;
                 let hasAnyWebAlarm = false;
 
                 data.boxes.forEach(b => {
@@ -1295,9 +1380,14 @@ MOBILE_HTML_TEMPLATE = """
                         collapsedMap[b.id] = false;
                     }
 
+                    // 报警声音触发条件：必须为报警状态，且未开启静音
                     if (b.is_alarm && !b.is_muted) {
                         hasAnyWebAlarm = true;
                     }
+
+                    // 四. 中间值无声提醒逻辑判断
+                    const numVal = parseFloat(b.value);
+                    const isWarning = (!b.is_alarm && !isNaN(numVal) && numVal > b.mid_val);
 
                     let cardEl = document.getElementById(`card-${b.id}`);
                     if (!cardEl) {
@@ -1306,11 +1396,18 @@ MOBILE_HTML_TEMPLATE = """
                         container.appendChild(cardEl);
                     }
 
-                    const isAlarm = b.is_alarm;
                     const isCollapsed = collapsedMap[b.id];
-                    cardEl.className = isAlarm ? 'card alarm' : 'card';
+                    
+                    // 卡片边框与背景色控制：报警红色闪烁，预警黄色显示，正常默认
+                    if (b.is_alarm) {
+                        cardEl.className = 'card alarm';
+                    } else if (isWarning) {
+                        cardEl.className = 'card warning';
+                    } else {
+                        cardEl.className = 'card';
+                    }
 
-                    renderCardDOM(cardEl, b, isCollapsed);
+                    renderCardDOM(cardEl, b, isCollapsed, isWarning);
                 });
 
                 triggerAlarmSoundLoop(hasAnyWebAlarm);
@@ -1365,6 +1462,7 @@ class WebServerThread(QThread):
                     'name': b.name,
                     'value': b.lbl_result.text(),
                     'lower': b.lower,
+                    'mid_val': getattr(b, 'mid_val', 50.0), # 四. 传输中间值到前端
                     'upper': b.upper,
                     'is_alarm': b.is_alarm,
                     'is_muted': b.is_muted,
@@ -1654,6 +1752,8 @@ class GlobalControlPanel(QWidget):
         if action == 'set_limits':
             if 'lower' in data:
                 target_box.spin_lower.setValue(float(data['lower']))
+            if 'mid_val' in data:
+                target_box.spin_mid.setValue(float(data['mid_val']))
             if 'upper' in data:
                 target_box.spin_upper.setValue(float(data['upper']))
         elif action == 'clear_alarm':
@@ -1858,7 +1958,6 @@ class GlobalControlPanel(QWidget):
     def start_monitor(self):
         if not self.boxes: return
         
-        # 1. 安全地彻底停止旧线程
         if hasattr(self, 'monitor_thread') and self.monitor_thread is not None:
             self.stop_monitor()
 
@@ -1866,11 +1965,9 @@ class GlobalControlPanel(QWidget):
         self.monitoring = True
         self._update_button_styles()
 
-        # 2. 在主线程提前获取 DPI 缩放比例
         screen = QApplication.primaryScreen()
         scale = screen.devicePixelRatio() if screen else 1.0
 
-        # 3. 重新创建并启动新线程
         self.monitor_thread = MonitorThread(
             self.boxes, 
             interval=self.spin_interval.value(), 
@@ -1888,10 +1985,9 @@ class GlobalControlPanel(QWidget):
         self.monitoring = False
         if hasattr(self, 'monitor_thread') and self.monitor_thread is not None:
             thread = self.monitor_thread
-            self.monitor_thread = None  # 置空引用，防重复进入
+            self.monitor_thread = None
             thread.stop()
             thread.quit()
-            # 设置 1 秒超时强关防死锁
             if not thread.wait(1000):
                 thread.terminate()
                 thread.wait()
@@ -1905,11 +2001,12 @@ class GlobalControlPanel(QWidget):
         self.curr_monitor_cd = rem
 
     def _on_value_updated(self, box, time_str, val, raw_text):
-        """完全在主线程中处理数值更新与报警状态判断（100% 线程安全）"""
+        """完全在主线程中处理数值更新与报警状态判断"""
         box.update_result_display(val, raw_text)
         box.add_log_val(time_str, val, raw_text)
 
         if val is not None:
+            # 只有超出 [lower, upper] 阈值才触发红色声音报警；中间值仅做黄色视觉提醒
             is_out_of_bounds = (val < box.lower or val > box.upper)
             
             if is_out_of_bounds:
@@ -1953,7 +2050,9 @@ class GlobalControlPanel(QWidget):
                 'name': b.name,
                 'x': b.capture_x, 'y': b.capture_y,
                 'w': b.capture_w, 'h': b.capture_h,
-                'lower': b.lower, 'upper': b.upper,
+                'lower': b.lower, 
+                'mid_val': getattr(b, 'mid_val', 50.0), # 保存中间值
+                'upper': b.upper,
                 'decimal_places': getattr(b, 'decimal_places', 0)
             })
         with open(self.config_file, 'w', encoding='utf-8') as f:
@@ -1982,7 +2081,9 @@ class GlobalControlPanel(QWidget):
                     x=item['x'], y=item['y'],
                     w=item['w'], h=item['h'],
                     name=item['name'],
-                    lower=item.get('lower', 0.0), upper=item.get('upper', 100.0),
+                    lower=item.get('lower', 0.0),
+                    mid_val=item.get('mid_val', 50.0), # 读取中间值
+                    upper=item.get('upper', 100.0),
                     decimal_places=item.get('decimal_places', 0)
                 )
                 box.delete_requested.connect(self._delete_box)
