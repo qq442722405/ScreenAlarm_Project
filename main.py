@@ -506,7 +506,6 @@ class OverlayRegionWidget(QWidget):
         self.spin_lower.setStyleSheet("background-color: rgba(26, 26, 38, 0.5); color: #ffaa00; border: 1px solid #ffaa00; font-size: 10px; border-radius: 2px;")
         self.spin_lower.valueChanged.connect(self._on_lower_changed)
 
-        # 二：界面添加预警值设置框（原中值）
         self.lbl_mid = QLabel("预警值:")
         self.lbl_mid.setStyleSheet("color: #ffaa00; font-size: 10px; font-weight: bold;")
         self.spin_mid = CleanDoubleSpinBox()
@@ -626,7 +625,6 @@ class OverlayRegionWidget(QWidget):
     def update_result_display(self, val, raw_text=""):
         if val is not None:
             self.lbl_result.setText(f"{val:.2f}")
-            # 预警值判断色（无声提醒）
             if val > self.upper or val < self.lower:
                 self.lbl_result.setStyleSheet("color: #ff4d4d; font-size: 11px; font-weight: bold; margin-left: 2px;")
             elif val > self.mid_val:
@@ -1041,7 +1039,7 @@ MOBILE_HTML_TEMPLATE = """
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="icon" href="/favicon.ico" type="image/x-icon">
     <link rel="shortcut icon" href="/favicon.ico" type="image/x-icon">
-    <title>📱 屏显数据控制面板</title>
+    <title>📱 中控数据面板</title>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body { background: #121218; color: #e0e0e0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 12px; }
@@ -1061,21 +1059,16 @@ MOBILE_HTML_TEMPLATE = """
         .btn-top.btn-grille.active { background: #cc3333; }
         .btn-sound { background: rgba(255,255,255,0.15); color: #00ff8c; border: 1px solid rgba(255,255,255,0.2); border-radius: 6px; padding: 6px 8px; font-size: 12px; font-weight: bold; cursor: pointer; }
 
-        /* 一. 合并后的展开/收起按钮样式 */
         .btn-fold-tool { background: rgba(255,255,255,0.1); color: #00ff8c; border: 1px solid rgba(0,255,140,0.3); border-radius: 6px; padding: 6px 8px; font-size: 12px; font-weight: bold; cursor: pointer; }
         .btn-fold-tool:active { background: rgba(0,255,140,0.2); }
 
-        /* 三. 登录控制栏样式 */
-        .login-bar { display: flex; justify-content: flex-end; align-items: center; padding: 6px 14px; background: #1a1a26; border-radius: 10px; margin-bottom: 12px; border: 1px solid rgba(255,255,255,0.1); gap: 6px; }
-        .login-input { background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; color: #00ff8c; font-weight: bold; padding: 4px 6px; width: 80px; font-size: 11px; }
+        .login-input { background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; color: #00ff8c; font-weight: bold; padding: 4px 6px; width: 75px; font-size: 11px; }
 
         .card { background: #1a1a26; border-radius: 12px; padding: 12px 14px; margin-bottom: 10px; border: 1px solid rgba(255,255,255,0.1); transition: all 0.3s; }
         
-        /* 报警色：红色高亮 */
         .card.alarm { border: 2px solid #ff4d4d; background: rgba(255, 77, 77, 0.08); animation: blink 1s infinite alternate; }
         @keyframes blink { from { box-shadow: 0 0 5px rgba(255,77,77,0.3); } to { box-shadow: 0 0 15px rgba(255,77,77,0.8); } }
 
-        /* 预警色：黄色无声提醒 */
         .card.warning { border: 2px solid #ffaa00; background: rgba(255, 170, 0, 0.08); }
 
         .card-header { display: flex; justify-content: space-between; align-items: center; font-size: 13px; color: #888; font-weight: bold; }
@@ -1086,14 +1079,13 @@ MOBILE_HTML_TEMPLATE = """
         .btn-action:active { opacity: 0.8; }
         .btn-clear { background: #ff4d4d; color: white; }
 
-        /* 报警开 / 报警关 两种不同颜色样式 */
-        .btn-alarm-on { background: #2e9a58; color: #ffffff; border: 1px solid #3fb950; }  /* 报警开：绿色高亮 */
-        .btn-alarm-off { background: #4a4d52; color: #cccccc; border: 1px solid #666666; } /* 报警关：暗灰色 */
+        .btn-alarm-on { background: #2e9a58; color: #ffffff; border: 1px solid #3fb950; }
+        .btn-alarm-off { background: #4a4d52; color: #cccccc; border: 1px solid #666666; }
 
         .value-box { text-align: center; margin: 8px 0; }
         .val-text { font-size: 32px; font-weight: bold; color: #00ff8c; font-family: monospace; }
         .val-text.alarm-text { color: #ff4d4d; }
-        .val-text.warning-text { color: #ffaa00; } /* 黄色预警数值 */
+        .val-text.warning-text { color: #ffaa00; }
 
         .fold-body { margin-top: 8px; border-top: 1px dashed rgba(255,255,255,0.1); padding-top: 8px; }
 
@@ -1106,18 +1098,35 @@ MOBILE_HTML_TEMPLATE = """
         .log-list::-webkit-scrollbar { width: 4px; }
         .log-list::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); border-radius: 2px; }
         .log-item { padding: 2px 0; border-bottom: 1px solid rgba(255,255,255,0.05); white-space: nowrap; }
+
+        /* 模态框弹窗样式 */
+        .modal-overlay { display: none; position: fixed; top:0; left:0; width:100%; height:100%; background: rgba(0,0,0,0.7); z-index: 1000; justify-content: center; align-items: center; }
+        .modal-content { background: #1a1a26; border: 1px solid rgba(255,255,255,0.2); border-radius: 10px; width: 90%; max-width: 420px; padding: 16px; color: #e0e0e0; }
+        .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 8px; }
+        .modal-close { cursor: pointer; color: #ff4d4d; font-weight: bold; font-size: 16px; }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="header">
             <div class="header-title-box">
-                <div class="title">📱 实时控制面板</div>
+                <div class="title">📱 中控数据面板</div>
                 <div id="status" class="status">初始化...</div>
             </div>
             <div class="header-actions">
-                <!-- 一. 全部展开/全部收起按钮合并为一个 -->
-                <button id="btn-toggle-all" class="btn-fold-tool" onclick="toggleCollapseAll()">📁 收起</button>
+                <button id="btn-toggle-all" class="btn-fold-tool" onclick="toggleCollapseAll()">📂 展开</button>
+
+                <!-- 登录及用户信息直接挂载在收起按钮之后 -->
+                <div id="login-box" style="display: inline-flex; align-items: center; gap: 4px;">
+                    <input type="text" id="login-user" placeholder="账号" class="login-input">
+                    <input type="password" id="login-pass" placeholder="密码" class="login-input">
+                    <button class="btn-action" style="background:#0088cc; color:white;" onclick="handleLogin()">🔐 登录</button>
+                </div>
+                <div id="user-box" style="display: none; align-items: center; gap: 4px;">
+                    <span id="current-username" style="color:#00ff8c; font-size:12px; font-weight:bold;">👤 已登录</span>
+                    <button class="btn-action" style="background:#e65100; color:white;" onclick="openUserMgmtModal()">⚙️ 用户管理</button>
+                    <button class="btn-action" style="background:#555; color:white;" onclick="handleLogout()">🚪 退出</button>
+                </div>
 
                 <button id="btn-sound" class="btn-sound" onclick="toggleWebSound()">🔊 网页声音</button>
                 <button id="btn-monitor" class="btn-top" onclick="postAction('toggle_monitor', -1)">▶ 开始监控</button>
@@ -1125,26 +1134,48 @@ MOBILE_HTML_TEMPLATE = """
             </div>
         </div>
 
-        <!-- 三. 权限登录控制栏 -->
-        <div class="login-bar">
-            <div id="login-box" style="display: flex; align-items: center; gap: 4px;">
-                <input type="text" id="login-user" placeholder="账号" class="login-input">
-                <input type="password" id="login-pass" placeholder="密码" class="login-input">
-                <button class="btn-action" style="background:#0088cc; color:white;" onclick="handleLogin()">🔐 登录</button>
+        <div id="cards-container"></div>
+    </div>
+
+    <!-- 用户管理模态框 -->
+    <div id="user-modal" class="modal-overlay">
+        <div class="modal-content">
+            <div class="modal-header">
+                <span style="font-weight:bold; color:#00ff8c; font-size:14px;">⚙️ 用户管理面板</span>
+                <span class="modal-close" onclick="closeUserMgmtModal()">✖</span>
             </div>
-            <div id="user-box" style="display: none; align-items: center; gap: 6px;">
-                <span style="color:#00ff8c; font-size:12px; font-weight:bold;">👤 已登录 (tcws)</span>
-                <button class="btn-action" style="background:#555; color:white;" onclick="handleLogout()">🚪 退出</button>
+            
+            <!-- 修改密码 -->
+            <div style="margin-bottom: 14px; padding-bottom: 10px; border-bottom: 1px dashed rgba(255,255,255,0.1);">
+                <div style="font-size:12px; color:#aaa; margin-bottom:6px; font-weight:bold;">🔑 修改当前密码 (<span id="modal-curr-user" style="color:#00ff8c;"></span>)</div>
+                <div class="setting-row">
+                    <input type="password" id="old-pass" placeholder="旧密码" class="setting-input" style="width:85px;">
+                    <input type="password" id="new-pass" placeholder="新密码" class="setting-input" style="width:85px;">
+                    <button class="btn-action" style="background:#0088cc; color:white; margin-left: auto;" onclick="handleChangePassword()">修改密码</button>
+                </div>
+            </div>
+
+            <!-- 新增与删除用户 -->
+            <div>
+                <div style="font-size:12px; color:#aaa; margin-bottom:6px; font-weight:bold;">➕ 新增用户</div>
+                <div class="setting-row" style="margin-bottom:10px;">
+                    <input type="text" id="new-user-name" placeholder="新账号" class="setting-input" style="width:85px;">
+                    <input type="password" id="new-user-pass" placeholder="新密码" class="setting-input" style="width:85px;">
+                    <button class="btn-action" style="background:#2e9a58; color:white; margin-left: auto;" onclick="handleAddUser()">添加用户</button>
+                </div>
+
+                <div style="font-size:12px; color:#aaa; margin-bottom:6px; font-weight:bold;">👥 用户账号列表</div>
+                <div id="user-list-container" style="max-height: 120px; overflow-y: auto; background: rgba(0,0,0,0.3); padding: 6px; border-radius: 4px;">
+                </div>
             </div>
         </div>
-
-        <div id="cards-container"></div>
     </div>
 
     <script>
         const collapsedMap = {};
-        let isAllCollapsed = false;
+        let isAllCollapsed = true; // 默认全面收起
         let isLoggedIn = localStorage.getItem('isLoggedIn') === 'true';
+        let currentUser = localStorage.getItem('currentUser') || '';
         let lastLoggedInState = null;
         let webSoundEnabled = true;
         let audioCtx = null;
@@ -1154,35 +1185,153 @@ MOBILE_HTML_TEMPLATE = """
         function updateLoginUI() {
             const loginBox = document.getElementById('login-box');
             const userBox = document.getElementById('user-box');
+            const usernameDisplay = document.getElementById('current-username');
+
             if (isLoggedIn) {
                 if (loginBox) loginBox.style.display = 'none';
-                if (userBox) userBox.style.display = 'flex';
+                if (userBox) userBox.style.display = 'inline-flex';
+                if (usernameDisplay) usernameDisplay.innerText = `👤 ${currentUser}`;
             } else {
-                if (loginBox) loginBox.style.display = 'flex';
+                if (loginBox) loginBox.style.display = 'inline-flex';
                 if (userBox) userBox.style.display = 'none';
             }
         }
 
-        function handleLogin() {
+        async function handleLogin() {
             const u = document.getElementById('login-user').value.trim();
             const p = document.getElementById('login-pass').value.trim();
-            if (u === 'tcws' && p === '111111') {
-                isLoggedIn = true;
-                localStorage.setItem('isLoggedIn', 'true');
-                updateLoginUI();
-                forceReRenderCards();
-                refreshData();
-            } else {
-                alert('账号或密码错误！');
+            if (!u || !p) {
+                alert('请输入账号和密码！');
+                return;
+            }
+            try {
+                const res = await fetch('/api/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username: u, password: p })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    isLoggedIn = true;
+                    currentUser = data.username;
+                    localStorage.setItem('isLoggedIn', 'true');
+                    localStorage.setItem('currentUser', currentUser);
+                    updateLoginUI();
+                    forceReRenderCards();
+                    refreshData();
+                } else {
+                    alert(data.message || '登录失败！');
+                }
+            } catch(e) {
+                alert('请求异常，请重试！');
             }
         }
 
         function handleLogout() {
             isLoggedIn = false;
+            currentUser = '';
             localStorage.setItem('isLoggedIn', 'false');
+            localStorage.removeItem('currentUser');
             updateLoginUI();
             forceReRenderCards();
             refreshData();
+        }
+
+        function openUserMgmtModal() {
+            document.getElementById('user-modal').style.display = 'flex';
+            document.getElementById('modal-curr-user').innerText = currentUser;
+            loadUserList();
+        }
+
+        function closeUserMgmtModal() {
+            document.getElementById('user-modal').style.display = 'none';
+        }
+
+        async function handleChangePassword() {
+            const oldP = document.getElementById('old-pass').value.trim();
+            const newP = document.getElementById('new-pass').value.trim();
+            if (!oldP || !newP) {
+                alert('请填写旧密码和新密码！');
+                return;
+            }
+            try {
+                const res = await fetch('/api/users/change_password', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username: currentUser, old_password: oldP, new_password: newP })
+                });
+                const data = await res.json();
+                alert(data.message);
+                if (data.success) {
+                    document.getElementById('old-pass').value = '';
+                    document.getElementById('new-pass').value = '';
+                }
+            } catch(e) {
+                alert('修改密码异常！');
+            }
+        }
+
+        async function handleAddUser() {
+            const u = document.getElementById('new-user-name').value.trim();
+            const p = document.getElementById('new-user-pass').value.trim();
+            if (!u || !p) {
+                alert('请输入新账号和新密码！');
+                return;
+            }
+            try {
+                const res = await fetch('/api/users/add', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username: u, password: p })
+                });
+                const data = await res.json();
+                alert(data.message);
+                if (data.success) {
+                    document.getElementById('new-user-name').value = '';
+                    document.getElementById('new-user-pass').value = '';
+                    loadUserList();
+                }
+            } catch(e) {
+                alert('添加用户异常！');
+            }
+        }
+
+        async function handleDeleteUser(username) {
+            if (!confirm(`确定要删除用户 "${username}" 吗？`)) return;
+            try {
+                const res = await fetch('/api/users/delete', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username })
+                });
+                const data = await res.json();
+                alert(data.message);
+                if (data.success) {
+                    loadUserList();
+                }
+            } catch(e) {
+                alert('删除用户异常！');
+            }
+        }
+
+        async function loadUserList() {
+            try {
+                const res = await fetch('/api/users/list');
+                const data = await res.json();
+                const container = document.getElementById('user-list-container');
+                if (data.users && data.users.length > 0) {
+                    container.innerHTML = data.users.map(u => `
+                        <div style="display:flex; justify-content:space-between; align-items:center; padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,0.05); font-size:12px;">
+                            <span>👤 ${u}</span>
+                            ${u !== 'admin' ? `<button class="btn-action" style="background:#ff4d4d; color:white;" onclick="handleDeleteUser('${u}')">删除</button>` : '<span style="color:#888; font-size:11px;">(默认管理员)</span>'}
+                        </div>
+                    `).join('');
+                } else {
+                    container.innerHTML = '<div style="color:#888; font-size:11px;">暂无其他用户</div>';
+                }
+            } catch(e) {
+                console.error("加载用户列表失败:", e);
+            }
         }
 
         function forceReRenderCards() {
@@ -1200,7 +1349,6 @@ MOBILE_HTML_TEMPLATE = """
         }
         document.addEventListener('click', initAudio, { once: false });
 
-        // 一. 全部展开 / 全部收起 按钮合并切换逻辑
         function toggleCollapseAll() {
             isAllCollapsed = !isAllCollapsed;
             cachedBoxes.forEach(b => {
@@ -1291,18 +1439,16 @@ MOBILE_HTML_TEMPLATE = """
             const currentFoldState = cardEl.getAttribute('data-collapsed');
             const stateChanged = (currentFoldState !== String(isCollapsed));
 
-            // 确定颜色状态值
             let valColor = '#00ff8c';
             if (b.is_alarm) {
-                valColor = '#ff4d4d'; // 红色报警
+                valColor = '#ff4d4d';
             } else if (isWarning) {
-                valColor = '#ffaa00'; // 黄色预警
+                valColor = '#ffaa00';
             }
 
             if (stateChanged) {
                 cardEl.setAttribute('data-collapsed', String(isCollapsed));
                 
-                // 收起后在右边显示数值
                 if (isCollapsed) {
                     cardEl.innerHTML = `
                         <div class="card-header" onclick="toggleFold(${b.id})" style="cursor:pointer; padding: 2px 0;">
@@ -1332,7 +1478,6 @@ MOBILE_HTML_TEMPLATE = """
                             <div class="val-text" id="val-text-${b.id}">${b.value}</div>
                         </div>
                         <div class="fold-body">
-                            <!-- 二. 预警值名字更改  三. 仅登录状态显示参数设置框 -->
                             <div class="setting-row" id="setting-row-${b.id}">
                                 <label>下限:</label>
                                 <input id="input-lower-${b.id}" class="setting-input" type="number" step="0.1" value="${b.lower}">
@@ -1349,7 +1494,6 @@ MOBILE_HTML_TEMPLATE = """
                 }
             }
 
-            // 更新折叠右侧的实时数值
             if (isCollapsed) {
                 const cValEl = document.getElementById(`collapsed-val-${b.id}`);
                 if (cValEl) {
@@ -1357,7 +1501,6 @@ MOBILE_HTML_TEMPLATE = """
                     cValEl.style.color = valColor;
                 }
             } else {
-                // 三. 登录控制：只有登录后才显示 报警开/报警关、消除报警 按钮
                 const actionBtns = document.getElementById(`action-btns-${b.id}`);
                 if (actionBtns) {
                     if (isLoggedIn) {
@@ -1372,13 +1515,11 @@ MOBILE_HTML_TEMPLATE = """
                     }
                 }
 
-                // 三. 登录控制：只有登录后才显示 上下限、预警值、保存
                 const settingRow = document.getElementById(`setting-row-${b.id}`);
                 if (settingRow) {
                     settingRow.style.display = isLoggedIn ? 'flex' : 'none';
                 }
 
-                // 展开时的大字数值状态判断
                 const valEl = document.getElementById(`val-text-${b.id}`);
                 if (valEl) {
                     valEl.innerText = b.value;
@@ -1459,16 +1600,15 @@ MOBILE_HTML_TEMPLATE = """
                 let hasAnyWebAlarm = false;
 
                 data.boxes.forEach(b => {
+                    // 默认首次加载全部收起
                     if (collapsedMap[b.id] === undefined) {
-                        collapsedMap[b.id] = false;
+                        collapsedMap[b.id] = true;
                     }
 
-                    // 报警声音触发条件：必须为报警状态，且未开启静音
                     if (b.is_alarm && !b.is_muted) {
                         hasAnyWebAlarm = true;
                     }
 
-                    // 预警值无声提醒逻辑判断
                     const numVal = parseFloat(b.value);
                     const isWarning = (!b.is_alarm && !isNaN(numVal) && numVal > b.mid_val);
 
@@ -1531,6 +1671,61 @@ class WebServerThread(QThread):
             script_dir = os.path.dirname(os.path.abspath(__file__))
             return send_from_directory(script_dir, 'favicon.ico', mimetype='image/vnd.microsoft.icon')
 
+        @app.route('/api/login', methods=['POST'])
+        def api_login():
+            data = request.get_json() or {}
+            u = data.get('username', '').strip()
+            p = data.get('password', '').strip()
+            users = self.main_panel.users
+            if u in users and users[u] == p:
+                return jsonify({'success': True, 'username': u})
+            return jsonify({'success': False, 'message': '账号或密码错误！'})
+
+        @app.route('/api/users/list', methods=['GET'])
+        def api_users_list():
+            return jsonify({'users': list(self.main_panel.users.keys())})
+
+        @app.route('/api/users/add', methods=['POST'])
+        def api_users_add():
+            data = request.get_json() or {}
+            u = data.get('username', '').strip()
+            p = data.get('password', '').strip()
+            if not u or not p:
+                return jsonify({'success': False, 'message': '账号或密码不能为空！'})
+            if u in self.main_panel.users:
+                return jsonify({'success': False, 'message': '该账号已存在！'})
+            self.main_panel.users[u] = p
+            self.main_panel.save_users()
+            return jsonify({'success': True, 'message': '新增用户成功！'})
+
+        @app.route('/api/users/delete', methods=['POST'])
+        def api_users_delete():
+            data = request.get_json() or {}
+            u = data.get('username', '').strip()
+            if u not in self.main_panel.users:
+                return jsonify({'success': False, 'message': '用户不存在！'})
+            if u == 'admin':
+                return jsonify({'success': False, 'message': '默认管理员 admin 不可删除！'})
+            del self.main_panel.users[u]
+            self.main_panel.save_users()
+            return jsonify({'success': True, 'message': '用户已删除！'})
+
+        @app.route('/api/users/change_password', methods=['POST'])
+        def api_users_change_password():
+            data = request.get_json() or {}
+            u = data.get('username', '').strip()
+            old_p = data.get('old_password', '').strip()
+            new_p = data.get('new_password', '').strip()
+            if u not in self.main_panel.users:
+                return jsonify({'success': False, 'message': '用户不存在！'})
+            if self.main_panel.users[u] != old_p:
+                return jsonify({'success': False, 'message': '原密码错误！'})
+            if not new_p:
+                return jsonify({'success': False, 'message': '新密码不能为空！'})
+            self.main_panel.users[u] = new_p
+            self.main_panel.save_users()
+            return jsonify({'success': True, 'message': '密码修改成功！'})
+
         @app.route('/api/data')
         def get_data():
             boxes_data = []
@@ -1544,7 +1739,7 @@ class WebServerThread(QThread):
                     'name': b.name,
                     'value': b.lbl_result.text(),
                     'lower': b.lower,
-                    'mid_val': getattr(b, 'mid_val', 50.0), # 传输预警值到前端
+                    'mid_val': getattr(b, 'mid_val', 50.0),
                     'upper': b.upper,
                     'is_alarm': b.is_alarm,
                     'is_muted': b.is_muted,
@@ -1603,6 +1798,9 @@ class GlobalControlPanel(QWidget):
         self.boxes_panel_hidden = False
         self.reader = None
         self.config_file = "monitor_config.json"
+        self.users_file = "users_config.json"
+        
+        self.users = self.load_users()
         self.alarm_player = AlarmSoundPlayer()
         self.grille_thread = None
         self.monitor_thread = None
@@ -1818,6 +2016,26 @@ class GlobalControlPanel(QWidget):
 
         self._init_ocr()
         self.load_config()
+
+    def load_users(self):
+        """读取用户字典，默认账户 admin / admin"""
+        if os.path.exists(self.users_file):
+            try:
+                with open(self.users_file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    if data:
+                        return data
+            except Exception:
+                pass
+        return {"admin": "admin"}
+
+    def save_users(self):
+        """保存用户字典"""
+        try:
+            with open(self.users_file, 'w', encoding='utf-8') as f:
+                json.dump(self.users, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            print("保存用户配置失败:", e)
 
     def _handle_web_action(self, action, box_id, data):
         if action == 'toggle_monitor':
@@ -2088,7 +2306,6 @@ class GlobalControlPanel(QWidget):
         box.add_log_val(time_str, val, raw_text)
 
         if val is not None:
-            # 只有超出 [lower, upper] 阈值才触发红色声音报警；预警值仅做黄色视觉提醒
             is_out_of_bounds = (val < box.lower or val > box.upper)
             
             if is_out_of_bounds:
@@ -2133,7 +2350,7 @@ class GlobalControlPanel(QWidget):
                 'x': b.capture_x, 'y': b.capture_y,
                 'w': b.capture_w, 'h': b.capture_h,
                 'lower': b.lower, 
-                'mid_val': getattr(b, 'mid_val', 50.0), # 保存预警值
+                'mid_val': getattr(b, 'mid_val', 50.0),
                 'upper': b.upper,
                 'decimal_places': getattr(b, 'decimal_places', 0)
             })
@@ -2164,7 +2381,7 @@ class GlobalControlPanel(QWidget):
                     w=item['w'], h=item['h'],
                     name=item['name'],
                     lower=item.get('lower', 0.0),
-                    mid_val=item.get('mid_val', 50.0), # 读取预警值
+                    mid_val=item.get('mid_val', 50.0),
                     upper=item.get('upper', 100.0),
                     decimal_places=item.get('decimal_places', 0)
                 )
@@ -2188,6 +2405,7 @@ class GlobalControlPanel(QWidget):
         self.stop_monitor()
         self.stop_grille()
         self.save_config()
+        self.save_users()
         for b in self.boxes:
             b.close()
         self.close()
