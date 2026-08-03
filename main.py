@@ -1052,7 +1052,7 @@ MOBILE_HTML_TEMPLATE = """
         .status { font-size: 11px; color: #aaa; font-weight: bold; }
 
         .header-actions { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
-        .btn-top { background: #2e9a58; color: #fff; border: none; border-radius: 6px; padding: 6px 10px; font-size: 12px; font-weight: bold; cursor: pointer; transition: background 0.2s; display: none; }
+        .btn-top { background: #2e9a58; color: #fff; border: none; border-radius: 6px; padding: 6px 10px; font-size: 12px; font-weight: bold; cursor: pointer; transition: background 0.2s; }
         .btn-top:active { opacity: 0.8; }
         .btn-top.active { background: #b03a3a; }
         .btn-top.btn-grille { background: #0088cc; }
@@ -1124,12 +1124,11 @@ MOBILE_HTML_TEMPLATE = """
                 </div>
                 <div id="user-box" style="display: none; align-items: center; gap: 4px;">
                     <span id="current-username" style="color:#00ff8c; font-size:12px; font-weight:bold;">👤 已登录</span>
-                    <button id="btn-user-mgmt" class="btn-action" style="background:#e65100; color:white; display:none;" onclick="openUserMgmtModal()">⚙️ 用户管理</button>
+                    <button class="btn-action" style="background:#e65100; color:white;" onclick="openUserMgmtModal()">⚙️ 用户管理</button>
                     <button class="btn-action" style="background:#555; color:white;" onclick="handleLogout()">🚪 退出</button>
                 </div>
 
                 <button id="btn-sound" class="btn-sound" onclick="toggleWebSound()">🔊 网页声音</button>
-                <!-- 未登录时默认隐藏开始监控与开始操作 -->
                 <button id="btn-monitor" class="btn-top" onclick="postAction('toggle_monitor', -1)">▶ 开始监控</button>
                 <button id="btn-grille" class="btn-top btn-grille" onclick="postAction('toggle_grille', -1)">▶ 开始操作</button>
             </div>
@@ -1156,8 +1155,8 @@ MOBILE_HTML_TEMPLATE = """
                 </div>
             </div>
 
-            <!-- 新增与删除用户（仅管理员可见） -->
-            <div id="admin-user-section">
+            <!-- 新增与删除用户 -->
+            <div>
                 <div style="font-size:12px; color:#aaa; margin-bottom:6px; font-weight:bold;">➕ 新增用户</div>
                 <div class="setting-row" style="margin-bottom:10px;">
                     <input type="text" id="new-user-name" placeholder="新账号" class="setting-input" style="width:85px;">
@@ -1175,9 +1174,8 @@ MOBILE_HTML_TEMPLATE = """
     <script>
         const collapsedMap = {};
         let isAllCollapsed = true; // 默认全面收起
-        // 使用 sessionStorage 存储，刷新或默认状态下未登录
-        let isLoggedIn = sessionStorage.getItem('isLoggedIn') === 'true';
-        let currentUser = sessionStorage.getItem('currentUser') || '';
+        let isLoggedIn = localStorage.getItem('isLoggedIn') === 'true';
+        let currentUser = localStorage.getItem('currentUser') || '';
         let lastLoggedInState = null;
         let webSoundEnabled = true;
         let audioCtx = null;
@@ -1188,31 +1186,14 @@ MOBILE_HTML_TEMPLATE = """
             const loginBox = document.getElementById('login-box');
             const userBox = document.getElementById('user-box');
             const usernameDisplay = document.getElementById('current-username');
-            const btnUserMgmt = document.getElementById('btn-user-mgmt');
-            const btnMonitor = document.getElementById('btn-monitor');
-            const btnGrille = document.getElementById('btn-grille');
 
             if (isLoggedIn) {
                 if (loginBox) loginBox.style.display = 'none';
                 if (userBox) userBox.style.display = 'inline-flex';
                 if (usernameDisplay) usernameDisplay.innerText = `👤 ${currentUser}`;
-                
-                // 仅管理员才会显示用户管理按钮
-                if (btnUserMgmt) {
-                    btnUserMgmt.style.display = (currentUser === 'admin') ? 'inline-block' : 'none';
-                }
-
-                // 已登录用户显示 开始监控 和 开始操作
-                if (btnMonitor) btnMonitor.style.display = 'inline-block';
-                if (btnGrille) btnGrille.style.display = 'inline-block';
             } else {
                 if (loginBox) loginBox.style.display = 'inline-flex';
                 if (userBox) userBox.style.display = 'none';
-                if (btnUserMgmt) btnUserMgmt.style.display = 'none';
-
-                // 未登录用户隐藏 开始监控 和 开始操作
-                if (btnMonitor) btnMonitor.style.display = 'none';
-                if (btnGrille) btnGrille.style.display = 'none';
             }
         }
 
@@ -1233,8 +1214,8 @@ MOBILE_HTML_TEMPLATE = """
                 if (data.success) {
                     isLoggedIn = true;
                     currentUser = data.username;
-                    sessionStorage.setItem('isLoggedIn', 'true');
-                    sessionStorage.setItem('currentUser', currentUser);
+                    localStorage.setItem('isLoggedIn', 'true');
+                    localStorage.setItem('currentUser', currentUser);
                     updateLoginUI();
                     forceReRenderCards();
                     refreshData();
@@ -1249,15 +1230,14 @@ MOBILE_HTML_TEMPLATE = """
         function handleLogout() {
             isLoggedIn = false;
             currentUser = '';
-            sessionStorage.removeItem('isLoggedIn');
-            sessionStorage.removeItem('currentUser');
+            localStorage.setItem('isLoggedIn', 'false');
+            localStorage.removeItem('currentUser');
             updateLoginUI();
             forceReRenderCards();
             refreshData();
         }
 
         function openUserMgmtModal() {
-            if (currentUser !== 'admin') return; // 只有管理员可访问
             document.getElementById('user-modal').style.display = 'flex';
             document.getElementById('modal-curr-user').innerText = currentUser;
             loadUserList();
@@ -1292,10 +1272,6 @@ MOBILE_HTML_TEMPLATE = """
         }
 
         async function handleAddUser() {
-            if (currentUser !== 'admin') {
-                alert('只有管理员可以增加用户！');
-                return;
-            }
             const u = document.getElementById('new-user-name').value.trim();
             const p = document.getElementById('new-user-pass').value.trim();
             if (!u || !p) {
@@ -1321,10 +1297,6 @@ MOBILE_HTML_TEMPLATE = """
         }
 
         async function handleDeleteUser(username) {
-            if (currentUser !== 'admin') {
-                alert('只有管理员可以删除用户！');
-                return;
-            }
             if (!confirm(`确定要删除用户 "${username}" 吗？`)) return;
             try {
                 const res = await fetch('/api/users/delete', {
@@ -1351,7 +1323,7 @@ MOBILE_HTML_TEMPLATE = """
                     container.innerHTML = data.users.map(u => `
                         <div style="display:flex; justify-content:space-between; align-items:center; padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,0.05); font-size:12px;">
                             <span>👤 ${u}</span>
-                            ${(currentUser === 'admin' && u !== 'admin') ? `<button class="btn-action" style="background:#ff4d4d; color:white;" onclick="handleDeleteUser('${u}')">删除</button>` : (u === 'admin' ? '<span style="color:#888; font-size:11px;">(默认管理员)</span>' : '')}
+                            ${u !== 'admin' ? `<button class="btn-action" style="background:#ff4d4d; color:white;" onclick="handleDeleteUser('${u}')">删除</button>` : '<span style="color:#888; font-size:11px;">(默认管理员)</span>'}
                         </div>
                     `).join('');
                 } else {
@@ -1463,7 +1435,64 @@ MOBILE_HTML_TEMPLATE = """
             }
         }
 
-        function renderCardDOM(cardEl, b, isCollapsed, isWarning) {
+        // 计算并生成与约 2 小时前日志数值的对比 HTML 字符串
+        function formatTwoHourCompare(b, currentTimeStr) {
+            const currVal = parseFloat(b.value);
+            if (isNaN(currVal) || !b.logs || b.logs.length === 0 || !currentTimeStr) {
+                return '<span style="font-size:11px; color:#666; margin-right:4px;">(2h: --)</span>';
+            }
+
+            function timeToSec(tStr) {
+                const p = tStr.split(':').map(Number);
+                return (p[0] || 0) * 3600 + (p[1] || 0) * 60 + (p[2] || 0);
+            }
+
+            const nowSec = timeToSec(currentTimeStr);
+            let bestVal = null;
+            let minErr = Infinity;
+
+            for (let log of b.logs) {
+                const m = log.match(/\[(\d{2}:\d{2}:\d{2})\]\s*(-?\d+(?:\.\d+)?)/);
+                if (m) {
+                    const logSec = timeToSec(m[1]);
+                    const logVal = parseFloat(m[2]);
+                    if (isNaN(logVal)) continue;
+
+                    let elapsed = nowSec - logSec;
+                    if (elapsed < 0) elapsed += 86400; // 跨夜转换
+
+                    // 寻找最接近 2 小时 (7200 秒) 的日志记录 (最少积攒 15 分钟历史)
+                    const err = Math.abs(elapsed - 7200);
+                    if (err < minErr && elapsed >= 900) {
+                        minErr = err;
+                        bestVal = logVal;
+                    }
+                }
+            }
+
+            if (bestVal === null) {
+                return '<span style="font-size:11px; color:#666; margin-right:4px;">(2h前: --)</span>';
+            }
+
+            const diff = currVal - bestVal;
+            let diffStr = (diff >= 0 ? '+' : '') + diff.toFixed(2);
+            let color = '#888';
+            let arrow = '→';
+
+            if (diff > 0) {
+                color = '#00ff8c'; // 增长绿
+                arrow = '↑';
+            } else if (diff < 0) {
+                color = '#ff4d4d'; // 下降红
+                arrow = '↓';
+            }
+
+            return `<span style="font-size:11px; color:#aaa; margin-right:6px;" title="对比 2 小时前数值 (${bestVal.toFixed(2)})">` +
+                   `2h前 ${bestVal.toFixed(2)} <span style="color:${color}; font-weight:bold;">(${arrow}${diffStr})</span>` +
+                   `</span>`;
+        }
+
+        function renderCardDOM(cardEl, b, isCollapsed, isWarning, currentTimeStr) {
             const currentFoldState = cardEl.getAttribute('data-collapsed');
             const stateChanged = (currentFoldState !== String(isCollapsed));
 
@@ -1474,6 +1503,8 @@ MOBILE_HTML_TEMPLATE = """
                 valColor = '#ffaa00';
             }
 
+            const compareHtml = formatTwoHourCompare(b, currentTimeStr);
+
             if (stateChanged) {
                 cardEl.setAttribute('data-collapsed', String(isCollapsed));
                 
@@ -1481,7 +1512,8 @@ MOBILE_HTML_TEMPLATE = """
                     cardEl.innerHTML = `
                         <div class="card-header" onclick="toggleFold(${b.id})" style="cursor:pointer; padding: 2px 0;">
                             <span class="card-title">${b.name}</span>
-                            <div style="display: flex; align-items: center; gap: 8px;">
+                            <div style="display: flex; align-items: center; gap: 4px;">
+                                <span id="collapsed-diff-${b.id}">${compareHtml}</span>
                                 <span id="collapsed-val-${b.id}" style="font-size: 15px; font-weight: bold; font-family: monospace; color: ${valColor};">${b.value}</span>
                                 <span style="font-size:12px; color:#888;">▶</span>
                             </div>
@@ -1527,6 +1559,10 @@ MOBILE_HTML_TEMPLATE = """
                 if (cValEl) {
                     cValEl.innerText = b.value;
                     cValEl.style.color = valColor;
+                }
+                const cDiffEl = document.getElementById(`collapsed-diff-${b.id}`);
+                if (cDiffEl) {
+                    cDiffEl.innerHTML = compareHtml;
                 }
             } else {
                 const actionBtns = document.getElementById(`action-btns-${b.id}`);
@@ -1596,28 +1632,24 @@ MOBILE_HTML_TEMPLATE = """
                 statusEl.innerText = data.time;
 
                 const btnMonitor = document.getElementById('btn-monitor');
-                if (btnMonitor) {
-                    if (data.monitoring) {
-                        btnMonitor.className = 'btn-top active';
-                        btnMonitor.innerText = '⏹ 停止监控';
-                    } else {
-                        btnMonitor.className = 'btn-top';
-                        btnMonitor.innerText = '▶ 开始监控';
-                    }
+                if (data.monitoring) {
+                    btnMonitor.className = 'btn-top active';
+                    btnMonitor.innerText = '⏹ 停止监控';
+                } else {
+                    btnMonitor.className = 'btn-top';
+                    btnMonitor.innerText = '▶ 开始监控';
                 }
 
                 const btnGrille = document.getElementById('btn-grille');
-                if (btnGrille) {
-                    if (data.grille_running) {
-                        btnGrille.className = 'btn-top btn-grille active';
-                        const m = Math.floor(data.grille_cd / 60);
-                        const s = Math.floor(data.grille_cd % 60);
-                        const timeStr = String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0');
-                        btnGrille.innerText = `⏹ 停止操作 (${timeStr})`;
-                    } else {
-                        btnGrille.className = 'btn-top btn-grille';
-                        btnGrille.innerText = '▶ 开始操作';
-                    }
+                if (data.grille_running) {
+                    btnGrille.className = 'btn-top btn-grille active';
+                    const m = Math.floor(data.grille_cd / 60);
+                    const s = Math.floor(data.grille_cd % 60);
+                    const timeStr = String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0');
+                    btnGrille.innerText = `⏹ 停止操作 (${timeStr})`;
+                } else {
+                    btnGrille.className = 'btn-top btn-grille';
+                    btnGrille.innerText = '▶ 开始操作';
                 }
 
                 const container = document.getElementById('cards-container');
@@ -1661,7 +1693,7 @@ MOBILE_HTML_TEMPLATE = """
                         cardEl.className = 'card';
                     }
 
-                    renderCardDOM(cardEl, b, isCollapsed, isWarning);
+                    renderCardDOM(cardEl, b, isCollapsed, isWarning, data.time);
                 });
 
                 triggerAlarmSoundLoop(hasAnyWebAlarm);
@@ -2420,39 +2452,31 @@ class GlobalControlPanel(QWidget):
                 box.delete_requested.connect(self._delete_box)
                 box.alarm_cleared.connect(self.check_and_update_alarm_sound)
                 box.mute_toggled.connect(self.check_and_update_alarm_sound)
-
-                box.set_max_log_count(self.spin_count.value())
-                box.log_interval_min = self.spin_log_interval.value()
                 box.show()
                 self.boxes.append(box)
-        except Exception:
-            pass
+
+        except Exception as e:
+            print("读取配置文件失败:", e)
 
     def close_app(self):
-        if hasattr(self, 'f12_listener'):
-            self.f12_listener.stop()
-            self.f12_listener.wait()
-        if self.web_thread:
-            self.web_thread.stop()
+        self.save_config()
         self.stop_monitor()
         self.stop_grille()
-        self.save_config()
-        self.save_users()
+
+        if self.web_thread:
+            self.web_thread.stop()
+
+        self.f12_listener.stop()
+        self.f12_listener.wait()
+
         for b in self.boxes:
             b.close()
         self.close()
-        QApplication.quit()
 
 
+# ==================== 10. 程序入口 ====================
 if __name__ == "__main__":
     app = QApplication(sys.argv)
-    app.setStyle("Fusion")
-    
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    icon_path = os.path.join(script_dir, "favicon.ico")
-    if os.path.exists(icon_path):
-        app.setWindowIcon(QIcon(icon_path))
-        
     panel = GlobalControlPanel()
     panel.show()
     sys.exit(app.exec())
