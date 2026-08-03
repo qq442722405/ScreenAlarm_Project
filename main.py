@@ -431,7 +431,7 @@ class OverlayRegionWidget(QWidget):
 
         self.name = name
         self.lower = lower
-        self.mid_val = mid_val  # 四：新增中间值
+        self.mid_val = mid_val  # 预警值
         self.upper = upper
         self.decimal_places = decimal_places
 
@@ -506,8 +506,8 @@ class OverlayRegionWidget(QWidget):
         self.spin_lower.setStyleSheet("background-color: rgba(26, 26, 38, 0.5); color: #ffaa00; border: 1px solid #ffaa00; font-size: 10px; border-radius: 2px;")
         self.spin_lower.valueChanged.connect(self._on_lower_changed)
 
-        # 四：界面添加中间值设置框
-        self.lbl_mid = QLabel("中值:")
+        # 二：界面添加预警值设置框（原中值）
+        self.lbl_mid = QLabel("预警值:")
         self.lbl_mid.setStyleSheet("color: #ffaa00; font-size: 10px; font-weight: bold;")
         self.spin_mid = CleanDoubleSpinBox()
         self.spin_mid.setButtonSymbols(QAbstractSpinBox.NoButtons)
@@ -626,7 +626,7 @@ class OverlayRegionWidget(QWidget):
     def update_result_display(self, val, raw_text=""):
         if val is not None:
             self.lbl_result.setText(f"{val:.2f}")
-            # 四：中值判断色（无声提醒）
+            # 预警值判断色（无声提醒）
             if val > self.upper or val < self.lower:
                 self.lbl_result.setStyleSheet("color: #ff4d4d; font-size: 11px; font-weight: bold; margin-left: 2px;")
             elif val > self.mid_val:
@@ -1061,9 +1061,13 @@ MOBILE_HTML_TEMPLATE = """
         .btn-top.btn-grille.active { background: #cc3333; }
         .btn-sound { background: rgba(255,255,255,0.15); color: #00ff8c; border: 1px solid rgba(255,255,255,0.2); border-radius: 6px; padding: 6px 8px; font-size: 12px; font-weight: bold; cursor: pointer; }
 
-        /* 一. 全部收起/全部展开 顶部按钮样式 */
+        /* 一. 合并后的展开/收起按钮样式 */
         .btn-fold-tool { background: rgba(255,255,255,0.1); color: #00ff8c; border: 1px solid rgba(0,255,140,0.3); border-radius: 6px; padding: 6px 8px; font-size: 12px; font-weight: bold; cursor: pointer; }
         .btn-fold-tool:active { background: rgba(0,255,140,0.2); }
+
+        /* 三. 登录控制栏样式 */
+        .login-bar { display: flex; justify-content: flex-end; align-items: center; padding: 6px 14px; background: #1a1a26; border-radius: 10px; margin-bottom: 12px; border: 1px solid rgba(255,255,255,0.1); gap: 6px; }
+        .login-input { background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; color: #00ff8c; font-weight: bold; padding: 4px 6px; width: 80px; font-size: 11px; }
 
         .card { background: #1a1a26; border-radius: 12px; padding: 12px 14px; margin-bottom: 10px; border: 1px solid rgba(255,255,255,0.1); transition: all 0.3s; }
         
@@ -1071,7 +1075,7 @@ MOBILE_HTML_TEMPLATE = """
         .card.alarm { border: 2px solid #ff4d4d; background: rgba(255, 77, 77, 0.08); animation: blink 1s infinite alternate; }
         @keyframes blink { from { box-shadow: 0 0 5px rgba(255,77,77,0.3); } to { box-shadow: 0 0 15px rgba(255,77,77,0.8); } }
 
-        /* 四. 预警色：黄色无声提醒 */
+        /* 预警色：黄色无声提醒 */
         .card.warning { border: 2px solid #ffaa00; background: rgba(255, 170, 0, 0.08); }
 
         .card-header { display: flex; justify-content: space-between; align-items: center; font-size: 13px; color: #888; font-weight: bold; }
@@ -1082,7 +1086,7 @@ MOBILE_HTML_TEMPLATE = """
         .btn-action:active { opacity: 0.8; }
         .btn-clear { background: #ff4d4d; color: white; }
 
-        /* 三. 报警开 / 报警关 两种不同颜色样式 */
+        /* 报警开 / 报警关 两种不同颜色样式 */
         .btn-alarm-on { background: #2e9a58; color: #ffffff; border: 1px solid #3fb950; }  /* 报警开：绿色高亮 */
         .btn-alarm-off { background: #4a4d52; color: #cccccc; border: 1px solid #666666; } /* 报警关：暗灰色 */
 
@@ -1112,24 +1116,79 @@ MOBILE_HTML_TEMPLATE = """
                 <div id="status" class="status">初始化...</div>
             </div>
             <div class="header-actions">
-                <!-- 一. 全部展开 / 全部收起 按钮 -->
-                <button class="btn-fold-tool" onclick="collapseAll(false)">📂 全部展开</button>
-                <button class="btn-fold-tool" onclick="collapseAll(true)">📁 全部收起</button>
+                <!-- 一. 全部展开/全部收起按钮合并为一个 -->
+                <button id="btn-toggle-all" class="btn-fold-tool" onclick="toggleCollapseAll()">📁 收起</button>
 
                 <button id="btn-sound" class="btn-sound" onclick="toggleWebSound()">🔊 网页声音</button>
                 <button id="btn-monitor" class="btn-top" onclick="postAction('toggle_monitor', -1)">▶ 开始监控</button>
                 <button id="btn-grille" class="btn-top btn-grille" onclick="postAction('toggle_grille', -1)">▶ 开始操作</button>
             </div>
         </div>
+
+        <!-- 三. 权限登录控制栏 -->
+        <div class="login-bar">
+            <div id="login-box" style="display: flex; align-items: center; gap: 4px;">
+                <input type="text" id="login-user" placeholder="账号" class="login-input">
+                <input type="password" id="login-pass" placeholder="密码" class="login-input">
+                <button class="btn-action" style="background:#0088cc; color:white;" onclick="handleLogin()">🔐 登录</button>
+            </div>
+            <div id="user-box" style="display: none; align-items: center; gap: 6px;">
+                <span style="color:#00ff8c; font-size:12px; font-weight:bold;">👤 已登录 (tcws)</span>
+                <button class="btn-action" style="background:#555; color:white;" onclick="handleLogout()">🚪 退出</button>
+            </div>
+        </div>
+
         <div id="cards-container"></div>
     </div>
 
     <script>
         const collapsedMap = {};
+        let isAllCollapsed = false;
+        let isLoggedIn = localStorage.getItem('isLoggedIn') === 'true';
+        let lastLoggedInState = null;
         let webSoundEnabled = true;
         let audioCtx = null;
         let alarmTimer = null;
         let cachedBoxes = [];
+
+        function updateLoginUI() {
+            const loginBox = document.getElementById('login-box');
+            const userBox = document.getElementById('user-box');
+            if (isLoggedIn) {
+                if (loginBox) loginBox.style.display = 'none';
+                if (userBox) userBox.style.display = 'flex';
+            } else {
+                if (loginBox) loginBox.style.display = 'flex';
+                if (userBox) userBox.style.display = 'none';
+            }
+        }
+
+        function handleLogin() {
+            const u = document.getElementById('login-user').value.trim();
+            const p = document.getElementById('login-pass').value.trim();
+            if (u === 'tcws' && p === '111111') {
+                isLoggedIn = true;
+                localStorage.setItem('isLoggedIn', 'true');
+                updateLoginUI();
+                forceReRenderCards();
+                refreshData();
+            } else {
+                alert('账号或密码错误！');
+            }
+        }
+
+        function handleLogout() {
+            isLoggedIn = false;
+            localStorage.setItem('isLoggedIn', 'false');
+            updateLoginUI();
+            forceReRenderCards();
+            refreshData();
+        }
+
+        function forceReRenderCards() {
+            const container = document.getElementById('cards-container');
+            if (container) container.innerHTML = '';
+        }
 
         function initAudio() {
             if (!audioCtx) {
@@ -1141,11 +1200,16 @@ MOBILE_HTML_TEMPLATE = """
         }
         document.addEventListener('click', initAudio, { once: false });
 
-        // 一. 全部收起/全部展开 触发逻辑
-        function collapseAll(collapse) {
+        // 一. 全部展开 / 全部收起 按钮合并切换逻辑
+        function toggleCollapseAll() {
+            isAllCollapsed = !isAllCollapsed;
             cachedBoxes.forEach(b => {
-                collapsedMap[b.id] = collapse;
+                collapsedMap[b.id] = isAllCollapsed;
             });
+            const btn = document.getElementById('btn-toggle-all');
+            if (btn) {
+                btn.innerText = isAllCollapsed ? "📂 展开" : "📁 收起";
+            }
             refreshData();
         }
 
@@ -1238,7 +1302,7 @@ MOBILE_HTML_TEMPLATE = """
             if (stateChanged) {
                 cardEl.setAttribute('data-collapsed', String(isCollapsed));
                 
-                // 二. 收起后在右边显示数值
+                // 收起后在右边显示数值
                 if (isCollapsed) {
                     cardEl.innerHTML = `
                         <div class="card-header" onclick="toggleFold(${b.id})" style="cursor:pointer; padding: 2px 0;">
@@ -1268,11 +1332,11 @@ MOBILE_HTML_TEMPLATE = """
                             <div class="val-text" id="val-text-${b.id}">${b.value}</div>
                         </div>
                         <div class="fold-body">
-                            <!-- 四. 加一个中间值设置 -->
-                            <div class="setting-row">
+                            <!-- 二. 预警值名字更改  三. 仅登录状态显示参数设置框 -->
+                            <div class="setting-row" id="setting-row-${b.id}">
                                 <label>下限:</label>
                                 <input id="input-lower-${b.id}" class="setting-input" type="number" step="0.1" value="${b.lower}">
-                                <label>中值:</label>
+                                <label>预警值:</label>
                                 <input id="input-mid-${b.id}" class="setting-input" type="number" step="0.1" value="${b.mid_val}">
                                 <label>上限:</label>
                                 <input id="input-upper-${b.id}" class="setting-input" type="number" step="0.1" value="${b.upper}">
@@ -1293,18 +1357,28 @@ MOBILE_HTML_TEMPLATE = """
                     cValEl.style.color = valColor;
                 }
             } else {
-                // 三. 报警开 和 报警关 弄两个颜色
+                // 三. 登录控制：只有登录后才显示 报警开/报警关、消除报警 按钮
                 const actionBtns = document.getElementById(`action-btns-${b.id}`);
                 if (actionBtns) {
-                    actionBtns.innerHTML = `
-                        ${b.is_alarm ? `<button class="btn-action btn-clear" onclick="postAction('clear_alarm', ${b.id})">🚨 消除报警</button>` : ''}
-                        <button class="btn-action ${b.is_muted ? 'btn-alarm-off' : 'btn-alarm-on'}" onclick="postAction('toggle_mute', ${b.id})">
-                            ${b.is_muted ? '🔕 报警关' : '🔔 报警开'}
-                        </button>
-                    `;
+                    if (isLoggedIn) {
+                        actionBtns.innerHTML = `
+                            ${b.is_alarm ? `<button class="btn-action btn-clear" onclick="postAction('clear_alarm', ${b.id})">🚨 消除报警</button>` : ''}
+                            <button class="btn-action ${b.is_muted ? 'btn-alarm-off' : 'btn-alarm-on'}" onclick="postAction('toggle_mute', ${b.id})">
+                                ${b.is_muted ? '🔕 报警关' : '🔔 报警开'}
+                            </button>
+                        `;
+                    } else {
+                        actionBtns.innerHTML = '';
+                    }
                 }
 
-                // 四. 展开时的大字数值状态判断
+                // 三. 登录控制：只有登录后才显示 上下限、预警值、保存
+                const settingRow = document.getElementById(`setting-row-${b.id}`);
+                if (settingRow) {
+                    settingRow.style.display = isLoggedIn ? 'flex' : 'none';
+                }
+
+                // 展开时的大字数值状态判断
                 const valEl = document.getElementById(`val-text-${b.id}`);
                 if (valEl) {
                     valEl.innerText = b.value;
@@ -1317,13 +1391,15 @@ MOBILE_HTML_TEMPLATE = """
                     }
                 }
 
-                const lowerInput = document.getElementById(`input-lower-${b.id}`);
-                const midInput = document.getElementById(`input-mid-${b.id}`);
-                const upperInput = document.getElementById(`input-upper-${b.id}`);
+                if (isLoggedIn) {
+                    const lowerInput = document.getElementById(`input-lower-${b.id}`);
+                    const midInput = document.getElementById(`input-mid-${b.id}`);
+                    const upperInput = document.getElementById(`input-upper-${b.id}`);
 
-                if (lowerInput && document.activeElement !== lowerInput) lowerInput.value = b.lower;
-                if (midInput && document.activeElement !== midInput) midInput.value = b.mid_val;
-                if (upperInput && document.activeElement !== upperInput) upperInput.value = b.upper;
+                    if (lowerInput && document.activeElement !== lowerInput) lowerInput.value = b.lower;
+                    if (midInput && document.activeElement !== midInput) midInput.value = b.mid_val;
+                    if (upperInput && document.activeElement !== upperInput) upperInput.value = b.upper;
+                }
 
                 const logListEl = document.getElementById(`log-list-${b.id}`);
                 if (logListEl) {
@@ -1337,6 +1413,13 @@ MOBILE_HTML_TEMPLATE = """
 
         async function refreshData() {
             try {
+                updateLoginUI();
+
+                if (lastLoggedInState !== isLoggedIn) {
+                    lastLoggedInState = isLoggedIn;
+                    forceReRenderCards();
+                }
+
                 const res = await fetch('/api/data');
                 const data = await res.json();
 
@@ -1385,7 +1468,7 @@ MOBILE_HTML_TEMPLATE = """
                         hasAnyWebAlarm = true;
                     }
 
-                    // 四. 中间值无声提醒逻辑判断
+                    // 预警值无声提醒逻辑判断
                     const numVal = parseFloat(b.value);
                     const isWarning = (!b.is_alarm && !isNaN(numVal) && numVal > b.mid_val);
 
@@ -1398,7 +1481,6 @@ MOBILE_HTML_TEMPLATE = """
 
                     const isCollapsed = collapsedMap[b.id];
                     
-                    // 卡片边框与背景色控制：报警红色闪烁，预警黄色显示，正常默认
                     if (b.is_alarm) {
                         cardEl.className = 'card alarm';
                     } else if (isWarning) {
@@ -1462,7 +1544,7 @@ class WebServerThread(QThread):
                     'name': b.name,
                     'value': b.lbl_result.text(),
                     'lower': b.lower,
-                    'mid_val': getattr(b, 'mid_val', 50.0), # 四. 传输中间值到前端
+                    'mid_val': getattr(b, 'mid_val', 50.0), # 传输预警值到前端
                     'upper': b.upper,
                     'is_alarm': b.is_alarm,
                     'is_muted': b.is_muted,
@@ -2001,12 +2083,12 @@ class GlobalControlPanel(QWidget):
         self.curr_monitor_cd = rem
 
     def _on_value_updated(self, box, time_str, val, raw_text):
-        """完全在主线程中处理数值更新与报警状态判断"""
+        """主线程处理数值更新与报警状态判断"""
         box.update_result_display(val, raw_text)
         box.add_log_val(time_str, val, raw_text)
 
         if val is not None:
-            # 只有超出 [lower, upper] 阈值才触发红色声音报警；中间值仅做黄色视觉提醒
+            # 只有超出 [lower, upper] 阈值才触发红色声音报警；预警值仅做黄色视觉提醒
             is_out_of_bounds = (val < box.lower or val > box.upper)
             
             if is_out_of_bounds:
@@ -2051,7 +2133,7 @@ class GlobalControlPanel(QWidget):
                 'x': b.capture_x, 'y': b.capture_y,
                 'w': b.capture_w, 'h': b.capture_h,
                 'lower': b.lower, 
-                'mid_val': getattr(b, 'mid_val', 50.0), # 保存中间值
+                'mid_val': getattr(b, 'mid_val', 50.0), # 保存预警值
                 'upper': b.upper,
                 'decimal_places': getattr(b, 'decimal_places', 0)
             })
@@ -2082,7 +2164,7 @@ class GlobalControlPanel(QWidget):
                     w=item['w'], h=item['h'],
                     name=item['name'],
                     lower=item.get('lower', 0.0),
-                    mid_val=item.get('mid_val', 50.0), # 读取中间值
+                    mid_val=item.get('mid_val', 50.0), # 读取预警值
                     upper=item.get('upper', 100.0),
                     decimal_places=item.get('decimal_places', 0)
                 )
