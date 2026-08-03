@@ -1052,7 +1052,7 @@ MOBILE_HTML_TEMPLATE = """
         .status { font-size: 11px; color: #aaa; font-weight: bold; }
 
         .header-actions { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
-        .btn-top { background: #2e9a58; color: #fff; border: none; border-radius: 6px; padding: 6px 10px; font-size: 12px; font-weight: bold; cursor: pointer; transition: background 0.2s; }
+        .btn-top { background: #2e9a58; color: #fff; border: none; border-radius: 6px; padding: 6px 10px; font-size: 12px; font-weight: bold; cursor: pointer; transition: background 0.2s; display: none; }
         .btn-top:active { opacity: 0.8; }
         .btn-top.active { background: #b03a3a; }
         .btn-top.btn-grille { background: #0088cc; }
@@ -1124,11 +1124,12 @@ MOBILE_HTML_TEMPLATE = """
                 </div>
                 <div id="user-box" style="display: none; align-items: center; gap: 4px;">
                     <span id="current-username" style="color:#00ff8c; font-size:12px; font-weight:bold;">👤 已登录</span>
-                    <button class="btn-action" style="background:#e65100; color:white;" onclick="openUserMgmtModal()">⚙️ 用户管理</button>
+                    <button id="btn-user-mgmt" class="btn-action" style="background:#e65100; color:white; display:none;" onclick="openUserMgmtModal()">⚙️ 用户管理</button>
                     <button class="btn-action" style="background:#555; color:white;" onclick="handleLogout()">🚪 退出</button>
                 </div>
 
                 <button id="btn-sound" class="btn-sound" onclick="toggleWebSound()">🔊 网页声音</button>
+                <!-- 未登录时默认隐藏开始监控与开始操作 -->
                 <button id="btn-monitor" class="btn-top" onclick="postAction('toggle_monitor', -1)">▶ 开始监控</button>
                 <button id="btn-grille" class="btn-top btn-grille" onclick="postAction('toggle_grille', -1)">▶ 开始操作</button>
             </div>
@@ -1155,8 +1156,8 @@ MOBILE_HTML_TEMPLATE = """
                 </div>
             </div>
 
-            <!-- 新增与删除用户 -->
-            <div>
+            <!-- 新增与删除用户（仅管理员可见） -->
+            <div id="admin-user-section">
                 <div style="font-size:12px; color:#aaa; margin-bottom:6px; font-weight:bold;">➕ 新增用户</div>
                 <div class="setting-row" style="margin-bottom:10px;">
                     <input type="text" id="new-user-name" placeholder="新账号" class="setting-input" style="width:85px;">
@@ -1174,8 +1175,9 @@ MOBILE_HTML_TEMPLATE = """
     <script>
         const collapsedMap = {};
         let isAllCollapsed = true; // 默认全面收起
-        let isLoggedIn = localStorage.getItem('isLoggedIn') === 'true';
-        let currentUser = localStorage.getItem('currentUser') || '';
+        // 使用 sessionStorage 存储，刷新或默认状态下未登录
+        let isLoggedIn = sessionStorage.getItem('isLoggedIn') === 'true';
+        let currentUser = sessionStorage.getItem('currentUser') || '';
         let lastLoggedInState = null;
         let webSoundEnabled = true;
         let audioCtx = null;
@@ -1186,14 +1188,31 @@ MOBILE_HTML_TEMPLATE = """
             const loginBox = document.getElementById('login-box');
             const userBox = document.getElementById('user-box');
             const usernameDisplay = document.getElementById('current-username');
+            const btnUserMgmt = document.getElementById('btn-user-mgmt');
+            const btnMonitor = document.getElementById('btn-monitor');
+            const btnGrille = document.getElementById('btn-grille');
 
             if (isLoggedIn) {
                 if (loginBox) loginBox.style.display = 'none';
                 if (userBox) userBox.style.display = 'inline-flex';
                 if (usernameDisplay) usernameDisplay.innerText = `👤 ${currentUser}`;
+                
+                // 仅管理员才会显示用户管理按钮
+                if (btnUserMgmt) {
+                    btnUserMgmt.style.display = (currentUser === 'admin') ? 'inline-block' : 'none';
+                }
+
+                // 已登录用户显示 开始监控 和 开始操作
+                if (btnMonitor) btnMonitor.style.display = 'inline-block';
+                if (btnGrille) btnGrille.style.display = 'inline-block';
             } else {
                 if (loginBox) loginBox.style.display = 'inline-flex';
                 if (userBox) userBox.style.display = 'none';
+                if (btnUserMgmt) btnUserMgmt.style.display = 'none';
+
+                // 未登录用户隐藏 开始监控 和 开始操作
+                if (btnMonitor) btnMonitor.style.display = 'none';
+                if (btnGrille) btnGrille.style.display = 'none';
             }
         }
 
@@ -1214,8 +1233,8 @@ MOBILE_HTML_TEMPLATE = """
                 if (data.success) {
                     isLoggedIn = true;
                     currentUser = data.username;
-                    localStorage.setItem('isLoggedIn', 'true');
-                    localStorage.setItem('currentUser', currentUser);
+                    sessionStorage.setItem('isLoggedIn', 'true');
+                    sessionStorage.setItem('currentUser', currentUser);
                     updateLoginUI();
                     forceReRenderCards();
                     refreshData();
@@ -1230,14 +1249,15 @@ MOBILE_HTML_TEMPLATE = """
         function handleLogout() {
             isLoggedIn = false;
             currentUser = '';
-            localStorage.setItem('isLoggedIn', 'false');
-            localStorage.removeItem('currentUser');
+            sessionStorage.removeItem('isLoggedIn');
+            sessionStorage.removeItem('currentUser');
             updateLoginUI();
             forceReRenderCards();
             refreshData();
         }
 
         function openUserMgmtModal() {
+            if (currentUser !== 'admin') return; // 只有管理员可访问
             document.getElementById('user-modal').style.display = 'flex';
             document.getElementById('modal-curr-user').innerText = currentUser;
             loadUserList();
@@ -1272,6 +1292,10 @@ MOBILE_HTML_TEMPLATE = """
         }
 
         async function handleAddUser() {
+            if (currentUser !== 'admin') {
+                alert('只有管理员可以增加用户！');
+                return;
+            }
             const u = document.getElementById('new-user-name').value.trim();
             const p = document.getElementById('new-user-pass').value.trim();
             if (!u || !p) {
@@ -1297,6 +1321,10 @@ MOBILE_HTML_TEMPLATE = """
         }
 
         async function handleDeleteUser(username) {
+            if (currentUser !== 'admin') {
+                alert('只有管理员可以删除用户！');
+                return;
+            }
             if (!confirm(`确定要删除用户 "${username}" 吗？`)) return;
             try {
                 const res = await fetch('/api/users/delete', {
@@ -1323,7 +1351,7 @@ MOBILE_HTML_TEMPLATE = """
                     container.innerHTML = data.users.map(u => `
                         <div style="display:flex; justify-content:space-between; align-items:center; padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,0.05); font-size:12px;">
                             <span>👤 ${u}</span>
-                            ${u !== 'admin' ? `<button class="btn-action" style="background:#ff4d4d; color:white;" onclick="handleDeleteUser('${u}')">删除</button>` : '<span style="color:#888; font-size:11px;">(默认管理员)</span>'}
+                            ${(currentUser === 'admin' && u !== 'admin') ? `<button class="btn-action" style="background:#ff4d4d; color:white;" onclick="handleDeleteUser('${u}')">删除</button>` : (u === 'admin' ? '<span style="color:#888; font-size:11px;">(默认管理员)</span>' : '')}
                         </div>
                     `).join('');
                 } else {
@@ -1568,24 +1596,28 @@ MOBILE_HTML_TEMPLATE = """
                 statusEl.innerText = data.time;
 
                 const btnMonitor = document.getElementById('btn-monitor');
-                if (data.monitoring) {
-                    btnMonitor.className = 'btn-top active';
-                    btnMonitor.innerText = '⏹ 停止监控';
-                } else {
-                    btnMonitor.className = 'btn-top';
-                    btnMonitor.innerText = '▶ 开始监控';
+                if (btnMonitor) {
+                    if (data.monitoring) {
+                        btnMonitor.className = 'btn-top active';
+                        btnMonitor.innerText = '⏹ 停止监控';
+                    } else {
+                        btnMonitor.className = 'btn-top';
+                        btnMonitor.innerText = '▶ 开始监控';
+                    }
                 }
 
                 const btnGrille = document.getElementById('btn-grille');
-                if (data.grille_running) {
-                    btnGrille.className = 'btn-top btn-grille active';
-                    const m = Math.floor(data.grille_cd / 60);
-                    const s = Math.floor(data.grille_cd % 60);
-                    const timeStr = String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0');
-                    btnGrille.innerText = `⏹ 停止操作 (${timeStr})`;
-                } else {
-                    btnGrille.className = 'btn-top btn-grille';
-                    btnGrille.innerText = '▶ 开始操作';
+                if (btnGrille) {
+                    if (data.grille_running) {
+                        btnGrille.className = 'btn-top btn-grille active';
+                        const m = Math.floor(data.grille_cd / 60);
+                        const s = Math.floor(data.grille_cd % 60);
+                        const timeStr = String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0');
+                        btnGrille.innerText = `⏹ 停止操作 (${timeStr})`;
+                    } else {
+                        btnGrille.className = 'btn-top btn-grille';
+                        btnGrille.innerText = '▶ 开始操作';
+                    }
                 }
 
                 const container = document.getElementById('cards-container');
