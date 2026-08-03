@@ -1062,7 +1062,7 @@ MOBILE_HTML_TEMPLATE = """
         .btn-fold-tool { background: rgba(255,255,255,0.1); color: #00ff8c; border: 1px solid rgba(0,255,140,0.3); border-radius: 6px; padding: 6px 8px; font-size: 12px; font-weight: bold; cursor: pointer; }
         .btn-fold-tool:active { background: rgba(0,255,140,0.2); }
 
-        .login-input { background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; color: #00ff8c; font-weight: bold; padding: 4px 6px; width: 75px; font-size: 11px; }
+        .login-input { background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; color: #00ff8c; font-weight: bold; padding: 4px 6px; width: 100%; font-size: 12px; }
 
         .card { background: #1a1a26; border-radius: 12px; padding: 12px 14px; margin-bottom: 10px; border: 1px solid rgba(255,255,255,0.1); transition: all 0.3s; }
         
@@ -1116,11 +1116,9 @@ MOBILE_HTML_TEMPLATE = """
             <div class="header-actions">
                 <button id="btn-toggle-all" class="btn-fold-tool" onclick="toggleCollapseAll()">📂 展开</button>
 
-                <!-- 登录及用户信息直接挂载在收起按钮之后 -->
+                <!-- 登录按钮（隐藏直列输入框，改为点击弹窗） -->
                 <div id="login-box" style="display: inline-flex; align-items: center; gap: 4px;">
-                    <input type="text" id="login-user" placeholder="账号" class="login-input">
-                    <input type="password" id="login-pass" placeholder="密码" class="login-input">
-                    <button class="btn-action" style="background:#0088cc; color:white;" onclick="handleLogin()">🔐 登录</button>
+                    <button class="btn-action" style="background:#0088cc; color:white;" onclick="openLoginModal()">🔐 登录</button>
                 </div>
                 <div id="user-box" style="display: none; align-items: center; gap: 4px;">
                     <span id="current-username" style="color:#00ff8c; font-size:12px; font-weight:bold;">👤 已登录</span>
@@ -1129,12 +1127,34 @@ MOBILE_HTML_TEMPLATE = """
                 </div>
 
                 <button id="btn-sound" class="btn-sound" onclick="toggleWebSound()">🔊 网页声音</button>
+                <!-- 未登录时控制隐藏开始/停止监控与操作 -->
                 <button id="btn-monitor" class="btn-top" onclick="postAction('toggle_monitor', -1)">▶ 开始监控</button>
                 <button id="btn-grille" class="btn-top btn-grille" onclick="postAction('toggle_grille', -1)">▶ 开始操作</button>
             </div>
         </div>
 
         <div id="cards-container"></div>
+    </div>
+
+    <!-- 独立登录界面弹窗 -->
+    <div id="login-modal" class="modal-overlay">
+        <div class="modal-content" style="max-width: 320px;">
+            <div class="modal-header">
+                <span style="font-weight:bold; color:#00ff8c; font-size:14px;">🔐 用户登录</span>
+                <span class="modal-close" onclick="closeLoginModal()">✖</span>
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 10px; margin-top: 8px;">
+                <div>
+                    <label style="font-size:12px; color:#aaa; font-weight:bold; display:block; margin-bottom:4px;">账号：</label>
+                    <input type="text" id="login-user" placeholder="请输入账号" class="login-input" style="height: 32px; padding: 4px 8px;">
+                </div>
+                <div>
+                    <label style="font-size:12px; color:#aaa; font-weight:bold; display:block; margin-bottom:4px;">密码：</label>
+                    <input type="password" id="login-pass" placeholder="请输入密码" class="login-input" style="height: 32px; padding: 4px 8px;">
+                </div>
+                <button class="btn-action" style="background:#0088cc; color:white; height: 34px; margin-top: 6px; font-size: 13px;" onclick="handleLogin()">登录</button>
+            </div>
+        </div>
     </div>
 
     <!-- 用户管理模态框 -->
@@ -1182,18 +1202,34 @@ MOBILE_HTML_TEMPLATE = """
         let alarmTimer = null;
         let cachedBoxes = [];
 
+        function openLoginModal() {
+            document.getElementById('login-modal').style.display = 'flex';
+        }
+
+        function closeLoginModal() {
+            document.getElementById('login-modal').style.display = 'none';
+        }
+
         function updateLoginUI() {
             const loginBox = document.getElementById('login-box');
             const userBox = document.getElementById('user-box');
             const usernameDisplay = document.getElementById('current-username');
+            const btnMonitor = document.getElementById('btn-monitor');
+            const btnGrille = document.getElementById('btn-grille');
 
             if (isLoggedIn) {
                 if (loginBox) loginBox.style.display = 'none';
                 if (userBox) userBox.style.display = 'inline-flex';
                 if (usernameDisplay) usernameDisplay.innerText = `👤 ${currentUser}`;
+                // 登录后显示 开始监控/停止监控 和 开始操作/停止操作 按钮
+                if (btnMonitor) btnMonitor.style.display = 'inline-block';
+                if (btnGrille) btnGrille.style.display = 'inline-block';
             } else {
                 if (loginBox) loginBox.style.display = 'inline-flex';
                 if (userBox) userBox.style.display = 'none';
+                // 未登录时隐藏 开始监控/停止监控 和 开始操作/停止操作 按钮
+                if (btnMonitor) btnMonitor.style.display = 'none';
+                if (btnGrille) btnGrille.style.display = 'none';
             }
         }
 
@@ -1216,6 +1252,9 @@ MOBILE_HTML_TEMPLATE = """
                     currentUser = data.username;
                     localStorage.setItem('isLoggedIn', 'true');
                     localStorage.setItem('currentUser', currentUser);
+                    closeLoginModal();
+                    document.getElementById('login-user').value = '';
+                    document.getElementById('login-pass').value = '';
                     updateLoginUI();
                     forceReRenderCards();
                     refreshData();
@@ -2389,92 +2428,108 @@ class GlobalControlPanel(QWidget):
                     self.check_and_update_alarm_sound()
 
     def check_and_update_alarm_sound(self):
-        should_play = any(b.is_alarm and not b.is_muted for b in self.boxes)
-        if should_play:
+        has_alarm = any(b.is_alarm and not b.is_muted for b in self.boxes)
+        if has_alarm and self.monitoring:
             self.alarm_player.play()
         else:
             self.alarm_player.stop()
 
     def save_config(self):
-        data = {
-            'panel_x': self.x(),
-            'panel_y': self.y(),
+        config_data = {
+            'ocr_params': self.ocr_params,
             'interval': self.spin_interval.value(),
-            'count': self.spin_count.value(),
+            'log_count': self.spin_count.value(),
             'log_interval': self.spin_log_interval.value(),
             'grille_interval': self.spin_grille_interval.value(),
-            'grille_checked': self.chk_grille.isChecked(),
-            'web_checked': self.chk_web.isChecked(),
-            'ocr_params': self.ocr_params,
+            'chk_grille': self.chk_grille.isChecked(),
+            'chk_web': self.chk_web.isChecked(),
             'boxes': []
         }
         for b in self.boxes:
-            data['boxes'].append({
+            config_data['boxes'].append({
+                'id': b.box_id,
+                'x': b.capture_x,
+                'y': b.capture_y,
+                'w': b.capture_w,
+                'h': b.capture_h,
                 'name': b.name,
-                'x': b.capture_x, 'y': b.capture_y,
-                'w': b.capture_w, 'h': b.capture_h,
-                'lower': b.lower, 
-                'mid_val': getattr(b, 'mid_val', 50.0),
+                'lower': b.lower,
+                'mid_val': b.mid_val,
                 'upper': b.upper,
-                'decimal_places': getattr(b, 'decimal_places', 0)
+                'decimal_places': b.decimal_places
             })
-        with open(self.config_file, 'w', encoding='utf-8') as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
+        try:
+            with open(self.config_file, 'w', encoding='utf-8') as f:
+                json.dump(config_data, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            print("保存配置失败:", e)
 
     def load_config(self):
-        if not os.path.exists(self.config_file): return
+        if not os.path.exists(self.config_file):
+            return
         try:
             with open(self.config_file, 'r', encoding='utf-8') as f:
                 data = json.load(f)
 
-            if 'panel_x' in data and 'panel_y' in data:
-                self.move(data['panel_x'], data['panel_y'])
+            if 'ocr_params' in data:
+                self.ocr_params = data['ocr_params']
+            if 'interval' in data:
+                self.spin_interval.setValue(float(data['interval']))
+            if 'log_count' in data:
+                self.spin_count.setValue(int(data['log_count']))
+            if 'log_interval' in data:
+                self.spin_log_interval.setValue(float(data['log_interval']))
+            if 'grille_interval' in data:
+                self.spin_grille_interval.setValue(float(data['grille_interval']))
+            if 'chk_grille' in data:
+                self.chk_grille.setChecked(bool(data['chk_grille']))
 
-            self.spin_interval.setValue(data.get('interval', 1.0))
-            self.spin_count.setValue(data.get('count', 30))
-            self.spin_log_interval.setValue(data.get('log_interval', 1.0))
-            self.spin_grille_interval.setValue(data.get('grille_interval', 2.0))
-            self.chk_grille.setChecked(data.get('grille_checked', False))
-            self.chk_web.setChecked(data.get('web_checked', False))
-            self.ocr_params = data.get('ocr_params', {'scale': 3.0, 'clahe': 2.0, 'thresh_block': 11, 'thresh_c': 2})
+            if 'boxes' in data:
+                for b_info in data['boxes']:
+                    box = OverlayRegionWidget(
+                        box_id=b_info.get('id', len(self.boxes) + 1),
+                        x=b_info.get('x', 100),
+                        y=b_info.get('y', 100),
+                        w=b_info.get('w', 100),
+                        h=b_info.get('h', 50),
+                        name=b_info.get('name', '区域'),
+                        lower=b_info.get('lower', 0.0),
+                        mid_val=b_info.get('mid_val', 50.0),
+                        upper=b_info.get('upper', 100.0),
+                        decimal_places=b_info.get('decimal_places', 0)
+                    )
+                    box.delete_requested.connect(self._delete_box)
+                    box.alarm_cleared.connect(self.check_and_update_alarm_sound)
+                    box.mute_toggled.connect(self.check_and_update_alarm_sound)
+                    box.set_max_log_count(self.spin_count.value())
+                    box.log_interval_min = self.spin_log_interval.value()
+                    box.show()
+                    self.boxes.append(box)
 
-            for item in data.get('boxes', []):
-                box = OverlayRegionWidget(
-                    box_id=len(self.boxes)+1,
-                    x=item['x'], y=item['y'],
-                    w=item['w'], h=item['h'],
-                    name=item['name'],
-                    lower=item.get('lower', 0.0),
-                    mid_val=item.get('mid_val', 50.0),
-                    upper=item.get('upper', 100.0),
-                    decimal_places=item.get('decimal_places', 0)
-                )
-                box.delete_requested.connect(self._delete_box)
-                box.alarm_cleared.connect(self.check_and_update_alarm_sound)
-                box.mute_toggled.connect(self.check_and_update_alarm_sound)
-                box.show()
-                self.boxes.append(box)
+            if 'chk_web' in data and data['chk_web']:
+                self.chk_web.setChecked(True)
 
         except Exception as e:
-            print("读取配置文件失败:", e)
+            print("读取配置失败:", e)
 
     def close_app(self):
         self.save_config()
         self.stop_monitor()
         self.stop_grille()
-
+        if self.f12_listener:
+            self.f12_listener.stop()
         if self.web_thread:
             self.web_thread.stop()
-
-        self.f12_listener.stop()
-        self.f12_listener.wait()
-
         for b in self.boxes:
             b.close()
         self.close()
+        QApplication.quit()
+
+    def closeEvent(self, event):
+        self.close_app()
+        event.accept()
 
 
-# ==================== 10. 程序入口 ====================
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     panel = GlobalControlPanel()
