@@ -28,7 +28,7 @@ jobs:
 
     - name: 🔨 使用 PyInstaller 打包应用
       run: |
-        pyinstaller --noconfirm --onedir --windowed --name="屏幕数值监控报警" --collect-all ddddocr --add-data "警报声.mp3;." main.py
+        pyinstaller --noconfirm --onedir --windowed --name="屏幕数值监控报警" --icon="favicon.ico" --collect-all ddddocr --add-data "警报声.mp3;." --add-data "favicon.ico;." main.py
 
     - name: 🗜️ 压缩打包好的软件文件夹
       run: |
