@@ -1049,21 +1049,18 @@ MOBILE_HTML_TEMPLATE = """
         .header { display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; background: #1a1a26; border-radius: 10px; margin-bottom: 12px; border: 1px solid rgba(255,255,255,0.1); flex-wrap: wrap; gap: 8px; }
         .header-title-box { display: flex; flex-direction: column; gap: 2px; }
         .title { font-size: 15px; font-weight: bold; color: #00ff8c; }
-        .status { font-size: 12px; color: #aaa; font-weight: bold; margin-left: auto; }
+        .status { font-size: 11px; color: #aaa; font-weight: bold; margin-left: auto; }
 
-        .header-actions { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; flex-grow: 1; justify-content: flex-end; }
-        .btn-top { background: #2e9a58; color: #fff; border: none; border-radius: 6px; padding: 6px 10px; font-size: 12px; font-weight: bold; cursor: pointer; transition: background 0.2s; height: 28px; display: inline-flex; align-items: center; justify-content: center; }
+        .header-actions { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; width: 100%; }
+        .btn-top { background: #2e9a58; color: #fff; border: none; border-radius: 6px; padding: 6px 10px; font-size: 12px; font-weight: bold; cursor: pointer; transition: background 0.2s; }
         .btn-top:active { opacity: 0.8; }
         .btn-top.active { background: #b03a3a; }
         .btn-top.btn-grille { background: #0088cc; }
         .btn-top.btn-grille.active { background: #cc3333; }
-        .btn-sound { background: rgba(255,255,255,0.15); color: #00ff8c; border: 1px solid rgba(255,255,255,0.2); border-radius: 6px; padding: 6px 10px; font-size: 12px; font-weight: bold; cursor: pointer; height: 28px; display: inline-flex; align-items: center; justify-content: center; }
+        .btn-sound { background: rgba(255,255,255,0.15); color: #00ff8c; border: 1px solid rgba(255,255,255,0.2); border-radius: 6px; padding: 6px 8px; font-size: 12px; font-weight: bold; cursor: pointer; }
 
-        .btn-fold-tool { background: rgba(255,255,255,0.1); color: #00ff8c; border: 1px solid rgba(0,255,140,0.3); border-radius: 6px; padding: 6px 10px; font-size: 12px; font-weight: bold; cursor: pointer; height: 28px; display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; }
+        .btn-fold-tool { background: rgba(255,255,255,0.1); color: #00ff8c; border: 1px solid rgba(0,255,140,0.3); border-radius: 6px; padding: 6px 8px; font-size: 12px; font-weight: bold; cursor: pointer; }
         .btn-fold-tool:active { background: rgba(0,255,140,0.2); }
-
-        .btn-login { background: #0088cc; color: #ffffff; border: 1px solid #0088cc; border-radius: 6px; padding: 6px 10px; font-size: 12px; font-weight: bold; cursor: pointer; height: 28px; display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; }
-        .btn-login:active { opacity: 0.8; }
 
         .login-input { background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; color: #00ff8c; font-weight: bold; padding: 4px 6px; width: 100%; font-size: 12px; }
 
@@ -1118,20 +1115,22 @@ MOBILE_HTML_TEMPLATE = """
             <div class="header-actions">
                 <button id="btn-toggle-all" class="btn-fold-tool" onclick="toggleCollapseAll()">📂 展开</button>
 
-                <!-- 登录按钮（隐藏直列输入框，改为点击弹窗） -->
+                <!-- 登录按钮（与展开按钮同大小） -->
                 <div id="login-box" style="display: inline-flex; align-items: center; gap: 4px;">
-                    <button class="btn-login" onclick="openLoginModal()">🔐 登录</button>
+                    <button class="btn-fold-tool" style="background:#0088cc; color:white; border:none;" onclick="openLoginModal()">🔐 登录</button>
                 </div>
                 <div id="user-box" style="display: none; align-items: center; gap: 4px;">
                     <span id="current-username" style="color:#00ff8c; font-size:12px; font-weight:bold;">👤 已登录</span>
-                    <button class="btn-action" style="background:#e65100; color:white; height:28px;" onclick="openUserMgmtModal()">⚙️ 用户管理</button>
-                    <button class="btn-action" style="background:#555; color:white; height:28px;" onclick="handleLogout()">🚪 退出</button>
+                    <button class="btn-action" style="background:#e65100; color:white;" onclick="openUserMgmtModal()">⚙️ 用户管理</button>
+                    <button class="btn-action" style="background:#555; color:white;" onclick="handleLogout()">🚪 退出</button>
                 </div>
 
                 <button id="btn-sound" class="btn-sound" onclick="toggleWebSound()">🔊 声音</button>
                 <!-- 未登录时控制隐藏开始/停止监控与操作 -->
                 <button id="btn-monitor" class="btn-top" onclick="postAction('toggle_monitor', -1)">▶ 开始监控</button>
                 <button id="btn-grille" class="btn-top btn-grille" onclick="postAction('toggle_grille', -1)">▶ 开始操作</button>
+
+                <!-- 时间显示在右侧 -->
                 <div id="status" class="status">初始化...</div>
             </div>
         </div>
@@ -1224,13 +1223,11 @@ MOBILE_HTML_TEMPLATE = """
                 if (loginBox) loginBox.style.display = 'none';
                 if (userBox) userBox.style.display = 'inline-flex';
                 if (usernameDisplay) usernameDisplay.innerText = `👤 ${currentUser}`;
-                // 登录后显示 开始监控/停止监控 和 开始操作/停止操作 按钮
                 if (btnMonitor) btnMonitor.style.display = 'inline-block';
                 if (btnGrille) btnGrille.style.display = 'inline-block';
             } else {
                 if (loginBox) loginBox.style.display = 'inline-flex';
                 if (userBox) userBox.style.display = 'none';
-                // 未登录时隐藏 开始监控/停止监控 和 开始操作/停止操作 按钮
                 if (btnMonitor) btnMonitor.style.display = 'none';
                 if (btnGrille) btnGrille.style.display = 'none';
             }
@@ -1477,6 +1474,62 @@ MOBILE_HTML_TEMPLATE = """
             }
         }
 
+        // 计算数值对比（删除 2H 前字，对调颜色：上涨红，下降绿）
+        function formatTwoHourCompare(b, currentTimeStr) {
+            const currVal = parseFloat(b.value);
+            if (isNaN(currVal) || !b.logs || b.logs.length === 0 || !currentTimeStr) {
+                return '<span style="font-size:11px; color:#666; margin-right:4px;">(--)</span>';
+            }
+
+            function timeToSec(tStr) {
+                const p = tStr.split(':').map(Number);
+                return (p[0] || 0) * 3600 + (p[1] || 0) * 60 + (p[2] || 0);
+            }
+
+            const nowSec = timeToSec(currentTimeStr);
+            let bestVal = null;
+            let minErr = Infinity;
+
+            for (let log of b.logs) {
+                const m = log.match(/\[(\d{2}:\d{2}:\d{2})\]\s*(-?\d+(?:\.\d+)?)/);
+                if (m) {
+                    const logSec = timeToSec(m[1]);
+                    const logVal = parseFloat(m[2]);
+                    if (isNaN(logVal)) continue;
+
+                    let elapsed = nowSec - logSec;
+                    if (elapsed < 0) elapsed += 86400; // 跨夜转换
+
+                    const err = Math.abs(elapsed - 7200);
+                    if (err < minErr && elapsed >= 900) {
+                        minErr = err;
+                        bestVal = logVal;
+                    }
+                }
+            }
+
+            if (bestVal === null) {
+                return '<span style="font-size:11px; color:#666; margin-right:4px;">(--)</span>';
+            }
+
+            const diff = currVal - bestVal;
+            let diffStr = (diff >= 0 ? '+' : '') + diff.toFixed(2);
+            let color = '#888';
+            let arrow = '→';
+
+            if (diff > 0) {
+                color = '#ff4d4d'; // 上涨红色
+                arrow = '↑';
+            } else if (diff < 0) {
+                color = '#00ff8c'; // 下降绿色
+                arrow = '↓';
+            }
+
+            return `<span style="font-size:11px; color:#aaa; margin-right:6px;" title="历史数值对比 (${bestVal.toFixed(2)})">` +
+                   `${bestVal.toFixed(2)} <span style="color:${color}; font-weight:bold;">(${arrow}${diffStr})</span>` +
+                   `</span>`;
+        }
+
         function renderCardDOM(cardEl, b, isCollapsed, isWarning, currentTimeStr) {
             const currentFoldState = cardEl.getAttribute('data-collapsed');
             const stateChanged = (currentFoldState !== String(isCollapsed));
@@ -1488,6 +1541,8 @@ MOBILE_HTML_TEMPLATE = """
                 valColor = '#ffaa00';
             }
 
+            const compareHtml = formatTwoHourCompare(b, currentTimeStr);
+
             if (stateChanged) {
                 cardEl.setAttribute('data-collapsed', String(isCollapsed));
                 
@@ -1496,6 +1551,7 @@ MOBILE_HTML_TEMPLATE = """
                         <div class="card-header" onclick="toggleFold(${b.id})" style="cursor:pointer; padding: 2px 0;">
                             <span class="card-title">${b.name}</span>
                             <div style="display: flex; align-items: center; gap: 4px;">
+                                <span id="collapsed-diff-${b.id}">${compareHtml}</span>
                                 <span id="collapsed-val-${b.id}" style="font-size: 15px; font-weight: bold; font-family: monospace; color: ${valColor};">${b.value}</span>
                                 <span style="font-size:12px; color:#888;">▶</span>
                             </div>
@@ -1541,6 +1597,10 @@ MOBILE_HTML_TEMPLATE = """
                 if (cValEl) {
                     cValEl.innerText = b.value;
                     cValEl.style.color = valColor;
+                }
+                const cDiffEl = document.getElementById(`collapsed-diff-${b.id}`);
+                if (cDiffEl) {
+                    cDiffEl.innerHTML = compareHtml;
                 }
             } else {
                 const actionBtns = document.getElementById(`action-btns-${b.id}`);
@@ -1607,7 +1667,7 @@ MOBILE_HTML_TEMPLATE = """
                 const data = await res.json();
 
                 const statusEl = document.getElementById('status');
-                statusEl.innerText = data.time;
+                if (statusEl) statusEl.innerText = data.time;
 
                 const btnMonitor = document.getElementById('btn-monitor');
                 if (data.monitoring) {
@@ -1642,7 +1702,6 @@ MOBILE_HTML_TEMPLATE = """
                 let hasAnyWebAlarm = false;
 
                 data.boxes.forEach(b => {
-                    // 默认首次加载全部收起
                     if (collapsedMap[b.id] === undefined) {
                         collapsedMap[b.id] = true;
                     }
@@ -2409,51 +2468,46 @@ class GlobalControlPanel(QWidget):
             return
         try:
             with open(self.config_file, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-            
-            if 'ocr_params' in data:
-                self.ocr_params = data['ocr_params']
-            if 'interval' in data:
-                self.spin_interval.setValue(float(data['interval']))
-            if 'log_count' in data:
-                self.spin_count.setValue(int(data['log_count']))
-            if 'log_interval' in data:
-                self.spin_log_interval.setValue(float(data['log_interval']))
-            if 'grille_interval' in data:
-                self.spin_grille_interval.setValue(float(data['grille_interval']))
-            if 'chk_grille' in data:
-                self.chk_grille.setChecked(bool(data['chk_grille']))
-            if 'chk_web' in data:
-                self.chk_web.setChecked(bool(data['chk_web']))
+                config_data = json.load(f)
 
-            if 'boxes' in data:
-                for b_data in data['boxes']:
-                    box = OverlayRegionWidget(
-                        b_data.get('id', len(self.boxes)+1),
-                        b_data.get('x', 100),
-                        b_data.get('y', 100),
-                        b_data.get('w', 100),
-                        b_data.get('h', 50),
-                        name=b_data.get('name', "区域"),
-                        lower=b_data.get('lower', 0.0),
-                        mid_val=b_data.get('mid_val', 50.0),
-                        upper=b_data.get('upper', 100.0),
-                        decimal_places=b_data.get('decimal_places', 0)
-                    )
-                    box.is_muted = b_data.get('is_muted', False)
-                    btn_txt = "🔇" if box.is_muted else "🔊"
-                    box.btn_mute.setText(btn_txt)
-                    
-                    box.delete_requested.connect(self._delete_box)
-                    box.alarm_cleared.connect(self.check_and_update_alarm_sound)
-                    box.mute_toggled.connect(self.check_and_update_alarm_sound)
-                    
-                    box.set_panel_hidden(self.boxes_panel_hidden)
-                    box.set_edit_mode(self.is_editing)
-                    box.set_max_log_count(self.spin_count.value())
-                    box.log_interval_min = self.spin_log_interval.value()
-                    box.show()
-                    self.boxes.append(box)
+            self.ocr_params = config_data.get('ocr_params', self.ocr_params)
+            self.spin_interval.setValue(config_data.get('interval', 1.0))
+            self.spin_count.setValue(config_data.get('log_count', 30))
+            self.spin_log_interval.setValue(config_data.get('log_interval', 1.0))
+            self.spin_grille_interval.setValue(config_data.get('grille_interval', 2.0))
+            self.chk_grille.setChecked(config_data.get('chk_grille', False))
+            self.chk_web.setChecked(config_data.get('chk_web', False))
+
+            for b in self.boxes:
+                b.close()
+            self.boxes.clear()
+
+            for b_info in config_data.get('boxes', []):
+                box = OverlayRegionWidget(
+                    box_id=b_info.get('id', len(self.boxes) + 1),
+                    x=b_info.get('x', 100),
+                    y=b_info.get('y', 100),
+                    w=b_info.get('w', 100),
+                    h=b_info.get('h', 40),
+                    name=b_info.get('name', "区域"),
+                    lower=b_info.get('lower', 0.0),
+                    mid_val=b_info.get('mid_val', 50.0),
+                    upper=b_info.get('upper', 100.0),
+                    decimal_places=b_info.get('decimal_places', 0)
+                )
+                if b_info.get('is_muted', False):
+                    box._toggle_mute()
+
+                box.delete_requested.connect(self._delete_box)
+                box.alarm_cleared.connect(self.check_and_update_alarm_sound)
+                box.mute_toggled.connect(self.check_and_update_alarm_sound)
+
+                box.set_panel_hidden(self.boxes_panel_hidden)
+                box.set_edit_mode(self.is_editing)
+                box.set_max_log_count(self.spin_count.value())
+                box.log_interval_min = self.spin_log_interval.value()
+                box.show()
+                self.boxes.append(box)
         except Exception as e:
             print("加载配置失败:", e)
 
@@ -2462,11 +2516,9 @@ class GlobalControlPanel(QWidget):
         self.stop_grille()
         if self.web_thread:
             self.web_thread.stop()
-        if self.f12_listener:
-            self.f12_listener.stop()
-            self.f12_listener.wait()
-        for b in self.boxes:
-            b.close()
+        self.f12_listener.stop()
+        for box in self.boxes:
+            box.close()
         self.close()
 
 
