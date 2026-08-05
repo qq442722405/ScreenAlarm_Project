@@ -216,6 +216,140 @@ class FineGrilleThread(QThread):
             if not self._safe_sleep(wait_sec): break
 
 
+# ==================== 3.5 自定义点击脚本执行线程 ====================
+class ScriptRunnerThread(QThread):
+    finished_signal = Signal()
+
+    def __init__(self, targets, delay, parent=None):
+        super().__init__(parent)
+        self.targets = targets
+        self.delay = max(0.01, float(delay))
+
+    def run(self):
+        user32 = ctypes.windll.user32
+        for t in self.targets:
+            x, y = int(t['x']), int(t['y'])
+            user32.SetCursorPos(x, y)
+            time.sleep(0.02)
+            user32.mouse_event(2, 0, 0, 0, 0) # Down
+            user32.mouse_event(4, 0, 0, 0, 0) # Up
+            time.sleep(self.delay)
+        self.finished_signal.emit()
+
+
+# ==================== 3.6 点击脚本编辑弹窗 ====================
+class ScriptEditDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("➕ 添加点击脚本")
+        self.setWindowFlags(Qt.WindowStaysOnTopHint | Qt.Tool)
+        self.setFixedSize(320, 380)
+        self.setStyleSheet("""
+            QDialog { background-color: #1a1a26; color: white; }
+            QLabel { color: #e0e0e0; font-size: 11px; font-weight: bold; }
+            QLineEdit, QDoubleSpinBox {
+                background-color: rgba(26, 26, 38, 0.8);
+                color: #00ff8c;
+                border: 1px solid rgba(255, 255, 255, 0.2);
+                border-radius: 4px;
+                padding: 2px 4px;
+                font-weight: bold;
+            }
+            QPushButton {
+                background-color: rgba(43, 45, 66, 0.8);
+                color: white;
+                border: 1px solid rgba(255, 255, 255, 0.2);
+                border-radius: 4px;
+                padding: 4px 8px;
+                font-weight: bold;
+                font-size: 11px;
+            }
+            QPushButton:hover { background-color: rgba(61, 64, 91, 0.9); }
+        """)
+
+        self.targets = []
+
+        layout = QVBoxLayout(self)
+
+        form = QFormLayout()
+        self.edit_name = QLineEdit()
+        self.edit_name.setPlaceholderText("例如: 自动连点脚本1")
+
+        self.spin_delay = CleanDoubleSpinBox()
+        self.spin_delay.setRange(0.01, 60.0)
+        self.spin_delay.setValue(0.5)
+        self.spin_delay.setSingleStep(0.1)
+
+        form.addRow("脚本名称:", self.edit_name)
+        form.addRow("统一延迟(秒):", self.spin_delay)
+        layout.addLayout(form)
+
+        layout.addWidget(QLabel("🎯 点击目标列表:"))
+
+        self.list_targets = QListWidget()
+        self.list_targets.setStyleSheet("background: rgba(0,0,0,0.5); color: #00ff8c; font-size: 11px; border: 1px solid rgba(255,255,255,0.1); border-radius: 4px;")
+        layout.addWidget(self.list_targets)
+
+        btn_box = QHBoxLayout()
+        self.btn_pick = QPushButton("🎯 抓取目标")
+        self.btn_pick.setStyleSheet("background-color: #0088cc; color: white;")
+        self.btn_pick.clicked.connect(self._pick_target)
+
+        self.btn_del_target = QPushButton("🗑 删除目标")
+        self.btn_del_target.clicked.connect(self._del_target)
+
+        btn_box.addWidget(self.btn_pick)
+        btn_box.addWidget(self.btn_del_target)
+        layout.addLayout(btn_box)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(self._on_accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def _pick_target(self):
+        self.hide()
+        time.sleep(0.2)
+        self.picker = CoordinatePicker()
+        def on_picked(x, y, w, h):
+            self.show()
+            if w == 0 and h == 0 and x == 0 and y == 0:
+                return
+            cx = x + w // 2 if w > 0 else x
+            cy = y + h // 2 if h > 0 else y
+            self.targets.append({"x": cx, "y": cy})
+            self._update_list()
+
+        self.picker.coord_selected.connect(on_picked)
+        self.picker.showFullScreen()
+
+    def _del_target(self):
+        row = self.list_targets.currentRow()
+        if 0 <= row < len(self.targets):
+            self.targets.pop(row)
+            self._update_list()
+
+    def _update_list(self):
+        self.list_targets.clear()
+        for i, t in enumerate(self.targets):
+            self.list_targets.addItem(f"目标 {i+1}: (X={t['x']}, Y={t['y']})")
+
+    def _on_accept(self):
+        if not self.edit_name.text().strip():
+            return
+        if not self.targets:
+            return
+        self.accept()
+
+    def get_data(self):
+        return {
+            "id": int(time.time() * 1000) % 1000000,
+            "name": self.edit_name.text().strip(),
+            "delay": self.spin_delay.value(),
+            "targets": self.targets
+        }
+
+
 # ==================== 4. OCR 识别参数调整对话框 ====================
 class OCRAdjustDialog(QDialog):
     def __init__(self, params, reader=None, parent=None):
@@ -823,7 +957,7 @@ class CoordinatePicker(QWidget):
         self.start_pos = QPoint()
         self.end_pos = QPoint()
 
-        self.label = QLabel("🖱 点击左上角确定起点", self)
+        self.label = QLabel("🖱 点击左上角确定起点 (也可直接单击抓取坐标)", self)
         self.label.setStyleSheet("color: white; background: rgba(0,0,0,220); padding: 10px 20px; border-radius: 8px; font-size: 14px; font-weight: bold;")
         self.label.adjustSize()
         self.label.move((self.width() - self.label.width()) // 2, self.height() - 80)
@@ -854,9 +988,8 @@ class CoordinatePicker(QWidget):
                 y = min(self.start_pos.y(), self.end_pos.y())
                 w = abs(self.end_pos.x() - self.start_pos.x())
                 h = abs(self.end_pos.y() - self.start_pos.y())
-                if w > 0 and h > 0:
-                    self.coord_selected.emit(x, y, w, h)
-                    self.close()
+                self.coord_selected.emit(x, y, w, h)
+                self.close()
 
     def mouseMoveEvent(self, event):
         self.end_pos = event.position().toPoint()
@@ -1049,16 +1182,17 @@ MOBILE_HTML_TEMPLATE = """
         .container { max-width: 600px; margin: 0 auto; width: 100%; }
 
         .header { display: flex; flex-direction: column; padding: 10px 14px; background: #1a1a26; border-radius: 10px; margin-bottom: 12px; border: 1px solid rgba(255,255,255,0.1); gap: 8px; }
-        .header-top-row { display: flex; justify-content: space-between; align-items: center; width: 100%; }
-        .title { font-size: 15px; font-weight: bold; color: #00ff8c; }
+        .header-top-row { display: flex; justify-content: space-between; align-items: center; width: 100%; user-select: none; -webkit-user-select: none; cursor: pointer; }
+        .title { font-size: 15px; font-weight: bold; color: #00ff8c; display: flex; align-items: center; gap: 6px; }
         .status { font-size: 11px; color: #aaa; font-weight: bold; }
 
-        .header-actions { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; width: 100%; }
+        .header-actions { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; width: 100%; margin-top: 4px; }
         .btn-top { background: #2e9a58; color: #fff; border: none; border-radius: 6px; padding: 6px 10px; font-size: 12px; font-weight: bold; cursor: pointer; transition: background 0.2s; }
         .btn-top:active { opacity: 0.8; }
         .btn-top.active { background: #b03a3a; }
         .btn-top.btn-grille { background: #0088cc; }
         .btn-top.btn-grille.active { background: #cc3333; }
+        .btn-top.btn-script { background: #8e44ad; }
         .btn-sound { background: rgba(255,255,255,0.15); color: #00ff8c; border: 1px solid rgba(255,255,255,0.2); border-radius: 6px; padding: 6px 8px; font-size: 12px; font-weight: bold; cursor: pointer; }
 
         .btn-fold-tool { background: rgba(255,255,255,0.1); color: #00ff8c; border: 1px solid rgba(0,255,140,0.3); border-radius: 6px; padding: 6px 8px; font-size: 12px; font-weight: bold; cursor: pointer; }
@@ -1085,8 +1219,13 @@ MOBILE_HTML_TEMPLATE = """
         .card.warning { border: 2px solid #ffaa00; background: rgba(255, 170, 0, 0.08); }
 
         .card-header { display: flex; justify-content: space-between; align-items: center; font-size: 13px; color: #888; font-weight: bold; }
-        .card-title-box { display: flex; align-items: center; gap: 8px; cursor: pointer; flex-grow: 1; }
-        .card-title { color: #ffffff; font-size: 15px; font-weight: bold; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .card-title-box { display: flex; align-items: center; gap: 4px; cursor: pointer; flex-grow: 1; user-select: none; -webkit-user-select: none; }
+        .card-title { color: #ffffff; font-size: 15px; font-weight: bold; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; user-select: none; -webkit-user-select: none; }
+
+        /* 微妙的列表上下移动按钮 */
+        .subtle-move-btn { color: rgba(255, 255, 255, 0.25); font-size: 10px; cursor: pointer; padding: 0 3px; font-weight: normal; user-select: none; -webkit-user-select: none; }
+        .subtle-move-btn:hover { color: rgba(255, 255, 255, 0.8); }
+        .subtle-move-btn:active { color: #00ff8c; }
 
         .btn-action { color: #fff; border-radius: 6px; padding: 4px 8px; font-size: 11px; font-weight: bold; cursor: pointer; border: none; }
         .btn-action:active { opacity: 0.8; }
@@ -1122,14 +1261,22 @@ MOBILE_HTML_TEMPLATE = """
 <body>
     <div class="container">
         <div class="header">
-            <!-- 统一顶部栏：左侧标题，右侧时间显示 -->
-            <div class="header-top-row">
-                <div class="title">📱 中控数据面板</div>
-                <div id="status" class="status">初始化...</div>
+            <!-- 统一顶部栏：点击整行可展开/收起面板 -->
+            <div class="header-top-row" onclick="toggleMainHeaderCollapse()">
+                <div class="title">
+                    📱 中控数据面板
+                    <span id="header-arrow" style="font-size: 12px; color: #888;">▶</span>
+                </div>
+                <div id="status" class="status" style="display: none;">初始化...</div>
             </div>
-            <div class="header-actions">
+
+            <!-- 操作按钮区域（默认隐藏） -->
+            <div id="header-actions" class="header-actions" style="display: none;">
                 <button id="btn-toggle-all" class="btn-fold-tool" onclick="toggleCollapseAll()">📂 展开</button>
-                <button id="btn-layout" class="btn-fold-tool" onclick="toggleLayoutView()">🔲 方块视图</button>
+                <button id="btn-layout" class="btn-fold-tool" onclick="toggleLayoutView()">🔲 视图切换</button>
+
+                <!-- 登录后显示的点击脚本按钮容器 -->
+                <div id="script-buttons-container" style="display: inline-flex; gap: 6px; flex-wrap: wrap;"></div>
 
                 <!-- 登录按钮 -->
                 <div id="login-box" style="display: inline-flex; align-items: center; gap: 4px;">
@@ -1206,6 +1353,7 @@ MOBILE_HTML_TEMPLATE = """
     <script>
         const collapsedMap = {};
         let isAllCollapsed = true;
+        let isHeaderCollapsed = true; // 默认收起主控制面板
         let isLoggedIn = localStorage.getItem('isLoggedIn') === 'true';
         let currentUser = localStorage.getItem('currentUser') || '';
         let lastLoggedInState = null;
@@ -1216,6 +1364,26 @@ MOBILE_HTML_TEMPLATE = """
         let isGridView = localStorage.getItem('isGridView') === 'true';
         let customBoxOrder = JSON.parse(localStorage.getItem('customBoxOrder') || '[]');
         let draggedItem = null;
+
+        function toggleMainHeaderCollapse() {
+            isHeaderCollapsed = !isHeaderCollapsed;
+            applyHeaderCollapse();
+        }
+
+        function applyHeaderCollapse() {
+            const actions = document.getElementById('header-actions');
+            const status = document.getElementById('status');
+            const arrow = document.getElementById('header-arrow');
+            if (isHeaderCollapsed) {
+                if (actions) actions.style.display = 'none';
+                if (status) status.style.display = 'none';
+                if (arrow) arrow.innerText = '▶';
+            } else {
+                if (actions) actions.style.display = 'flex';
+                if (status) status.style.display = 'block';
+                if (arrow) arrow.innerText = '▼';
+            }
+        }
 
         function openLoginModal() {
             document.getElementById('login-modal').style.display = 'flex';
@@ -1257,12 +1425,40 @@ MOBILE_HTML_TEMPLATE = """
             const btnLayout = document.getElementById('btn-layout');
             if (isGridView) {
                 container.className = 'grid-view';
-                btnLayout.innerText = '☰ 长条视图';
             } else {
                 container.className = 'list-view';
-                btnLayout.innerText = '🔲 方块视图';
             }
+            if (btnLayout) btnLayout.innerText = '🔲 视图切换';
             refreshData();
+        }
+
+        /* 微妙的上下移动函数 (解决手机端无法拖拽) */
+        function moveBoxUp(boxId) {
+            if (!customBoxOrder || customBoxOrder.length === 0) {
+                customBoxOrder = cachedBoxes.map(b => b.id);
+            }
+            let idx = customBoxOrder.indexOf(boxId);
+            if (idx > 0) {
+                let temp = customBoxOrder[idx];
+                customBoxOrder[idx] = customBoxOrder[idx - 1];
+                customBoxOrder[idx - 1] = temp;
+                localStorage.setItem('customBoxOrder', JSON.stringify(customBoxOrder));
+                refreshData();
+            }
+        }
+
+        function moveBoxDown(boxId) {
+            if (!customBoxOrder || customBoxOrder.length === 0) {
+                customBoxOrder = cachedBoxes.map(b => b.id);
+            }
+            let idx = customBoxOrder.indexOf(boxId);
+            if (idx >= 0 && idx < customBoxOrder.length - 1) {
+                let temp = customBoxOrder[idx];
+                customBoxOrder[idx] = customBoxOrder[idx + 1];
+                customBoxOrder[idx + 1] = temp;
+                localStorage.setItem('customBoxOrder', JSON.stringify(customBoxOrder));
+                refreshData();
+            }
         }
 
         async function handleLogin() {
@@ -1651,9 +1847,13 @@ MOBILE_HTML_TEMPLATE = """
                     return;
                 } else if (isCollapsed) {
                     cardEl.innerHTML = `
-                        <div class="card-header" onclick="toggleFold(${b.id})" style="cursor:pointer; padding: 2px 0;">
-                            <span class="card-title">${b.name}</span>
-                            <div style="display: flex; align-items: center; gap: 4px;">
+                        <div class="card-header" style="padding: 2px 0;">
+                            <div class="card-title-box">
+                                <span class="card-title" onclick="toggleFold(${b.id})">${b.name}</span>
+                                <span class="subtle-move-btn" onclick="event.stopPropagation(); moveBoxUp(${b.id})" title="上移">▲</span>
+                                <span class="subtle-move-btn" onclick="event.stopPropagation(); moveBoxDown(${b.id})" title="下移">▼</span>
+                            </div>
+                            <div style="display: flex; align-items: center; gap: 4px; cursor:pointer;" onclick="toggleFold(${b.id})">
                                 <span id="collapsed-diff-${b.id}">${compareHtml}</span>
                                 <span id="collapsed-val-${b.id}" style="font-size: 15px; font-weight: bold; font-family: monospace; color: ${valColor};">${b.value}</span>
                                 <span style="font-size:12px; color:#888;">▶</span>
@@ -1668,9 +1868,11 @@ MOBILE_HTML_TEMPLATE = """
 
                     cardEl.innerHTML = `
                         <div class="card-header">
-                            <div class="card-title-box" onclick="toggleFold(${b.id})">
-                                <span class="card-title">${b.name}</span>
-                                <span style="font-size:12px; color:#888;">▼</span>
+                            <div class="card-title-box">
+                                <span class="card-title" onclick="toggleFold(${b.id})">${b.name}</span>
+                                <span class="subtle-move-btn" onclick="event.stopPropagation(); moveBoxUp(${b.id})" title="上移">▲</span>
+                                <span class="subtle-move-btn" onclick="event.stopPropagation(); moveBoxDown(${b.id})" title="下移">▼</span>
+                                <span style="font-size:12px; color:#888; cursor:pointer;" onclick="toggleFold(${b.id})">▼</span>
                             </div>
                             <div style="display: flex; gap: 6px; align-items: center;" id="action-btns-${b.id}">
                             </div>
@@ -1776,6 +1978,7 @@ MOBILE_HTML_TEMPLATE = """
         async function refreshData() {
             try {
                 updateLoginUI();
+                applyHeaderCollapse();
 
                 if (lastLoggedInState !== isLoggedIn) {
                     lastLoggedInState = isLoggedIn;
@@ -1807,6 +2010,18 @@ MOBILE_HTML_TEMPLATE = """
                 } else {
                     btnGrille.className = 'btn-top btn-grille';
                     btnGrille.innerText = '▶ 开始操作';
+                }
+
+                // 渲染登录后显示的脚本按钮
+                const scriptContainer = document.getElementById('script-buttons-container');
+                if (scriptContainer) {
+                    if (isLoggedIn && data.scripts && data.scripts.length > 0) {
+                        scriptContainer.innerHTML = data.scripts.map(s => 
+                            `<button class="btn-top btn-script" onclick="postAction('run_script', -1, {script_id: ${s.id}})">▶ ${s.name}</button>`
+                        ).join('');
+                    } else {
+                        scriptContainer.innerHTML = '';
+                    }
                 }
 
                 const container = document.getElementById('cards-container');
@@ -1983,13 +2198,16 @@ class WebServerThread(QThread):
 
             grille_running = bool(self.main_panel.grille_thread and self.main_panel.grille_thread.isRunning())
 
+            scripts_data = [{'id': s['id'], 'name': s['name']} for s in getattr(self.main_panel, 'custom_scripts', [])]
+
             return jsonify({
                 'monitoring': self.main_panel.monitoring,
                 'monitor_cd': getattr(self.main_panel, 'curr_monitor_cd', 0.0),
                 'grille_running': grille_running,
                 'grille_cd': getattr(self.main_panel, 'curr_grille_cd', 0.0),
                 'time': datetime.now().strftime("%H:%M:%S"),
-                'boxes': boxes_data
+                'boxes': boxes_data,
+                'scripts': scripts_data
             })
 
         @app.route('/api/action', methods=['POST'])
@@ -2027,6 +2245,9 @@ class GlobalControlPanel(QWidget):
         self.setAttribute(Qt.WA_TranslucentBackground, True)
 
         self.boxes = []
+        self.custom_scripts = []
+        self.active_script_threads = []
+
         self.monitoring = False
         self.is_editing = False
         self.is_collapsed = False
@@ -2055,7 +2276,7 @@ class GlobalControlPanel(QWidget):
         main_layout.setContentsMargins(6, 6, 6, 6)
         main_layout.setSpacing(6)
 
-        self.setMaximumWidth(520)
+        self.setMaximumWidth(580)
 
         self.setStyleSheet("""
             QWidget { border-radius: 6px; }
@@ -2207,7 +2428,7 @@ class GlobalControlPanel(QWidget):
 
         main_layout.addWidget(self.row2_card)
 
-        # ---------- 第 3 排：Web 服务扩展 ----------
+        # ---------- 第 3 排：Web 服务扩展与自定义脚本栏 ----------
         self.grille_card = QFrame()
         self.grille_card.setStyleSheet("QFrame { background-color: rgba(0, 0, 0, 0.8); border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 6px; }")
         row3_layout = QHBoxLayout(self.grille_card)
@@ -2232,7 +2453,7 @@ class GlobalControlPanel(QWidget):
         self.lbl_grille_countdown.setStyleSheet("color: #ffcc00; font-weight: bold; padding-left: 4px;")
         row3_layout.addWidget(self.lbl_grille_countdown)
 
-        row3_layout.addSpacing(10)
+        row3_layout.addSpacing(6)
 
         self.chk_web = QCheckBox("🌐 网页服务")
         self.chk_web.toggled.connect(self._toggle_web_service)
@@ -2241,6 +2462,20 @@ class GlobalControlPanel(QWidget):
         self.lbl_web_url = QLabel("手机访问: 未开启")
         self.lbl_web_url.setStyleSheet("color: #00ff8c; font-weight: bold; font-size: 11px;")
         row3_layout.addWidget(self.lbl_web_url)
+
+        # 脚本按键容器与添加按键
+        self.widget_scripts_container = QWidget()
+        self.layout_scripts_inner = QHBoxLayout(self.widget_scripts_container)
+        self.layout_scripts_inner.setContentsMargins(0, 0, 0, 0)
+        self.layout_scripts_inner.setSpacing(4)
+
+        self.btn_add_script = QPushButton("➕ 添加")
+        self.btn_add_script.setFixedHeight(24)
+        self.btn_add_script.setStyleSheet("background-color: #0088cc; color: white; font-weight: bold;")
+        self.btn_add_script.clicked.connect(self._open_add_script_dialog)
+        self.layout_scripts_inner.addWidget(self.btn_add_script)
+
+        row3_layout.addWidget(self.widget_scripts_container)
 
         row3_layout.addStretch()
         main_layout.addWidget(self.grille_card)
@@ -2251,6 +2486,38 @@ class GlobalControlPanel(QWidget):
 
         self._init_ocr()
         self.load_config()
+
+    def _open_add_script_dialog(self):
+        dlg = ScriptEditDialog(self)
+        if dlg.exec() == QDialog.Accepted:
+            data = dlg.get_data()
+            self.custom_scripts.append(data)
+            self.save_config()
+            self.refresh_script_buttons()
+
+    def refresh_script_buttons(self):
+        # 清除现有动态生成的脚本按键
+        while self.layout_scripts_inner.count() > 1:
+            item = self.layout_scripts_inner.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        for script in self.custom_scripts:
+            btn = QPushButton(f"▶ {script['name']}")
+            btn.setFixedHeight(24)
+            btn.setStyleSheet("background-color: #8e44ad; color: white; font-weight: bold;")
+            s_id = script['id']
+            btn.clicked.connect(lambda checked=False, id_val=s_id: self.run_custom_script(id_val))
+            self.layout_scripts_inner.insertWidget(self.layout_scripts_inner.count() - 1, btn)
+
+    def run_custom_script(self, script_id):
+        script = next((s for s in self.custom_scripts if s['id'] == script_id), None)
+        if not script:
+            return
+        runner = ScriptRunnerThread(script['targets'], script['delay'], parent=self)
+        self.active_script_threads.append(runner)
+        runner.finished_signal.connect(lambda: self.active_script_threads.remove(runner) if runner in self.active_script_threads else None)
+        runner.start()
 
     def load_users(self):
         """读取用户字典，默认账户 admin / admin"""
@@ -2272,12 +2539,93 @@ class GlobalControlPanel(QWidget):
         except Exception as e:
             print("保存用户配置失败:", e)
 
+    def load_config(self):
+        if os.path.exists(self.config_file):
+            try:
+                with open(self.config_file, "r", encoding="utf-8") as f:
+                    cfg = json.load(f)
+                    self.ocr_params = cfg.get("ocr_params", self.ocr_params)
+                    self.spin_interval.setValue(cfg.get("interval", 1.0))
+                    self.spin_count.setValue(cfg.get("max_log_count", 30))
+                    self.spin_log_interval.setValue(cfg.get("log_interval", 1.0))
+                    self.spin_grille_interval.setValue(cfg.get("grille_interval", 2.0))
+                    self.custom_scripts = cfg.get("custom_scripts", [])
+                    boxes_data = cfg.get("boxes", [])
+                    for b in boxes_data:
+                        self.add_box(
+                            b.get("x", 100), b.get("y", 100),
+                            b.get("w", 100), b.get("h", 40),
+                            box_id=b.get("id"),
+                            name=b.get("name"),
+                            lower=b.get("lower", 0.0),
+                            mid_val=b.get("mid_val", 50.0),
+                            upper=b.get("upper", 100.0),
+                            decimal_places=b.get("decimal_places", 0)
+                        )
+            except Exception as e:
+                print("加载配置文件失败:", e)
+        self.refresh_script_buttons()
+
+    def save_config(self):
+        try:
+            boxes_data = []
+            for b in self.boxes:
+                boxes_data.append({
+                    "id": b.box_id,
+                    "name": b.name,
+                    "x": b.capture_x,
+                    "y": b.capture_y,
+                    "w": b.capture_w,
+                    "h": b.capture_h,
+                    "lower": b.lower,
+                    "mid_val": getattr(b, 'mid_val', 50.0),
+                    "upper": b.upper,
+                    "decimal_places": getattr(b, 'decimal_places', 0)
+                })
+            cfg = {
+                "ocr_params": self.ocr_params,
+                "interval": self.spin_interval.value(),
+                "max_log_count": self.spin_count.value(),
+                "log_interval": self.spin_log_interval.value(),
+                "grille_interval": self.spin_grille_interval.value(),
+                "custom_scripts": self.custom_scripts,
+                "boxes": boxes_data
+            }
+            with open(self.config_file, "w", encoding="utf-8") as f:
+                json.dump(cfg, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            print("保存配置文件失败:", e)
+
+    def close_app(self):
+        self.save_config()
+        if self.f12_listener:
+            self.f12_listener.stop()
+        if self.monitor_thread:
+            self.monitor_thread.stop()
+        if self.grille_thread:
+            self.grille_thread.stop()
+        if self.web_thread:
+            self.web_thread.stop()
+        self.alarm_player.stop()
+        for b in self.boxes:
+            b.close()
+        self.close()
+
+    def closeEvent(self, event):
+        self.close_app()
+        event.accept()
+
     def _handle_web_action(self, action, box_id, data):
         if action == 'toggle_monitor':
             self._toggle_monitor()
             return
         if action == 'toggle_grille':
             self._toggle_grille()
+            return
+        if action == 'run_script':
+            s_id = data.get('script_id')
+            if s_id is not None:
+                self.run_custom_script(int(s_id))
             return
 
         target_box = next((b for b in self.boxes if b.box_id == box_id), None)
@@ -2466,40 +2814,25 @@ class GlobalControlPanel(QWidget):
 
         self._update_button_styles()
 
-    def _on_monitor_cd_tick(self, rem_sec):
-        self.curr_monitor_cd = rem_sec
-
     def _toggle_grille(self):
         if self.grille_thread and self.grille_thread.isRunning():
             self.grille_thread.stop()
             self.grille_thread = None
-            self.lbl_grille_countdown.setText("⏳ --")
-            self.curr_grille_cd = 0.0
         else:
-            self.grille_thread = FineGrilleThread(cycle_interval_min=self.spin_grille_interval.value())
+            self.grille_thread = FineGrilleThread(self.spin_grille_interval.value())
             self.grille_thread.countdown_tick.connect(self._on_grille_cd_tick)
             self.grille_thread.start()
-
         self._update_button_styles()
 
-    def _on_grille_cd_tick(self, rem_sec):
-        self.curr_grille_cd = rem_sec
-        m = int(rem_sec // 60)
-        s = int(rem_sec % 60)
-        self.lbl_grille_countdown.setText(f"⏳ {m:02d}:{s:02d}")
+    def _on_value_updated(self, box, now_str, found_val, raw_text):
+        box.update_result_display(found_val, raw_text)
+        box.add_log_val(now_str, found_val, raw_text)
 
-    def _on_value_updated(self, box, time_str, val, raw_text):
-        box.update_result_display(val, raw_text)
-        box.add_log_val(time_str, val, raw_text)
-
-        if val is not None:
-            is_alarm_cond = (val > box.upper or val < box.lower)
-            if is_alarm_cond:
-                if box.last_alarm_val != val:
+        if found_val is not None:
+            if found_val > box.upper or found_val < box.lower:
+                if not box.user_cleared_alarm or box.last_alarm_val != found_val:
                     box.user_cleared_alarm = False
-                    box.last_alarm_val = val
-
-                if not box.user_cleared_alarm:
+                    box.last_alarm_val = found_val
                     box.set_alarm_state(True)
             else:
                 box.user_cleared_alarm = False
@@ -2509,93 +2842,23 @@ class GlobalControlPanel(QWidget):
         self._check_global_alarm_state()
 
     def _check_global_alarm_state(self):
-        any_alarm = False
-        for b in self.boxes:
-            if b.is_alarm and not b.is_muted:
-                any_alarm = True
-                break
-
-        if any_alarm:
+        has_alarm = any(b.is_alarm and not b.is_muted for b in self.boxes)
+        if has_alarm:
             self.alarm_player.play()
         else:
             self.alarm_player.stop()
 
-    def save_config(self):
-        data = {
-            'interval': self.spin_interval.value(),
-            'count': self.spin_count.value(),
-            'log_interval': self.spin_log_interval.value(),
-            'grille_interval': self.spin_grille_interval.value(),
-            'ocr_params': self.ocr_params,
-            'boxes': []
-        }
-        for b in self.boxes:
-            data['boxes'].append({
-                'id': b.box_id,
-                'x': b.capture_x,
-                'y': b.capture_y,
-                'w': b.capture_w,
-                'h': b.capture_h,
-                'name': b.name,
-                'lower': b.lower,
-                'mid_val': getattr(b, 'mid_val', 50.0),
-                'upper': b.upper,
-                'decimal_places': getattr(b, 'decimal_places', 0)
-            })
-        try:
-            with open(self.config_file, 'w', encoding='utf-8') as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
-        except Exception as e:
-            print("保存配置失败:", e)
+    def _on_monitor_cd_tick(self, rem_sec):
+        self.curr_monitor_cd = rem_sec
 
-    def load_config(self):
-        if not os.path.exists(self.config_file):
-            return
-        try:
-            with open(self.config_file, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-
-            self.spin_interval.setValue(data.get('interval', 1.0))
-            self.spin_count.setValue(data.get('count', 30))
-            self.spin_log_interval.setValue(data.get('log_interval', 1.0))
-            self.spin_grille_interval.setValue(data.get('grille_interval', 2.0))
-            self.ocr_params = data.get('ocr_params', self.ocr_params)
-
-            for b_data in data.get('boxes', []):
-                self.add_box(
-                    x=b_data['x'],
-                    y=b_data['y'],
-                    w=b_data['w'],
-                    h=b_data['h'],
-                    box_id=b_data.get('id'),
-                    name=b_data.get('name', '区域'),
-                    lower=b_data.get('lower', 0.0),
-                    mid_val=b_data.get('mid_val', 50.0),
-                    upper=b_data.get('upper', 100.0),
-                    decimal_places=b_data.get('decimal_places', 0)
-                )
-        except Exception as e:
-            print("读取配置失败:", e)
-
-    def close_app(self):
-        self.save_config()
-        self.f12_listener.stop()
-        if self.monitor_thread:
-            self.monitor_thread.stop()
-        if self.grille_thread:
-            self.grille_thread.stop()
-        if self.web_thread:
-            self.web_thread.stop()
-        self.alarm_player.stop()
-
-        for b in self.boxes:
-            b.close()
-        self.close()
-        QApplication.quit()
+    def _on_grille_cd_tick(self, rem_sec):
+        self.curr_grille_cd = rem_sec
+        m = int(rem_sec // 60)
+        s = int(rem_sec % 60)
+        self.lbl_grille_countdown.setText(f"⏳ {m:02d}:{s:02d}")
 
 
-# ==================== 10. 程序主入口 ====================
-if __name__ == '__main__':
+if __name__ == "__main__":
     app = QApplication(sys.argv)
     panel = GlobalControlPanel()
     panel.show()
