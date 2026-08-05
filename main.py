@@ -516,7 +516,6 @@ class OverlayRegionWidget(QWidget):
         self.name = name
         self.lower = lower
         self.mid_val = mid_val  # 预警值
-        self.warning_mode = '>'  # 预警条件，默认大于
         self.upper = upper
         self.decimal_places = decimal_places
 
@@ -635,14 +634,7 @@ class OverlayRegionWidget(QWidget):
         self.spin_mid.setStyleSheet("background-color: rgba(26, 26, 38, 0.5); color: #ffaa00; border: 1px solid #ffaa00; font-size: 10px; border-radius: 2px;")
         self.spin_mid.valueChanged.connect(self._on_mid_changed)
 
-        self.combo_mid_mode = QComboBox()
-        self.combo_mid_mode.addItems(['大于', '小于', '等于'])
-        self.combo_mid_mode.setFixedSize(45, 20)
-        self.combo_mid_mode.setStyleSheet("background-color: rgba(26,26,38,0.5); color:#ffaa00; border:1px solid #ffaa00; font-size:10px;")
-        self.combo_mid_mode.currentIndexChanged.connect(self._on_mid_mode_changed)
-
         row3_layout.addWidget(self.lbl_mid)
-        row3_layout.addWidget(self.combo_mid_mode)
         row3_layout.addWidget(self.spin_mid)
         row3_layout.addStretch()
         panel_layout.addWidget(self.row3_container)
@@ -706,10 +698,6 @@ class OverlayRegionWidget(QWidget):
         self.mid_val = val
         self.config_changed.emit()
 
-    def _on_mid_mode_changed(self, index):
-        self.warning_mode = ['>', '<', '='][index]
-        self.config_changed.emit()
-
     def _on_upper_changed(self, val):
         self.upper = val
         self.config_changed.emit()
@@ -730,11 +718,9 @@ class OverlayRegionWidget(QWidget):
             if val > self.upper or val < self.lower:
                 self.lbl_result.setStyleSheet("color: #ff4d4d; font-size: 11px; font-weight: bold; margin-left: 2px;")
                 self.is_warning = False
-            elif ((self.warning_mode == '>' and val > self.mid_val) or
-                  (self.warning_mode == '<' and val < self.mid_val) or
-                  (self.warning_mode == '=' and abs(val - self.mid_val) < 1e-6)):
+            elif val > self.mid_val:
                 self.lbl_result.setStyleSheet("color: #ffaa00; font-size: 11px; font-weight: bold; margin-left: 2px;")
-                self.is_warning = True
+                self.is_warning = True  # 超过预警值 (需求三)
             else:
                 self.lbl_result.setStyleSheet("color: #00ff8c; font-size: 11px; font-weight: bold; margin-left: 2px;")
                 self.is_warning = False
@@ -1728,10 +1714,9 @@ MOBILE_HTML_TEMPLATE = """
         function saveLimits(boxId) {
             const lowerVal = parseFloat(document.getElementById(`input-lower-${boxId}`).value);
             const midVal = parseFloat(document.getElementById(`input-mid-${boxId}`).value);
-            const midMode = document.getElementById(`input-mid-mode-${boxId}`).value;
             const upperVal = parseFloat(document.getElementById(`input-upper-${boxId}`).value);
             if (!isNaN(lowerVal) && !isNaN(midVal) && !isNaN(upperVal)) {
-                postAction('set_limits', boxId, { lower: lowerVal, mid_val: midVal, warning_mode: midMode, upper: upperVal });
+                postAction('set_limits', boxId, { lower: lowerVal, mid_val: midVal, upper: upperVal });
             } else {
                 alert("请输入有效的数值！");
             }
@@ -1909,12 +1894,7 @@ MOBILE_HTML_TEMPLATE = """
                             <div class="setting-row" id="setting-row-${b.id}">
                                 <label>下限:</label>
                                 <input id="input-lower-${b.id}" class="setting-input" type="number" step="0.1" value="${b.lower}">
-                                <label>预警:</label>
-                                <select id="input-mid-mode-${b.id}" class="setting-input">
-                                    <option value=">" ${b.warning_mode === '>' ? 'selected' : ''}>大于</option>
-                                    <option value="<" ${b.warning_mode === '<' ? 'selected' : ''}>小于</option>
-                                    <option value="=" ${b.warning_mode === '=' ? 'selected' : ''}>等于</option>
-                                </select>
+                                <label>预警值:</label>
                                 <input id="input-mid-${b.id}" class="setting-input" type="number" step="0.1" value="${b.mid_val}">
                                 <label>上限:</label>
                                 <input id="input-upper-${b.id}" class="setting-input" type="number" step="0.1" value="${b.upper}">
@@ -2205,7 +2185,6 @@ class WebServerThread(QThread):
                     'value': b.lbl_result.text(),
                     'lower': b.lower,
                     'mid_val': getattr(b, 'mid_val', 50.0),
-                    'warning_mode': getattr(b, 'warning_mode', '>'),
                     'upper': b.upper,
                     'decimal_places': getattr(b, 'decimal_places', 2),
                     'is_alarm': b.is_alarm,
@@ -2482,7 +2461,6 @@ class GlobalControlPanel(QWidget):
 
         self._init_ocr()
         self.load_config()
-        QTimer.singleShot(1000, lambda: self.start_web_service_with_ip(get_local_ip()))
 
     def load_users(self):
         """读取用户字典，默认账户 admin / admin"""
@@ -2527,7 +2505,6 @@ class GlobalControlPanel(QWidget):
                     'name': b.name,
                     'lower': b.lower,
                     'mid_val': b.mid_val,
-                    'warning_mode': b.warning_mode,
                     'upper': b.upper,
                     'decimal_places': b.decimal_places,
                     'is_muted': b.is_muted
@@ -2567,9 +2544,6 @@ class GlobalControlPanel(QWidget):
                     decimal_places=b_data.get('decimal_places', 0),
                     box_id=b_data.get('id')
                 )
-                box.warning_mode = b_data.get('warning_mode', '>')
-                if hasattr(box, 'combo_mid_mode'):
-                    box.combo_mid_mode.setCurrentIndex({'<':1, '=':2}.get(box.warning_mode, 0))
                 if b_data.get('is_muted', False):
                     box._toggle_mute()
         except Exception as e:
@@ -2613,8 +2587,6 @@ class GlobalControlPanel(QWidget):
                 target_box.spin_lower.setValue(float(data['lower']))
             if 'mid_val' in data:
                 target_box.spin_mid.setValue(float(data['mid_val']))
-            if 'warning_mode' in data and hasattr(target_box, 'combo_mid_mode'):
-                target_box.combo_mid_mode.setCurrentIndex({'<':1, '=':2}.get(data['warning_mode'], 0))
             if 'upper' in data:
                 target_box.spin_upper.setValue(float(data['upper']))
         elif action == 'clear_alarm':
