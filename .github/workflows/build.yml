@@ -5,7 +5,7 @@ on:
     branches: [ "main", "master" ]
   pull_request:
     branches: [ "main", "master" ]
-  workflow_dispatch: # 支持在 GitHub 页面手动点击触发构建
+  workflow_dispatch:
 
 jobs:
   build:
@@ -30,12 +30,8 @@ jobs:
       run: |
         pyinstaller --noconfirm --onedir --windowed --name="屏幕数值监控报警" --icon="favicon.ico" --collect-all ddddocr --add-data "警报声.mp3;." --add-data "favicon.ico;." main.py
 
-    - name: 🗜️ 压缩打包好的软件文件夹
-      run: |
-        Powershell Compress-Archive -Path dist/屏幕数值监控报警/* -DestinationPath dist/屏幕数值监控报警-Windows.zip
-
     - name: 📤 上传打包后的文件 (Artifacts)
       uses: actions/upload-artifact@v4
       with:
-        name: 屏幕数值监控报警-Windows-EXE
-        path: dist/屏幕数值监控报警-Windows.zip
+        name: 屏幕数值监控报警-Windows
+        path: dist/屏幕数值监控报警/
