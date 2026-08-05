@@ -30,6 +30,12 @@ import numpy as np
 import cv2
 
 try:
+    import ddddocr
+    DDDDOCR_AVAILABLE = True
+except ImportError:
+    DDDDOCR_AVAILABLE = False
+
+try:
     import pygame
     PYGAME_AVAILABLE = True
 except ImportError:
@@ -76,7 +82,6 @@ def get_all_local_ips():
 
 # ==================== 二维码生成工具函数 ====================
 def generate_qr_pixmap(url):
-    """优先使用 qrcode 库生成二维码，若未安装则通过网络 API 或绘图备用生成"""
     try:
         import qrcode
         qr = qrcode.QRCode(box_size=5, border=2)
@@ -111,7 +116,6 @@ def generate_qr_pixmap(url):
 
 # ==================== 0. 自定义无冗余 .00 的 SpinBox ====================
 class CleanDoubleSpinBox(QDoubleSpinBox):
-    """自动消除末尾 .00 / 冗余 0 的输入框"""
     def textFromValue(self, val):
         s = f"{val:.2f}"
         if s.endswith('.00'):
@@ -131,6 +135,8 @@ class GlobalF12Listener(QThread):
 
     def stop(self):
         self.running = False
+        self.quit()
+        self.wait(1000)
 
     def run(self):
         user32 = ctypes.windll.user32
@@ -237,6 +243,8 @@ class FineGrilleThread(QThread):
 
     def stop(self):
         self.running = False
+        self.quit()
+        self.wait(2000)  # 修复闪退：显式等待线程安全退出
 
     def _safe_sleep(self, seconds):
         start_t = time.time()
@@ -515,7 +523,7 @@ class OverlayRegionWidget(QWidget):
 
         self.name = name
         self.lower = lower
-        self.mid_val = mid_val  # 预警值
+        self.mid_val = mid_val
         self.upper = upper
         self.decimal_places = decimal_places
 
@@ -524,7 +532,7 @@ class OverlayRegionWidget(QWidget):
         self.max_log_count = 30
 
         self.is_alarm = False
-        self.is_warning = False  # 超过预警值标记
+        self.is_warning = False
         self.user_cleared_alarm = False
         self.last_alarm_val = None
 
@@ -552,7 +560,7 @@ class OverlayRegionWidget(QWidget):
         panel_layout.setContentsMargins(4, 4, 4, 4)
         panel_layout.setSpacing(3)
 
-        # ---------- 排版 1：标题与当前值 ----------
+        # 排版 1
         self.row1_container = QWidget()
         row1_layout = QHBoxLayout(self.row1_container)
         row1_layout.setContentsMargins(0, 0, 0, 0)
@@ -576,7 +584,7 @@ class OverlayRegionWidget(QWidget):
         row1_layout.addStretch()
         panel_layout.addWidget(self.row1_container)
 
-        # ---------- 排版 2：下限与上限 ----------
+        # 排版 2
         self.row2_container = QWidget()
         row2_layout = QHBoxLayout(self.row2_container)
         row2_layout.setContentsMargins(0, 0, 0, 0)
@@ -617,7 +625,7 @@ class OverlayRegionWidget(QWidget):
         row2_layout.addWidget(self.btn_delete)
         panel_layout.addWidget(self.row2_container)
 
-        # ---------- 排版 3：预警值 (需求二) ----------
+        # 排版 3
         self.row3_container = QWidget()
         row3_layout = QHBoxLayout(self.row3_container)
         row3_layout.setContentsMargins(0, 0, 0, 0)
@@ -639,7 +647,7 @@ class OverlayRegionWidget(QWidget):
         row3_layout.addStretch()
         panel_layout.addWidget(self.row3_container)
 
-        # ---------- 排版 4：静音、小数点、日志按钮、消除报警 (需求二) ----------
+        # 排版 4
         self.row4_container = QWidget()
         row4_layout = QHBoxLayout(self.row4_container)
         row4_layout.setContentsMargins(0, 0, 0, 0)
@@ -678,7 +686,7 @@ class OverlayRegionWidget(QWidget):
         row4_layout.addStretch()
         panel_layout.addWidget(self.row4_container)
 
-        self.list_widget = QListWidget()  # 内部存储日志数据
+        self.list_widget = QListWidget()
         main_layout.addWidget(self.control_panel)
 
         self._update_bar_visibility()
@@ -720,7 +728,7 @@ class OverlayRegionWidget(QWidget):
                 self.is_warning = False
             elif val > self.mid_val:
                 self.lbl_result.setStyleSheet("color: #ffaa00; font-size: 11px; font-weight: bold; margin-left: 2px;")
-                self.is_warning = True  # 超过预警值 (需求三)
+                self.is_warning = True
             else:
                 self.lbl_result.setStyleSheet("color: #00ff8c; font-size: 11px; font-weight: bold; margin-left: 2px;")
                 self.is_warning = False
@@ -893,7 +901,7 @@ class OverlayRegionWidget(QWidget):
             pen = QPen(QColor(255, 40, 40), 3, Qt.SolidLine)
             painter.setPen(pen)
             painter.setBrush(QColor(255, 0, 0, 25))
-        elif self.is_warning:  # 需求三：超过预警值变成黄色
+        elif self.is_warning:
             pen = QPen(QColor(255, 200, 0), 2, Qt.SolidLine)
             painter.setPen(pen)
             painter.setBrush(QColor(255, 200, 0, 25))
@@ -905,7 +913,7 @@ class OverlayRegionWidget(QWidget):
         painter.drawRect(box_rect.adjusted(1, 1, -1, -1))
 
 
-# ==================== 网页服务与二维码配置对话框 (需求一) ====================
+# ==================== 网页服务与二维码配置对话框 ====================
 class WebServiceDialog(QDialog):
     def __init__(self, main_panel, parent=None):
         super().__init__(parent)
@@ -931,7 +939,6 @@ class WebServiceDialog(QDialog):
 
         layout = QVBoxLayout(self)
 
-        # 选择 IP
         ip_layout = QHBoxLayout()
         ip_layout.addWidget(QLabel("选择IP:"))
         self.combo_ip = QComboBox()
@@ -940,7 +947,6 @@ class WebServiceDialog(QDialog):
         ip_layout.addWidget(self.combo_ip)
         layout.addLayout(ip_layout)
 
-        # 服务控制按钮
         btn_layout = QHBoxLayout()
         self.btn_start = QPushButton("▶ 启动服务")
         self.btn_start.setStyleSheet("background-color: #2e9a58; color: white;")
@@ -954,7 +960,6 @@ class WebServiceDialog(QDialog):
         btn_layout.addWidget(self.btn_stop)
         layout.addLayout(btn_layout)
 
-        # 二维码显示区
         self.lbl_qr = QLabel()
         self.lbl_qr.setFixedSize(180, 180)
         self.lbl_qr.setAlignment(Qt.AlignCenter)
@@ -966,7 +971,6 @@ class WebServiceDialog(QDialog):
         qr_box.addStretch()
         layout.addLayout(qr_box)
 
-        # 访问链接显示
         self.lbl_url = QLabel("http://127.0.0.1:5000")
         self.lbl_url.setAlignment(Qt.AlignCenter)
         self.lbl_url.setStyleSheet("color: #00ff8c; font-size: 13px; font-weight: bold;")
@@ -1069,7 +1073,8 @@ class CoordinatePicker(QWidget):
 
 # ==================== 7. 后台识别线程 ====================
 class MonitorThread(QThread):
-    value_updated = Signal(object, str, object, str)
+    # 修复闪退：Signal 改传 box_id，避免跨线程直接操作 UI 控件对象
+    value_updated = Signal(int, str, object, str)
     countdown_tick = Signal(float)
 
     def __init__(self, boxes, interval=1.0, ocr_params=None, scale=1.0, parent=None):
@@ -1094,6 +1099,8 @@ class MonitorThread(QThread):
 
     def stop(self):
         self.running = False
+        self.quit()
+        self.wait(2000)  # 修复闪退：等待 C++ 线程安全退出
 
     def _clean_digit_text(self, text):
         mapping = {
@@ -1124,6 +1131,7 @@ class MonitorThread(QThread):
                 for box in box_list:
                     if not self.running: break
                     
+                    box_id = getattr(box, 'box_id', 0)
                     capture_x = getattr(box, 'capture_x', 0)
                     capture_y = getattr(box, 'capture_y', 0)
                     capture_w = getattr(box, 'capture_w', 0)
@@ -1214,12 +1222,12 @@ class MonitorThread(QThread):
 
                         now_str = datetime.now().strftime("%H:%M:%S")
                         if self.running:
-                            self.value_updated.emit(box, now_str, found_val, last_raw_str)
+                            self.value_updated.emit(box_id, now_str, found_val, last_raw_str)
 
                     except Exception as e:
                         now_str = datetime.now().strftime("%H:%M:%S")
                         if self.running:
-                            self.value_updated.emit(box, now_str, None, f"异常:{e}")
+                            self.value_updated.emit(box_id, now_str, None, f"异常:{e}")
 
                 elapsed = time.time() - start_time
                 sleep_needed = max(0.05, self.interval - elapsed)
@@ -1238,20 +1246,15 @@ MOBILE_HTML_TEMPLATE = """
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link rel="icon" href="/favicon.ico" type="image/x-icon">
-    <link rel="shortcut icon" href="/favicon.ico" type="image/x-icon">
     <title>📱 中控数据面板</title>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body { background: #121218; color: #e0e0e0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 12px; }
-        
         .container { max-width: 600px; margin: 0 auto; width: 100%; }
-
         .header { display: flex; flex-direction: column; padding: 10px 14px; background: #1a1a26; border-radius: 10px; margin-bottom: 12px; border: 1px solid rgba(255,255,255,0.1); gap: 8px; }
         .header-top-row { display: flex; justify-content: space-between; align-items: center; width: 100%; }
         .title { font-size: 15px; font-weight: bold; color: #00ff8c; }
         .status { font-size: 11px; color: #aaa; font-weight: bold; }
-
         .header-actions { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; width: 100%; }
         .btn-top { background: #2e9a58; color: #fff; border: none; border-radius: 6px; padding: 6px 10px; font-size: 12px; font-weight: bold; cursor: pointer; transition: background 0.2s; }
         .btn-top:active { opacity: 0.8; }
@@ -1259,755 +1262,55 @@ MOBILE_HTML_TEMPLATE = """
         .btn-top.btn-grille { background: #0088cc; }
         .btn-top.btn-grille.active { background: #cc3333; }
         .btn-sound { background: rgba(255,255,255,0.15); color: #00ff8c; border: 1px solid rgba(255,255,255,0.2); border-radius: 6px; padding: 6px 8px; font-size: 12px; font-weight: bold; cursor: pointer; }
-
         .btn-fold-tool { background: rgba(255,255,255,0.1); color: #00ff8c; border: 1px solid rgba(0,255,140,0.3); border-radius: 6px; padding: 6px 8px; font-size: 12px; font-weight: bold; cursor: pointer; }
-        .btn-fold-tool:active { background: rgba(0,255,140,0.2); }
-
-        .login-input { background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; color: #00ff8c; font-weight: bold; padding: 4px 6px; width: 100%; font-size: 12px; }
-
-        /* 卡片容器与视图模式 */
-        #cards-container.list-view { display: flex; flex-direction: column; gap: 10px; }
         
+        #cards-container.list-view { display: flex; flex-direction: column; gap: 10px; }
         #cards-container.grid-view { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 10px; }
         #cards-container.grid-view .card { margin-bottom: 0; height: 130px; display: flex; flex-direction: column; justify-content: space-between; padding: 10px; text-align: center; }
-        #cards-container.grid-view .card .val-text { font-size: 26px; }
-        #cards-container.grid-view .card .fold-body { display: none !important; }
-
-        .card { background: #1a1a26; border-radius: 12px; padding: 12px 14px; margin-bottom: 10px; border: 1px solid rgba(255,255,255,0.1); transition: all 0.2s; user-select: none; }
-        .card.dragging { opacity: 0.4; border: 2px dashed #00ff8c; }
-        .card[draggable="true"] { cursor: grab; }
-        .card[draggable="true"]:active { cursor: grabbing; }
-
-        .card.alarm { border: 2px solid #ff4d4d; background: rgba(255, 77, 77, 0.08); animation: blink 1s infinite alternate; }
-        @keyframes blink { from { box-shadow: 0 0 5px rgba(255,77,77,0.3); } to { box-shadow: 0 0 15px rgba(255,77,77,0.8); } }
-
+        
+        .card { background: #1a1a26; border-radius: 12px; padding: 12px 14px; margin-bottom: 10px; border: 1px solid rgba(255,255,255,0.1); }
+        .card.alarm { border: 2px solid #ff4d4d; background: rgba(255, 77, 77, 0.08); }
         .card.warning { border: 2px solid #ffaa00; background: rgba(255, 170, 0, 0.08); }
-
         .card-header { display: flex; justify-content: space-between; align-items: center; font-size: 13px; color: #888; font-weight: bold; }
-        .card-title-box { display: flex; align-items: center; gap: 8px; cursor: pointer; flex-grow: 1; }
-        .card-title { color: #ffffff; font-size: 15px; font-weight: bold; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-
-        .btn-action { color: #fff; border-radius: 6px; padding: 4px 8px; font-size: 11px; font-weight: bold; cursor: pointer; border: none; }
-        .btn-action:active { opacity: 0.8; }
-        .btn-clear { background: #ff4d4d; color: white; }
-
-        .btn-alarm-on { background: #2e9a58; color: #ffffff; border: 1px solid #3fb950; }
-        .btn-alarm-off { background: #4a4d52; color: #cccccc; border: 1px solid #666666; }
-
-        .value-box { text-align: center; margin: 8px 0; }
-        .val-text { font-size: 32px; font-weight: bold; color: #00ff8c; font-family: monospace; }
+        .card-title { color: #ffffff; font-size: 15px; font-weight: bold; }
+        .val-text { font-size: 32px; font-weight: bold; color: #00ff8c; font-family: monospace; text-align: center; margin: 8px 0; }
         .val-text.alarm-text { color: #ff4d4d; }
         .val-text.warning-text { color: #ffaa00; }
-
-        .fold-body { margin-top: 8px; border-top: 1px dashed rgba(255,255,255,0.1); padding-top: 8px; }
-
-        .setting-row { display: flex; align-items: center; gap: 4px; margin-bottom: 8px; font-size: 11px; flex-wrap: wrap; }
-        .setting-row label { color: #ffaa00; font-weight: bold; }
-        .setting-input { background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; color: #00ff8c; font-weight: bold; padding: 4px 2px; width: 50px; text-align: center; font-size: 11px; }
-
-        .log-title { margin-top: 6px; font-size: 11px; color: #888; font-weight: bold; }
-        .log-list { margin-top: 4px; background: rgba(0,0,0,0.4); border-radius: 6px; padding: 6px 8px; font-size: 11px; font-family: monospace; height: 110px; overflow-y: auto; color: #00ff8c; }
-        .log-list::-webkit-scrollbar { width: 4px; }
-        .log-list::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); border-radius: 2px; }
-        .log-item { padding: 2px 0; border-bottom: 1px solid rgba(255,255,255,0.05); white-space: nowrap; }
-
-        /* 模态框弹窗样式 */
-        .modal-overlay { display: none; position: fixed; top:0; left:0; width:100%; height:100%; background: rgba(0,0,0,0.7); z-index: 1000; justify-content: center; align-items: center; }
-        .modal-content { background: #1a1a26; border: 1px solid rgba(255,255,255,0.2); border-radius: 10px; width: 90%; max-width: 420px; padding: 16px; color: #e0e0e0; }
-        .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 8px; }
-        .modal-close { cursor: pointer; color: #ff4d4d; font-weight: bold; font-size: 16px; }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="header">
-            <!-- 统一顶部栏：需求四 添加收起展开图标 -->
             <div class="header-top-row">
-                <div style="display: flex; align-items: center; gap: 6px;">
-                    <div class="title">📱 中控数据面板</div>
-                    <span id="header-fold-btn" onclick="toggleHeaderFold()" style="cursor: pointer; font-size: 14px; color: #00ff8c;" title="收起/展开控制区">🔼</span>
-                </div>
-                <div id="status" class="status">初始化...</div>
+                <div class="title">📱 中控数据面板</div>
+                <div id="status" class="status">--:--:--</div>
             </div>
-            <div id="header-actions" class="header-actions">
-                <button id="btn-toggle-all" class="btn-fold-tool" onclick="toggleCollapseAll()">📂 展开</button>
-                <button id="btn-layout" class="btn-fold-tool" onclick="toggleLayoutView()">🔲 方块视图</button>
-
-                <!-- 登录按钮 -->
-                <div id="login-box" style="display: inline-flex; align-items: center; gap: 4px;">
-                    <button class="btn-fold-tool" style="background:#0088cc; color:white; border:none;" onclick="openLoginModal()">🔐 登录</button>
-                </div>
-                <div id="user-box" style="display: none; align-items: center; gap: 4px;">
-                    <span id="current-username" style="color:#00ff8c; font-size:12px; font-weight:bold;">👤 已登录</span>
-                    <button class="btn-sound" style="background:#e65100; color:white; border:none;" onclick="openUserMgmtModal()">⚙️ 用户管理</button>
-                    <button class="btn-sound" style="background:#555; color:white; border:none;" onclick="handleLogout()">🚪 退出</button>
-                </div>
-
-                <button id="btn-sound" class="btn-sound" onclick="toggleWebSound()">🔊 声音</button>
+            <div class="header-actions">
                 <button id="btn-monitor" class="btn-top" onclick="postAction('toggle_monitor', -1)">▶ 开始监控</button>
                 <button id="btn-grille" class="btn-top btn-grille" onclick="postAction('toggle_grille', -1)">▶ 开始操作</button>
             </div>
         </div>
-
         <div id="cards-container" class="list-view"></div>
     </div>
-
-    <!-- 登录弹窗 -->
-    <div id="login-modal" class="modal-overlay">
-        <div class="modal-content" style="max-width: 320px;">
-            <div class="modal-header">
-                <span style="font-weight:bold; color:#00ff8c; font-size:14px;">🔐 用户登录</span>
-                <span class="modal-close" onclick="closeLoginModal()">✖</span>
-            </div>
-            <div style="display: flex; flex-direction: column; gap: 10px; margin-top: 8px;">
-                <div>
-                    <label style="font-size:12px; color:#aaa; font-weight:bold; display:block; margin-bottom:4px;">账号：</label>
-                    <input type="text" id="login-user" placeholder="请输入账号" class="login-input" style="height: 32px; padding: 4px 8px;">
-                </div>
-                <div>
-                    <label style="font-size:12px; color:#aaa; font-weight:bold; display:block; margin-bottom:4px;">密码：</label>
-                    <input type="password" id="login-pass" placeholder="请输入密码" class="login-input" style="height: 32px; padding: 4px 8px;">
-                </div>
-                <button class="btn-action" style="background:#0088cc; color:white; height: 34px; margin-top: 6px; font-size: 13px;" onclick="handleLogin()">登录</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- 用户管理模态框 -->
-    <div id="user-modal" class="modal-overlay">
-        <div class="modal-content">
-            <div class="modal-header">
-                <span style="font-weight:bold; color:#00ff8c; font-size:14px;">⚙️ 用户管理面板</span>
-                <span class="modal-close" onclick="closeUserMgmtModal()">✖</span>
-            </div>
-            
-            <div style="margin-bottom: 14px; padding-bottom: 10px; border-bottom: 1px dashed rgba(255,255,255,0.1);">
-                <div style="font-size:12px; color:#aaa; margin-bottom:6px; font-weight:bold;">🔑 修改当前密码 (<span id="modal-curr-user" style="color:#00ff8c;"></span>)</div>
-                <div class="setting-row">
-                    <input type="password" id="old-pass" placeholder="旧密码" class="setting-input" style="width:85px;">
-                    <input type="password" id="new-pass" placeholder="新密码" class="setting-input" style="width:85px;">
-                    <button class="btn-action" style="background:#0088cc; color:white; margin-left: auto;" onclick="handleChangePassword()">修改密码</button>
-                </div>
-            </div>
-
-            <div>
-                <div style="font-size:12px; color:#aaa; margin-bottom:6px; font-weight:bold;">➕ 新增用户</div>
-                <div class="setting-row" style="margin-bottom:10px;">
-                    <input type="text" id="new-user-name" placeholder="新账号" class="setting-input" style="width:85px;">
-                    <input type="password" id="new-user-pass" placeholder="新密码" class="setting-input" style="width:85px;">
-                    <button class="btn-action" style="background:#2e9a58; color:white; margin-left: auto;" onclick="handleAddUser()">添加用户</button>
-                </div>
-
-                <div style="font-size:12px; color:#aaa; margin-bottom:6px; font-weight:bold;">👥 用户账号列表</div>
-                <div id="user-list-container" style="max-height: 120px; overflow-y: auto; background: rgba(0,0,0,0.3); padding: 6px; border-radius: 4px;">
-                </div>
-            </div>
-        </div>
-    </div>
-
     <script>
-        const collapsedMap = {};
-        let isAllCollapsed = true;
-        let isLoggedIn = localStorage.getItem('isLoggedIn') === 'true';
-        let currentUser = localStorage.getItem('currentUser') || '';
-        let lastLoggedInState = null;
-        let webSoundEnabled = true;
-        let audioCtx = null;
-        let alarmTimer = null;
-        let cachedBoxes = [];
-        let isGridView = localStorage.getItem('isGridView') === 'true';
-        let customBoxOrder = JSON.parse(localStorage.getItem('customBoxOrder') || '[]');
-        let draggedItem = null;
-        let isHeaderFolded = false;
-
-        function toggleHeaderFold() {
-            isHeaderFolded = !isHeaderFolded;
-            const actionsEl = document.getElementById('header-actions');
-            const foldBtn = document.getElementById('header-fold-btn');
-            if (isHeaderFolded) {
-                if (actionsEl) actionsEl.style.display = 'none';
-                if (foldBtn) foldBtn.innerText = '🔽';
-            } else {
-                if (actionsEl) actionsEl.style.display = 'flex';
-                if (foldBtn) foldBtn.innerText = '🔼';
-            }
-        }
-
-        function openLoginModal() {
-            document.getElementById('login-modal').style.display = 'flex';
-        }
-
-        function closeLoginModal() {
-            document.getElementById('login-modal').style.display = 'none';
-        }
-
-        function updateLoginUI() {
-            const loginBox = document.getElementById('login-box');
-            const userBox = document.getElementById('user-box');
-            const usernameDisplay = document.getElementById('current-username');
-            const btnMonitor = document.getElementById('btn-monitor');
-            const btnGrille = document.getElementById('btn-grille');
-
-            if (isLoggedIn) {
-                if (loginBox) loginBox.style.display = 'none';
-                if (userBox) userBox.style.display = 'inline-flex';
-                if (usernameDisplay) usernameDisplay.innerText = `👤 ${currentUser}`;
-                if (btnMonitor) btnMonitor.style.display = 'inline-block';
-                if (btnGrille) btnGrille.style.display = 'inline-block';
-            } else {
-                if (loginBox) loginBox.style.display = 'inline-flex';
-                if (userBox) userBox.style.display = 'none';
-                if (btnMonitor) btnMonitor.style.display = 'none';
-                if (btnGrille) btnGrille.style.display = 'none';
-            }
-        }
-
-        function toggleLayoutView() {
-            isGridView = !isGridView;
-            localStorage.setItem('isGridView', isGridView);
-            applyLayoutView();
-        }
-
-        function applyLayoutView() {
-            const container = document.getElementById('cards-container');
-            const btnLayout = document.getElementById('btn-layout');
-            if (isGridView) {
-                container.className = 'grid-view';
-                btnLayout.innerText = '☰ 长条视图';
-            } else {
-                container.className = 'list-view';
-                btnLayout.innerText = '🔲 方块视图';
-            }
-            refreshData();
-        }
-
-        async function handleLogin() {
-            const u = document.getElementById('login-user').value.trim();
-            const p = document.getElementById('login-pass').value.trim();
-            if (!u || !p) {
-                alert('请输入账号和密码！');
-                return;
-            }
-            try {
-                const res = await fetch('/api/login', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ username: u, password: p })
-                });
-                const data = await res.json();
-                if (data.success) {
-                    isLoggedIn = true;
-                    currentUser = data.username;
-                    localStorage.setItem('isLoggedIn', 'true');
-                    localStorage.setItem('currentUser', currentUser);
-                    closeLoginModal();
-                    document.getElementById('login-user').value = '';
-                    document.getElementById('login-pass').value = '';
-                    updateLoginUI();
-                    forceReRenderCards();
-                    refreshData();
-                } else {
-                    alert(data.message || '登录失败！');
-                }
-            } catch(e) {
-                alert('请求异常，请重试！');
-            }
-        }
-
-        function handleLogout() {
-            isLoggedIn = false;
-            currentUser = '';
-            localStorage.setItem('isLoggedIn', 'false');
-            localStorage.removeItem('currentUser');
-            updateLoginUI();
-            forceReRenderCards();
-            refreshData();
-        }
-
-        function openUserMgmtModal() {
-            document.getElementById('user-modal').style.display = 'flex';
-            document.getElementById('modal-curr-user').innerText = currentUser;
-            loadUserList();
-        }
-
-        function closeUserMgmtModal() {
-            document.getElementById('user-modal').style.display = 'none';
-        }
-
-        async function handleChangePassword() {
-            const oldP = document.getElementById('old-pass').value.trim();
-            const newP = document.getElementById('new-pass').value.trim();
-            if (!oldP || !newP) {
-                alert('请填写旧密码和新密码！');
-                return;
-            }
-            try {
-                const res = await fetch('/api/users/change_password', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ username: currentUser, old_password: oldP, new_password: newP })
-                });
-                const data = await res.json();
-                alert(data.message);
-                if (data.success) {
-                    document.getElementById('old-pass').value = '';
-                    document.getElementById('new-pass').value = '';
-                }
-            } catch(e) {
-                alert('修改密码异常！');
-            }
-        }
-
-        async function handleAddUser() {
-            const u = document.getElementById('new-user-name').value.trim();
-            const p = document.getElementById('new-user-pass').value.trim();
-            if (!u || !p) {
-                alert('请输入新账号和新密码！');
-                return;
-            }
-            try {
-                const res = await fetch('/api/users/add', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ username: u, password: p })
-                });
-                const data = await res.json();
-                alert(data.message);
-                if (data.success) {
-                    document.getElementById('new-user-name').value = '';
-                    document.getElementById('new-user-pass').value = '';
-                    loadUserList();
-                }
-            } catch(e) {
-                alert('添加用户异常！');
-            }
-        }
-
-        async function handleDeleteUser(username) {
-            if (!confirm(`确定要删除用户 "${username}" 吗？`)) return;
-            try {
-                const res = await fetch('/api/users/delete', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ username })
-                });
-                const data = await res.json();
-                alert(data.message);
-                if (data.success) {
-                    loadUserList();
-                }
-            } catch(e) {
-                alert('删除用户异常！');
-            }
-        }
-
-        async function loadUserList() {
-            try {
-                const res = await fetch('/api/users/list');
-                const data = await res.json();
-                const container = document.getElementById('user-list-container');
-                if (data.users && data.users.length > 0) {
-                    container.innerHTML = data.users.map(u => `
-                        <div style="display:flex; justify-content:space-between; align-items:center; padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,0.05); font-size:12px;">
-                            <span>👤 ${u}</span>
-                            ${u !== 'admin' ? `<button class="btn-action" style="background:#ff4d4d; color:white;" onclick="handleDeleteUser('${u}')">删除</button>` : '<span style="color:#888; font-size:11px;">(默认管理员)</span>'}
-                        </div>
-                    `).join('');
-                } else {
-                    container.innerHTML = '<div style="color:#888; font-size:11px;">暂无其他用户</div>';
-                }
-            } catch(e) {
-                console.error("加载用户列表失败:", e);
-            }
-        }
-
-        function forceReRenderCards() {
-            const container = document.getElementById('cards-container');
-            if (container) container.innerHTML = '';
-        }
-
-        function initAudio() {
-            if (!audioCtx) {
-                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-            }
-            if (audioCtx.state === 'suspended') {
-                audioCtx.resume();
-            }
-        }
-        document.addEventListener('click', initAudio, { once: false });
-
-        function toggleCollapseAll() {
-            isAllCollapsed = !isAllCollapsed;
-            cachedBoxes.forEach(b => {
-                collapsedMap[b.id] = isAllCollapsed;
+        async function postAction(action, boxId) {
+            await fetch('/api/action', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action, id: boxId })
             });
-            const btn = document.getElementById('btn-toggle-all');
-            if (btn) {
-                btn.innerText = isAllCollapsed ? "📂 展开" : "📁 收起";
-            }
             refreshData();
-        }
-
-        function toggleWebSound() {
-            webSoundEnabled = !webSoundEnabled;
-            const btn = document.getElementById('btn-sound');
-            if (webSoundEnabled) {
-                btn.innerText = "🔊 声音";
-                btn.style.color = "#00ff8c";
-            } else {
-                btn.innerText = "🔇 静音";
-                btn.style.color = "#aaa";
-                stopWebAlarmSound();
-            }
-        }
-
-        function triggerAlarmSoundLoop(play) {
-            if (play && webSoundEnabled) {
-                if (!alarmTimer) {
-                    alarmTimer = setInterval(() => {
-                        if (!webSoundEnabled) return;
-                        try {
-                            initAudio();
-                            const osc = audioCtx.createOscillator();
-                            const gain = audioCtx.createGain();
-                            osc.type = 'sawtooth';
-                            osc.frequency.setValueAtTime(850, audioCtx.currentTime);
-                            gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
-                            gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.25);
-                            osc.connect(gain);
-                            gain.connect(audioCtx.destination);
-                            osc.start();
-                            osc.stop(audioCtx.currentTime + 0.25);
-                        } catch(e) {}
-                    }, 400);
-                }
-            } else {
-                stopWebAlarmSound();
-            }
-        }
-
-        function stopWebAlarmSound() {
-            if (alarmTimer) {
-                clearInterval(alarmTimer);
-                alarmTimer = null;
-            }
-        }
-
-        async function postAction(action, boxId, data = {}) {
-            try {
-                await fetch('/api/action', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ action, id: boxId, data })
-                });
-                refreshData();
-            } catch(e) {
-                console.error("操作失败:", e);
-            }
-        }
-
-        function toggleFold(boxId) {
-            collapsedMap[boxId] = !collapsedMap[boxId];
-            refreshData();
-        }
-
-        function saveLimits(boxId) {
-            const lowerVal = parseFloat(document.getElementById(`input-lower-${boxId}`).value);
-            const midVal = parseFloat(document.getElementById(`input-mid-${boxId}`).value);
-            const upperVal = parseFloat(document.getElementById(`input-upper-${boxId}`).value);
-            if (!isNaN(lowerVal) && !isNaN(midVal) && !isNaN(upperVal)) {
-                postAction('set_limits', boxId, { lower: lowerVal, mid_val: midVal, upper: upperVal });
-            } else {
-                alert("请输入有效的数值！");
-            }
-        }
-
-        function formatTwoHourCompare(b, currentTimeStr) {
-            const currVal = parseFloat(b.value);
-            const dp = b.decimal_places !== undefined ? b.decimal_places : 2;
-            
-            if (isNaN(currVal) || !b.logs || b.logs.length === 0 || !currentTimeStr) {
-                return '<span style="font-size:11px; color:#666;">(--)</span>';
-            }
-
-            function timeToSec(tStr) {
-                const p = tStr.split(':').map(Number);
-                return (p[0] || 0) * 3600 + (p[1] || 0) * 60 + (p[2] || 0);
-            }
-
-            const nowSec = timeToSec(currentTimeStr);
-            let bestVal = null;
-            let minErr = Infinity;
-
-            for (let log of b.logs) {
-                const m = log.match(/\[(\d{2}:\d{2}:\d{2})\]\s*(-?\d+(?:\.\d+)?)/);
-                if (m) {
-                    const logSec = timeToSec(m[1]);
-                    const logVal = parseFloat(m[2]);
-                    if (isNaN(logVal)) continue;
-
-                    let elapsed = nowSec - logSec;
-                    if (elapsed < 0) elapsed += 86400;
-
-                    const err = Math.abs(elapsed - 7200);
-                    if (err < minErr && elapsed >= 900) {
-                        minErr = err;
-                        bestVal = logVal;
-                    }
-                }
-            }
-
-            if (bestVal === null) {
-                return '<span style="font-size:11px; color:#666;">(--)</span>';
-            }
-
-            const diff = currVal - bestVal;
-            let diffStr = (diff >= 0 ? '+' : '') + diff.toFixed(dp);
-            let color = '#888';
-            let arrow = '→';
-
-            if (diff > 0) {
-                color = '#ff4d4d';
-                arrow = '↑';
-            } else if (diff < 0) {
-                color = '#00ff8c';
-                arrow = '↓';
-            }
-
-            return `<span style="font-size:11px; color:#aaa;" title="历史数值对比 (${bestVal.toFixed(dp)})">` +
-                   `${bestVal.toFixed(dp)} <span style="color:${color}; font-weight:bold;">(${arrow}${diffStr})</span>` +
-                   `</span>`;
-        }
-
-        function attachDragEvents(cardEl, boxId) {
-            if (!isLoggedIn) {
-                cardEl.removeAttribute('draggable');
-                cardEl.ondragstart = null;
-                cardEl.ondragover = null;
-                cardEl.ondrop = null;
-                cardEl.ondragend = null;
-                return;
-            }
-
-            cardEl.setAttribute('draggable', 'true');
-
-            cardEl.ondragstart = (e) => {
-                draggedItem = cardEl;
-                cardEl.classList.add('dragging');
-                e.dataTransfer.effectAllowed = 'move';
-            };
-
-            cardEl.ondragover = (e) => {
-                e.preventDefault();
-                e.dataTransfer.dropEffect = 'move';
-            };
-
-            cardEl.ondrop = (e) => {
-                e.preventDefault();
-                if (draggedItem && draggedItem !== cardEl) {
-                    const container = document.getElementById('cards-container');
-                    const children = Array.from(container.children);
-                    const draggedIdx = children.indexOf(draggedItem);
-                    const targetIdx = children.indexOf(cardEl);
-
-                    if (draggedIdx < targetIdx) {
-                        container.insertBefore(draggedItem, cardEl.nextSibling);
-                    } else {
-                        container.insertBefore(draggedItem, cardEl);
-                    }
-
-                    const newOrder = Array.from(container.children).map(el => parseInt(el.id.replace('card-', '')));
-                    customBoxOrder = newOrder;
-                    localStorage.setItem('customBoxOrder', JSON.stringify(customBoxOrder));
-                }
-            };
-
-            cardEl.ondragend = () => {
-                if (draggedItem) {
-                    draggedItem.classList.remove('dragging');
-                    draggedItem = null;
-                }
-            };
-        }
-
-        function renderCardDOM(cardEl, b, isCollapsed, isWarning, currentTimeStr) {
-            const expectedState = isGridView ? 'grid' : String(isCollapsed);
-            const currentFoldState = cardEl.getAttribute('data-collapsed');
-            const stateChanged = (currentFoldState !== expectedState);
-
-            let valColor = '#00ff8c';
-            if (b.is_alarm) {
-                valColor = '#ff4d4d';
-            } else if (isWarning) {
-                valColor = '#ffaa00';
-            }
-
-            const compareHtml = formatTwoHourCompare(b, currentTimeStr);
-            attachDragEvents(cardEl, b.id);
-
-            if (stateChanged) {
-                cardEl.setAttribute('data-collapsed', expectedState);
-                
-                if (isGridView) {
-                    cardEl.innerHTML = `
-                        <div class="card-header" onclick="toggleFold(${b.id})" style="cursor:pointer; justify-content:center; width:100%;">
-                            <span class="card-title" style="text-align:center; width:100%;">${b.name}</span>
-                        </div>
-                        <div class="value-box" style="flex:1; display:flex; align-items:center; justify-content:center; margin:0;">
-                            <div class="val-text" id="grid-val-${b.id}" style="font-size:26px; color:${valColor};">${b.value}</div>
-                        </div>
-                        <div style="text-align:center; font-size:11px;" id="grid-diff-${b.id}">
-                            ${compareHtml}
-                        </div>
-                    `;
-                    return;
-                } else if (isCollapsed) {
-                    cardEl.innerHTML = `
-                        <div class="card-header" onclick="toggleFold(${b.id})" style="cursor:pointer; padding: 2px 0;">
-                            <span class="card-title">${b.name}</span>
-                            <div style="display: flex; align-items: center; gap: 4px;">
-                                <span id="collapsed-diff-${b.id}">${compareHtml}</span>
-                                <span id="collapsed-val-${b.id}" style="font-size: 15px; font-weight: bold; font-family: monospace; color: ${valColor};">${b.value}</span>
-                                <span style="font-size:12px; color:#888;">▶</span>
-                            </div>
-                        </div>
-                    `;
-                    return;
-                } else {
-                    let logsHtml = (b.logs && b.logs.length > 0)
-                        ? b.logs.map(l => `<div class="log-item">${l}</div>`).join('')
-                        : '<div class="log-item">无历史记录</div>';
-
-                    cardEl.innerHTML = `
-                        <div class="card-header">
-                            <div class="card-title-box" onclick="toggleFold(${b.id})">
-                                <span class="card-title">${b.name}</span>
-                                <span style="font-size:12px; color:#888;">▼</span>
-                            </div>
-                            <div style="display: flex; gap: 6px; align-items: center;" id="action-btns-${b.id}">
-                            </div>
-                        </div>
-                        <div class="value-box">
-                            <div class="val-text" id="val-text-${b.id}">${b.value}</div>
-                        </div>
-                        <div class="fold-body">
-                            <div class="setting-row" id="setting-row-${b.id}">
-                                <label>下限:</label>
-                                <input id="input-lower-${b.id}" class="setting-input" type="number" step="0.1" value="${b.lower}">
-                                <label>预警值:</label>
-                                <input id="input-mid-${b.id}" class="setting-input" type="number" step="0.1" value="${b.mid_val}">
-                                <label>上限:</label>
-                                <input id="input-upper-${b.id}" class="setting-input" type="number" step="0.1" value="${b.upper}">
-                                <button class="btn-action" style="background:#0088cc; color:white; margin-left:auto;" onclick="saveLimits(${b.id})">💾 保存</button>
-                            </div>
-                            <div class="log-title">📜 历史日志:</div>
-                            <div class="log-list" id="log-list-${b.id}">${logsHtml}</div>
-                        </div>
-                    `;
-                }
-            }
-
-            if (isGridView) {
-                const gValEl = document.getElementById(`grid-val-${b.id}`);
-                if (gValEl) {
-                    gValEl.innerText = b.value;
-                    if (b.is_alarm) {
-                        gValEl.className = 'val-text alarm-text';
-                    } else if (isWarning) {
-                        gValEl.className = 'val-text warning-text';
-                    } else {
-                        gValEl.className = 'val-text';
-                    }
-                }
-                const gDiffEl = document.getElementById(`grid-diff-${b.id}`);
-                if (gDiffEl) {
-                    gDiffEl.innerHTML = compareHtml;
-                }
-            } else if (isCollapsed) {
-                const cValEl = document.getElementById(`collapsed-val-${b.id}`);
-                if (cValEl) {
-                    cValEl.innerText = b.value;
-                    cValEl.style.color = valColor;
-                }
-                const cDiffEl = document.getElementById(`collapsed-diff-${b.id}`);
-                if (cDiffEl) {
-                    cDiffEl.innerHTML = compareHtml;
-                }
-            } else {
-                const actionBtns = document.getElementById(`action-btns-${b.id}`);
-                if (actionBtns) {
-                    if (isLoggedIn) {
-                        actionBtns.innerHTML = `
-                            ${b.is_alarm ? `<button class="btn-action btn-clear" onclick="postAction('clear_alarm', ${b.id})">🚨 消除报警</button>` : ''}
-                            <button class="btn-action ${b.is_muted ? 'btn-alarm-off' : 'btn-alarm-on'}" onclick="postAction('toggle_mute', ${b.id})">
-                                ${b.is_muted ? '🔕 报警关' : '🔔 报警开'}
-                            </button>
-                        `;
-                    } else {
-                        actionBtns.innerHTML = '';
-                    }
-                }
-
-                const settingRow = document.getElementById(`setting-row-${b.id}`);
-                if (settingRow) {
-                    settingRow.style.display = isLoggedIn ? 'flex' : 'none';
-                }
-
-                const valEl = document.getElementById(`val-text-${b.id}`);
-                if (valEl) {
-                    valEl.innerText = b.value;
-                    if (b.is_alarm) {
-                        valEl.className = 'val-text alarm-text';
-                    } else if (isWarning) {
-                        valEl.className = 'val-text warning-text';
-                    } else {
-                        valEl.className = 'val-text';
-                    }
-                }
-
-                if (isLoggedIn) {
-                    const lowerInput = document.getElementById(`input-lower-${b.id}`);
-                    const midInput = document.getElementById(`input-mid-${b.id}`);
-                    const upperInput = document.getElementById(`input-upper-${b.id}`);
-
-                    if (lowerInput && document.activeElement !== lowerInput) lowerInput.value = b.lower;
-                    if (midInput && document.activeElement !== midInput) midInput.value = b.mid_val;
-                    if (upperInput && document.activeElement !== upperInput) upperInput.value = b.upper;
-                }
-
-                const logListEl = document.getElementById(`log-list-${b.id}`);
-                if (logListEl) {
-                    let logsHtml = (b.logs && b.logs.length > 0)
-                        ? b.logs.map(l => `<div class="log-item">${l}</div>`).join('')
-                        : '<div class="log-item">无历史记录</div>';
-                    logListEl.innerHTML = logsHtml;
-                }
-            }
         }
 
         async function refreshData() {
             try {
-                updateLoginUI();
-
-                if (lastLoggedInState !== isLoggedIn) {
-                    lastLoggedInState = isLoggedIn;
-                    forceReRenderCards();
-                }
-
                 const res = await fetch('/api/data');
                 const data = await res.json();
-
-                const statusEl = document.getElementById('status');
-                if (statusEl) statusEl.innerText = data.time;
+                document.getElementById('status').innerText = data.time;
 
                 const btnMonitor = document.getElementById('btn-monitor');
-                if (data.monitoring) {
-                    btnMonitor.className = 'btn-top active';
-                    btnMonitor.innerText = '⏹ 停止监控';
-                } else {
-                    btnMonitor.className = 'btn-top';
-                    btnMonitor.innerText = '▶ 开始监控';
-                }
+                btnMonitor.className = data.monitoring ? 'btn-top active' : 'btn-top';
+                btnMonitor.innerText = data.monitoring ? '⏹ 停止监控' : '▶ 开始监控';
 
                 const btnGrille = document.getElementById('btn-grille');
                 if (data.grille_running) {
@@ -2015,75 +1318,25 @@ MOBILE_HTML_TEMPLATE = """
                     const m = Math.floor(data.grille_cd / 60);
                     const s = Math.floor(data.grille_cd % 60);
                     const timeStr = String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0');
-                    btnGrille.innerText = `⏹ 停止操作 (${timeStr})`;
+                    btnGrille.innerText = `⏹ 停止操作(按F12停止) (${timeStr})`;
                 } else {
                     btnGrille.className = 'btn-top btn-grille';
                     btnGrille.innerText = '▶ 开始操作';
                 }
 
                 const container = document.getElementById('cards-container');
-
                 if (!data.boxes || data.boxes.length === 0) {
-                    container.innerHTML = '<div style="text-align:center; padding: 40px; color: #666;">未添加监控选框</div>';
-                    stopWebAlarmSound();
+                    container.innerHTML = '<div style="text-align:center; padding: 20px; color:#666;">未添加选框</div>';
                     return;
                 }
-
-                cachedBoxes = data.boxes;
-                
-                let sortedBoxes = [...data.boxes];
-                if (customBoxOrder && customBoxOrder.length > 0) {
-                    sortedBoxes.sort((a, b) => {
-                        let idxA = customBoxOrder.indexOf(a.id);
-                        let idxB = customBoxOrder.indexOf(b.id);
-                        if (idxA === -1) idxA = 999;
-                        if (idxB === -1) idxB = 999;
-                        return idxA - idxB;
-                    });
-                }
-
-                let hasAnyWebAlarm = false;
-
-                sortedBoxes.forEach(b => {
-                    if (collapsedMap[b.id] === undefined) {
-                        collapsedMap[b.id] = true;
-                    }
-
-                    if (b.is_alarm && !b.is_muted) {
-                        hasAnyWebAlarm = true;
-                    }
-
-                    const numVal = parseFloat(b.value);
-                    const isWarning = (!b.is_alarm && !isNaN(numVal) && numVal > b.mid_val);
-
-                    let cardEl = document.getElementById(`card-${b.id}`);
-                    if (!cardEl) {
-                        cardEl = document.createElement('div');
-                        cardEl.id = `card-${b.id}`;
-                        container.appendChild(cardEl);
-                    }
-
-                    const isCollapsed = collapsedMap[b.id];
-                    
-                    if (b.is_alarm) {
-                        cardEl.className = 'card alarm';
-                    } else if (isWarning) {
-                        cardEl.className = 'card warning';
-                    } else {
-                        cardEl.className = 'card';
-                    }
-
-                    renderCardDOM(cardEl, b, isCollapsed, isWarning, data.time);
-                });
-
-                triggerAlarmSoundLoop(hasAnyWebAlarm);
-
-            } catch(e) {
-                console.error("加载失败:", e);
-            }
+                container.innerHTML = data.boxes.map(b => `
+                    <div class="card ${b.is_alarm ? 'alarm' : ''}">
+                        <div class="card-header"><span class="card-title">${b.name}</span></div>
+                        <div class="val-text ${b.is_alarm ? 'alarm-text' : ''}">${b.value}</div>
+                    </div>
+                `).join('');
+            } catch(e){}
         }
-
-        applyLayoutView();
         setInterval(refreshData, 1000);
         refreshData();
     </script>
@@ -2101,102 +1354,36 @@ class WebServerThread(QThread):
         self.port = port
         self.server = None
 
-    def run(self):
-        if not FLASK_AVAILABLE:
-            return
+    def stop(self):
+        if self.server:
+            try:
+                self.server.shutdown()
+            except Exception:
+                pass
+        self.quit()
+        self.wait(1000)
 
+    def run(self):
+        if not FLASK_AVAILABLE: return
         app = Flask(__name__)
 
         @app.route('/')
         def index():
             return render_template_string(MOBILE_HTML_TEMPLATE)
 
-        @app.route('/favicon.ico')
-        def favicon():
-            script_dir = os.path.dirname(os.path.abspath(__file__))
-            return send_from_directory(script_dir, 'favicon.ico', mimetype='image/vnd.microsoft.icon')
-
-        @app.route('/api/login', methods=['POST'])
-        def api_login():
-            data = request.get_json() or {}
-            u = data.get('username', '').strip()
-            p = data.get('password', '').strip()
-            users = self.main_panel.users
-            if u in users and users[u] == p:
-                return jsonify({'success': True, 'username': u})
-            return jsonify({'success': False, 'message': '账号或密码错误！'})
-
-        @app.route('/api/users/list', methods=['GET'])
-        def api_users_list():
-            return jsonify({'users': list(self.main_panel.users.keys())})
-
-        @app.route('/api/users/add', methods=['POST'])
-        def api_users_add():
-            data = request.get_json() or {}
-            u = data.get('username', '').strip()
-            p = data.get('password', '').strip()
-            if not u or not p:
-                return jsonify({'success': False, 'message': '账号或密码不能为空！'})
-            if u in self.main_panel.users:
-                return jsonify({'success': False, 'message': '该账号已存在！'})
-            self.main_panel.users[u] = p
-            self.main_panel.save_users()
-            return jsonify({'success': True, 'message': '新增用户成功！'})
-
-        @app.route('/api/users/delete', methods=['POST'])
-        def api_users_delete():
-            data = request.get_json() or {}
-            u = data.get('username', '').strip()
-            if u not in self.main_panel.users:
-                return jsonify({'success': False, 'message': '用户不存在！'})
-            if u == 'admin':
-                return jsonify({'success': False, 'message': '默认管理员 admin 不可删除！'})
-            del self.main_panel.users[u]
-            self.main_panel.save_users()
-            return jsonify({'success': True, 'message': '用户已删除！'})
-
-        @app.route('/api/users/change_password', methods=['POST'])
-        def api_users_change_password():
-            data = request.get_json() or {}
-            u = data.get('username', '').strip()
-            old_p = data.get('old_password', '').strip()
-            new_p = data.get('new_password', '').strip()
-            if u not in self.main_panel.users:
-                return jsonify({'success': False, 'message': '用户不存在！'})
-            if self.main_panel.users[u] != old_p:
-                return jsonify({'success': False, 'message': '原密码错误！'})
-            if not new_p:
-                return jsonify({'success': False, 'message': '新密码不能为空！'})
-            self.main_panel.users[u] = new_p
-            self.main_panel.save_users()
-            return jsonify({'success': True, 'message': '密码修改成功！'})
-
         @app.route('/api/data')
         def get_data():
             boxes_data = []
             for b in self.main_panel.boxes:
-                logs = []
-                for i in range(min(30, b.list_widget.count())):
-                    logs.append(b.list_widget.item(i).text())
-
                 boxes_data.append({
                     'id': b.box_id,
                     'name': b.name,
                     'value': b.lbl_result.text(),
-                    'lower': b.lower,
-                    'mid_val': getattr(b, 'mid_val', 50.0),
-                    'upper': b.upper,
-                    'decimal_places': getattr(b, 'decimal_places', 2),
                     'is_alarm': b.is_alarm,
-                    'is_muted': b.is_muted,
-                    'logs': logs
                 })
-
             grille_running = bool(self.main_panel.grille_thread and self.main_panel.grille_thread.isRunning())
-
             return jsonify({
                 'monitoring': self.main_panel.monitoring,
-                'monitor_cd': getattr(self.main_panel, 'curr_monitor_cd', 0.0),
                 'grille_running': grille_running,
                 'grille_cd': getattr(self.main_panel, 'curr_grille_cd', 0.0),
                 'time': datetime.now().strftime("%H:%M:%S"),
@@ -2208,12 +1395,10 @@ class WebServerThread(QThread):
             data = request.get_json() or {}
             action = data.get('action')
             box_id = data.get('id')
-            payload = data.get('data', {})
-
             if action:
-                self.action_requested.emit(action, box_id if box_id is not None else -1, payload)
+                self.action_requested.emit(action, box_id if box_id is not None else -1, {})
                 return jsonify({'status': 'ok'})
-            return jsonify({'status': 'error', 'message': 'Invalid parameters'}), 400
+            return jsonify({'status': 'error'}), 400
 
         from werkzeug.serving import make_server
         try:
@@ -2221,13 +1406,6 @@ class WebServerThread(QThread):
             self.server.serve_forever()
         except Exception as e:
             print("Web Server Error:", e)
-
-    def stop(self):
-        if self.server:
-            try:
-                self.server.shutdown()
-            except Exception:
-                pass
 
 
 # ==================== 9. 全局控制面板 ====================
@@ -2240,13 +1418,9 @@ class GlobalControlPanel(QWidget):
         self.boxes = []
         self.monitoring = False
         self.is_editing = False
-        self.is_collapsed = False
-        self.boxes_panel_hidden = False
         self.reader = None
         self.config_file = "monitor_config.json"
-        self.users_file = "users_config.json"
         
-        self.users = self.load_users()
         self.alarm_player = AlarmSoundPlayer()
         self.grille_thread = None
         self.monitor_thread = None
@@ -2254,10 +1428,10 @@ class GlobalControlPanel(QWidget):
 
         self.curr_monitor_cd = 0.0
         self.curr_grille_cd = 0.0
-
         self.ocr_params = {'scale': 3.0, 'clahe': 2.0, 'thresh_block': 11, 'thresh_c': 2}
         self._drag_pos = None
 
+        # F12 键盘监听
         self.f12_listener = GlobalF12Listener()
         self.f12_listener.f12_triggered.connect(self._on_f12_pressed)
         self.f12_listener.start()
@@ -2265,7 +1439,6 @@ class GlobalControlPanel(QWidget):
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(6, 6, 6, 6)
         main_layout.setSpacing(6)
-
         self.setMaximumWidth(520)
 
         self.setStyleSheet("""
@@ -2282,7 +1455,6 @@ class GlobalControlPanel(QWidget):
                 font-weight: bold; 
             }
             QPushButton:hover { background-color: rgba(61, 64, 91, 0.8); }
-            QPushButton:pressed { background-color: rgba(26, 27, 38, 0.9); }
             QDoubleSpinBox, QSpinBox { 
                 background-color: rgba(26, 26, 38, 0.8); 
                 color: #00ff8c; 
@@ -2293,17 +1465,13 @@ class GlobalControlPanel(QWidget):
                 padding: 0px 2px;
                 height: 26px;
             }
-            QCheckBox { color: #00ff8c; font-size: 11px; font-weight: bold; background: transparent; border: none; }
-            QCheckBox::indicator { width: 14px; height: 14px; border-radius: 3px; border: 1px solid #00ff8c; background: rgba(26, 26, 38, 0.8); }
-            QCheckBox::indicator:checked { background: #00ff8c; }
         """)
 
-        # ---------- 第 1 排：识别监控配置栏 ----------
+        # ---------- 第 1 排：配置栏 ----------
         self.row1_card = QFrame()
         self.row1_card.setStyleSheet("QFrame { background-color: rgba(0, 0, 0, 0.8); border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 6px; }")
         self.row1_layout = QHBoxLayout(self.row1_card)
         self.row1_layout.setContentsMargins(8, 5, 8, 5)
-        self.row1_layout.setSpacing(6)
 
         self.row1_layout.addWidget(QLabel("⏱ 识别间隔(秒):"))
         self.spin_interval = CleanDoubleSpinBox()
@@ -2312,30 +1480,8 @@ class GlobalControlPanel(QWidget):
         self.spin_interval.setFixedSize(42, 26)
         self.spin_interval.setRange(0.1, 10.0)
         self.spin_interval.setValue(1.0)
-        self.spin_interval.setSingleStep(0.5)
         self.spin_interval.valueChanged.connect(self._on_interval_changed)
         self.row1_layout.addWidget(self.spin_interval)
-
-        self.row1_layout.addWidget(QLabel("📊 记录数:"))
-        self.spin_count = QSpinBox()
-        self.spin_count.setButtonSymbols(QAbstractSpinBox.NoButtons)
-        self.spin_count.setAlignment(Qt.AlignCenter)
-        self.spin_count.setFixedSize(40, 26)
-        self.spin_count.setRange(5, 200)
-        self.spin_count.setValue(30)
-        self.spin_count.valueChanged.connect(self._on_count_changed)
-        self.row1_layout.addWidget(self.spin_count)
-
-        self.row1_layout.addWidget(QLabel("📝 记录间隔(分):"))
-        self.spin_log_interval = CleanDoubleSpinBox()
-        self.spin_log_interval.setButtonSymbols(QAbstractSpinBox.NoButtons)
-        self.spin_log_interval.setAlignment(Qt.AlignCenter)
-        self.spin_log_interval.setFixedSize(42, 26)
-        self.spin_log_interval.setRange(0.0, 1440.0)
-        self.spin_log_interval.setValue(1.0)
-        self.spin_log_interval.setSingleStep(0.5)
-        self.spin_log_interval.valueChanged.connect(self._on_log_interval_changed)
-        self.row1_layout.addWidget(self.spin_log_interval)
 
         self.btn_ocr_adjust = QPushButton("⚙️ 识别调整")
         self.btn_ocr_adjust.setFixedHeight(26)
@@ -2349,433 +1495,146 @@ class GlobalControlPanel(QWidget):
         self.row2_card.setStyleSheet("QFrame { background-color: rgba(0, 0, 0, 0.8); border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 6px; }")
         row2_layout = QHBoxLayout(self.row2_card)
         row2_layout.setContentsMargins(8, 5, 8, 5)
-        row2_layout.setSpacing(6)
 
+        # 监控按钮（完全不与F12绑定）
         self.btn_monitor = QPushButton("▶ 开始监控")
         self.btn_monitor.setFixedHeight(26)
         self.btn_monitor.clicked.connect(self._toggle_monitor)
         row2_layout.addWidget(self.btn_monitor)
 
+        # 细格栅操作按钮（提示F12按键）
         self.btn_grille_start = QPushButton("▶ 开始操作")
         self.btn_grille_start.setFixedHeight(26)
         self.btn_grille_start.setStyleSheet("background-color: #0088cc; color: white; font-weight: bold;")
         self.btn_grille_start.clicked.connect(self._toggle_grille)
         row2_layout.addWidget(self.btn_grille_start)
 
+        self.btn_add_box = QPushButton("➕ 添加选框")
+        self.btn_add_box.setFixedHeight(26)
+        self.btn_add_box.clicked.connect(self._add_box_dialog)
+        row2_layout.addWidget(self.btn_add_box)
+
         self.btn_exit = QPushButton("❌ 退出")
         self.btn_exit.setFixedHeight(26)
         self.btn_exit.clicked.connect(self.close_app)
         row2_layout.addWidget(self.btn_exit)
 
-        self.row2_extra_container = QWidget()
-        row2_extra_layout = QHBoxLayout(self.row2_extra_container)
-        row2_extra_layout.setContentsMargins(0, 0, 0, 0)
-        row2_extra_layout.setSpacing(6)
-
-        self.btn_toggle_hide = QPushButton("👁 隐藏")
-        self.btn_toggle_hide.setFixedHeight(26)
-        self.btn_toggle_hide.setStyleSheet("background-color: rgba(255,255,255,0.12); color: #00ff8c; border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; padding: 0px 8px; font-size: 11px; font-weight: bold;")
-        self.btn_toggle_hide.clicked.connect(self._toggle_hide_boxes)
-        row2_extra_layout.addWidget(self.btn_toggle_hide)
-
-        self.btn_edit = QPushButton("⚙️ 调整窗口")
-        self.btn_edit.setFixedSize(90, 26)
-        self.btn_edit.setStyleSheet("QPushButton { background-color: rgba(255,255,255,0.12); color: #ffffff; border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; padding: 0px 4px; font-size: 11px; font-weight: bold; } QPushButton:hover { background-color: rgba(61, 64, 91, 0.8); }")
-        self.btn_edit.clicked.connect(self._toggle_edit)
-        row2_extra_layout.addWidget(self.btn_edit)
-
-        self.widget_edit_tools = QWidget()
-        self.widget_edit_tools.setFixedSize(90, 26)
-        edit_tools_layout = QHBoxLayout(self.widget_edit_tools)
-        edit_tools_layout.setContentsMargins(0, 0, 0, 0)
-        edit_tools_layout.setSpacing(4)
-
-        self.btn_finish = QPushButton("✅ 完成")
-        self.btn_finish.setFixedSize(60, 26)
-        self.btn_finish.setStyleSheet("QPushButton { background-color: #e6b84d; color: black; border-radius: 4px; padding: 0px 4px; font-size: 11px; font-weight: bold; }")
-        self.btn_finish.clicked.connect(self._toggle_edit)
-
-        self.btn_add = QPushButton("➕")
-        self.btn_add.setFixedSize(26, 26)
-        self.btn_add.setStyleSheet("QPushButton { background-color: #00a86b; color: white; border-radius: 4px; padding: 0px 0px; font-size: 11px; font-weight: bold; }")
-        self.btn_add.clicked.connect(self._add_box_picker)
-
-        edit_tools_layout.addWidget(self.btn_finish)
-        edit_tools_layout.addWidget(self.btn_add)
-        self.widget_edit_tools.setVisible(False)
-
-        row2_extra_layout.addWidget(self.widget_edit_tools)
-        row2_layout.addWidget(self.row2_extra_container)
-
-        self.spacer_widget = QWidget()
-        self.spacer_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        row2_layout.addWidget(self.spacer_widget)
-
-        self.btn_collapse = QPushButton("◀")
-        self.btn_collapse.setFixedSize(26, 26)
-        self.btn_collapse.clicked.connect(self._toggle_collapse)
-        row2_layout.addWidget(self.btn_collapse)
-
         main_layout.addWidget(self.row2_card)
 
-        # ---------- 第 3 排：网络服务按钮与细格栅 (需求一) ----------
-        self.grille_card = QFrame()
-        self.grille_card.setStyleSheet("QFrame { background-color: rgba(0, 0, 0, 0.8); border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 6px; }")
-        row3_layout = QHBoxLayout(self.grille_card)
-        row3_layout.setContentsMargins(8, 5, 8, 5)
-        row3_layout.setSpacing(6)
-
-        self.chk_grille = QCheckBox("细格栅")
-        self.chk_grille.toggled.connect(self.save_config)
-        row3_layout.addWidget(self.chk_grille)
-
-        row3_layout.addWidget(QLabel("执行间隔(分):"))
-        self.spin_grille_interval = CleanDoubleSpinBox()
-        self.spin_grille_interval.setButtonSymbols(QAbstractSpinBox.NoButtons)
-        self.spin_grille_interval.setAlignment(Qt.AlignCenter)
-        self.spin_grille_interval.setFixedSize(48, 24)
-        self.spin_grille_interval.setRange(0.1, 1440.0)
-        self.spin_grille_interval.setValue(2.0)
-        self.spin_grille_interval.setSingleStep(0.5)
-        self.spin_grille_interval.valueChanged.connect(self._on_grille_interval_changed)
-        row3_layout.addWidget(self.spin_grille_interval)
-
-        self.lbl_grille_countdown = QLabel("⏳ --")
-        self.lbl_grille_countdown.setStyleSheet("color: #ffcc00; font-weight: bold; padding-left: 4px;")
-        row3_layout.addWidget(self.lbl_grille_countdown)
-
-        row3_layout.addSpacing(10)
-
-        # 改为按钮弹出网络服务界面 (需求一)
-        self.btn_web_service = QPushButton("🌐 网页服务")
-        self.btn_web_service.setFixedHeight(26)
-        self.btn_web_service.clicked.connect(self._open_web_service_dialog)
-        row3_layout.addWidget(self.btn_web_service)
-
-        row3_layout.addStretch()
-        main_layout.addWidget(self.grille_card)
-
-        self._update_button_styles()
-        self.adjustSize()
-        self._position_top_right()
-
-        self._init_ocr()
+        # 初始化 OCR
+        self._init_ocr_engine()
         self.load_config()
 
-    def load_users(self):
-        """读取用户字典，默认账户 admin / admin"""
-        if os.path.exists(self.users_file):
+    def _init_ocr_engine(self):
+        if DDDDOCR_AVAILABLE:
             try:
-                with open(self.users_file, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                    if data:
-                        return data
-            except Exception:
-                pass
-        return {"admin": "admin"}
+                self.reader = ddddocr.DdddOcr(show_ad=False)
+            except Exception as e:
+                print("DDDDOCR 初始化失败:", e)
 
-    def save_users(self):
-        """保存用户字典"""
-        try:
-            with open(self.users_file, 'w', encoding='utf-8') as f:
-                json.dump(self.users, f, ensure_ascii=False, indent=2)
-        except Exception as e:
-            print("保存用户配置失败:", e)
-
-    # ---------- 需求五：配置文件实时保存 ----------
-    def save_config(self):
-        """实时保存所有选框和全局参数配置"""
-        try:
-            data = {
-                'interval': self.spin_interval.value(),
-                'count': self.spin_count.value(),
-                'log_interval': self.spin_log_interval.value(),
-                'grille_interval': self.spin_grille_interval.value(),
-                'use_grille': self.chk_grille.isChecked(),
-                'ocr_params': self.ocr_params,
-                'boxes': []
-            }
-            for b in self.boxes:
-                data['boxes'].append({
-                    'id': b.box_id,
-                    'x': b.capture_x,
-                    'y': b.capture_y,
-                    'w': b.capture_w,
-                    'h': b.capture_h,
-                    'name': b.name,
-                    'lower': b.lower,
-                    'mid_val': b.mid_val,
-                    'upper': b.upper,
-                    'decimal_places': b.decimal_places,
-                    'is_muted': b.is_muted
-                })
-            with open(self.config_file, 'w', encoding='utf-8') as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
-        except Exception as e:
-            print("保存配置文件失败:", e)
-
-    def load_config(self):
-        """加载配置文件"""
-        if not os.path.exists(self.config_file):
-            return
-        try:
-            with open(self.config_file, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-
-            self.spin_interval.setValue(data.get('interval', 1.0))
-            self.spin_count.setValue(data.get('count', 30))
-            self.spin_log_interval.setValue(data.get('log_interval', 1.0))
-            self.spin_grille_interval.setValue(data.get('grille_interval', 2.0))
-            self.chk_grille.setChecked(data.get('use_grille', False))
-
-            if 'ocr_params' in data:
-                self.ocr_params = data['ocr_params']
-
-            for b_data in data.get('boxes', []):
-                box = self.create_box(
-                    x=b_data.get('x', 100),
-                    y=b_data.get('y', 100),
-                    w=b_data.get('w', 150),
-                    h=b_data.get('h', 40),
-                    name=b_data.get('name', '区域'),
-                    lower=b_data.get('lower', 0.0),
-                    mid_val=b_data.get('mid_val', 50.0),
-                    upper=b_data.get('upper', 100.0),
-                    decimal_places=b_data.get('decimal_places', 0),
-                    box_id=b_data.get('id')
-                )
-                if b_data.get('is_muted', False):
-                    box._toggle_mute()
-        except Exception as e:
-            print("读取配置文件失败:", e)
-
-    def _open_web_service_dialog(self):
-        """打开网页服务设置与二维码弹窗 (需求一)"""
-        dlg = WebServiceDialog(self, parent=self)
-        dlg.exec()
-
-    def start_web_service_with_ip(self, host_ip):
-        if not FLASK_AVAILABLE:
-            return
-        if self.web_thread:
-            self.stop_web_service()
-        self.web_thread = WebServerThread(self, host='0.0.0.0', port=5000)
-        self.web_thread.action_requested.connect(self._handle_web_action)
-        self.web_thread.start()
-        self.save_config()
-
-    def stop_web_service(self):
-        if self.web_thread:
-            self.web_thread.stop()
-            self.web_thread = None
-        self.save_config()
-
-    def _handle_web_action(self, action, box_id, data):
-        if action == 'toggle_monitor':
-            self._toggle_monitor()
-            return
-        if action == 'toggle_grille':
-            self._toggle_grille()
-            return
-
-        target_box = next((b for b in self.boxes if b.box_id == box_id), None)
-        if not target_box:
-            return
-
-        if action == 'set_limits':
-            if 'lower' in data:
-                target_box.spin_lower.setValue(float(data['lower']))
-            if 'mid_val' in data:
-                target_box.spin_mid.setValue(float(data['mid_val']))
-            if 'upper' in data:
-                target_box.spin_upper.setValue(float(data['upper']))
-        elif action == 'clear_alarm':
-            target_box._on_clear_alarm()
-        elif action == 'toggle_mute':
-            target_box._toggle_mute()
-
-    def mousePressEvent(self, event):
-        if event.button() == Qt.LeftButton:
-            self._drag_pos = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
-            event.accept()
-
-    def mouseMoveEvent(self, event):
-        if event.buttons() & Qt.LeftButton and self._drag_pos is not None:
-            self.move(event.globalPosition().toPoint() - self._drag_pos)
-            event.accept()
-
-    def mouseReleaseEvent(self, event):
-        self._drag_pos = None
-
+    # ---------- 需求一逻辑修正：F12 按键响应 ----------
     def _on_f12_pressed(self):
-        QTimer.singleShot(0, self._toggle_monitor)
-
-    def _init_ocr(self):
-        try:
-            import ddddocr
-            self.reader = ddddocr.DdddOcr(show_ad=False)
-        except Exception as e:
-            print("ddddocr 初始化失败:", e)
-            self.reader = None
-
-    def _position_top_right(self):
-        screen = QApplication.primaryScreen()
-        if screen:
-            screen_geo = screen.availableGeometry()
-            self.move(screen_geo.width() - self.width() - 20, 20)
-
-    def _update_button_styles(self):
-        if self.monitoring:
-            self.btn_monitor.setText("⏹ 停止监控 (F12)")
-            self.btn_monitor.setStyleSheet("background-color: #b03a3a; color: white; font-weight: bold;")
-        else:
-            self.btn_monitor.setText("▶ 开始监控 (F12)")
-            self.btn_monitor.setStyleSheet("background-color: #2e9a58; color: white; font-weight: bold;")
-
+        # 开始监控不需要 F12 响应，仅当【开始操作】运行时，按下 F12 执行【停止操作】
         if self.grille_thread and self.grille_thread.isRunning():
-            self.btn_grille_start.setText("⏹ 停止操作")
-            self.btn_grille_start.setStyleSheet("background-color: #cc3333; color: white; font-weight: bold;")
+            self._stop_grille()
+
+    # ---------- 需求二逻辑修正：停止监控 / 停止操作防止闪退 ----------
+    def _toggle_monitor(self):
+        if self.monitoring:
+            self._stop_monitor()
         else:
-            self.btn_grille_start.setText("▶ 开始操作")
-            self.btn_grille_start.setStyleSheet("background-color: #0088cc; color: white; font-weight: bold;")
+            self._start_monitor()
+
+    def _start_monitor(self):
+        if not self.boxes: return
+        self.monitoring = True
+        self.btn_monitor.setText("⏹ 停止监控")
+        self.btn_monitor.setStyleSheet("background-color: #b03a3a; color: white;")
+
+        screen = QApplication.primaryScreen()
+        scale = screen.devicePixelRatio() if screen else 1.0
+
+        self.monitor_thread = MonitorThread(self.boxes, self.spin_interval.value(), self.ocr_params, scale)
+        if self.reader:
+            self.monitor_thread.set_reader(self.reader)
+        
+        # 使用安全的 box_id 回调
+        self.monitor_thread.value_updated.connect(self._on_monitor_value_updated)
+        self.monitor_thread.start()
+
+    def _stop_monitor(self):
+        self.monitoring = False
+        if self.monitor_thread:
+            self.monitor_thread.stop()  # 调用安全的 stop() + wait()
+            self.monitor_thread = None
+        self.btn_monitor.setText("▶ 开始监控")
+        self.btn_monitor.setStyleSheet("")
+
+    def _on_monitor_value_updated(self, box_id, now_str, found_val, raw_text):
+        # 主线程查找 box，避免跨线程直接访问控件引发崩溃
+        box = next((b for b in self.boxes if b.box_id == box_id), None)
+        if box:
+            box.update_result_display(found_val, raw_text)
+            box.add_log_val(now_str, found_val, raw_text)
+
+    def _toggle_grille(self):
+        if self.grille_thread and self.grille_thread.isRunning():
+            self._stop_grille()
+        else:
+            self._start_grille()
+
+    def _start_grille(self):
+        self.grille_thread = FineGrilleThread(cycle_interval_min=2.0)
+        self.grille_thread.countdown_tick.connect(self._on_grille_tick)
+        self.grille_thread.start()
+        # 在按钮上添加【按F12停止】提示
+        self.btn_grille_start.setText("⏹ 停止操作(按F12停止)")
+        self.btn_grille_start.setStyleSheet("background-color: #cc3333; color: white; font-weight: bold;")
+
+    def _stop_grille(self):
+        if self.grille_thread:
+            self.grille_thread.stop()  # 修复闪退：等待 C++ 线程安全退出
+            self.grille_thread = None
+        self.curr_grille_cd = 0.0
+        self.btn_grille_start.setText("▶ 开始操作")
+        self.btn_grille_start.setStyleSheet("background-color: #0088cc; color: white; font-weight: bold;")
+
+    def _on_grille_tick(self, rem_seconds):
+        self.curr_grille_cd = rem_seconds
+        m = int(rem_seconds // 60)
+        s = int(rem_seconds % 60)
+        time_str = f"{m:02d}:{s:02d}"
+        # 实时更新按钮提示文本
+        self.btn_grille_start.setText(f"⏹ 停止操作(按F12停止) ({time_str})")
 
     def _on_interval_changed(self, val):
         if self.monitor_thread:
             self.monitor_thread.update_params(interval=val)
-        self.save_config()
-
-    def _on_count_changed(self, val):
-        for b in self.boxes:
-            b.set_max_log_count(val)
-        self.save_config()
-
-    def _on_log_interval_changed(self, val):
-        for b in self.boxes:
-            b.log_interval_min = val
-        self.save_config()
-
-    def _on_grille_interval_changed(self, val):
-        if self.grille_thread:
-            self.grille_thread.set_interval(val)
-        self.save_config()
 
     def _open_ocr_adjust_dialog(self):
-        dlg = OCRAdjustDialog(self.ocr_params, reader=self.reader, parent=self)
+        dlg = OCRAdjustDialog(self.ocr_params, self.reader, parent=self)
         if dlg.exec() == QDialog.Accepted:
             self.ocr_params = dlg.get_params()
             if self.monitor_thread:
                 self.monitor_thread.update_params(ocr_params=self.ocr_params)
-            self.save_config()
 
-    def _toggle_monitor(self):
-        if self.monitoring:
-            self.monitoring = False
-            if self.monitor_thread:
-                self.monitor_thread.stop()
-                self.monitor_thread = None
-            self.alarm_player.stop()
-        else:
-            if not self.boxes:
-                return
-            self.monitoring = True
-            screen = QApplication.primaryScreen()
-            scale = screen.devicePixelRatio() if screen else 1.0
+    def _add_box_dialog(self):
+        self.hide()
+        time.sleep(0.2)
+        self.picker = CoordinatePicker()
+        self.picker.coord_selected.connect(self._on_box_picked)
+        self.picker.showFullScreen()
 
-            self.monitor_thread = MonitorThread(
-                boxes=self.boxes,
-                interval=self.spin_interval.value(),
-                ocr_params=self.ocr_params,
-                scale=scale
-            )
-            self.monitor_thread.set_reader(self.reader)
-            self.monitor_thread.value_updated.connect(self._on_value_updated)
-            self.monitor_thread.countdown_tick.connect(self._on_monitor_cd_tick)
-            self.monitor_thread.start()
-
-        self._update_button_styles()
-
-    def _on_monitor_cd_tick(self, rem_sec):
-        self.curr_monitor_cd = rem_sec
-
-    def _toggle_grille(self):
-        if self.grille_thread and self.grille_thread.isRunning():
-            self.grille_thread.stop()
-            self.grille_thread = None
-            self.lbl_grille_countdown.setText("⏳ --")
-        else:
-            if not self.chk_grille.isChecked():
-                return
-            interval = self.spin_grille_interval.value()
-            self.grille_thread = FineGrilleThread(cycle_interval_min=interval)
-            self.grille_thread.countdown_tick.connect(self._on_grille_cd_tick)
-            self.grille_thread.start()
-
-        self._update_button_styles()
-
-    def _on_grille_cd_tick(self, rem_sec):
-        self.curr_grille_cd = rem_sec
-        m = int(rem_sec) // 60
-        s = int(rem_sec) % 60
-        self.lbl_grille_countdown.setText(f"⏳ {m:02d}:{s:02d}")
-
-    def _on_value_updated(self, box, now_str, val, raw_str):
-        if box not in self.boxes:
-            return
-
-        box.update_result_display(val, raw_str)
-        box.add_log_val(now_str, val, raw_str)
-
-        if val is not None:
-            if val > box.upper or val < box.lower:
-                if not box.user_cleared_alarm or (box.last_alarm_val is not None and abs(val - box.last_alarm_val) > 1e-4):
-                    box.user_cleared_alarm = False
-                    box.last_alarm_val = val
-                    box.set_alarm_state(True)
-            else:
-                box.user_cleared_alarm = False
-                box.last_alarm_val = None
-                box.set_alarm_state(False)
-
-        has_any_alarm = any(b.is_alarm and not b.is_muted for b in self.boxes)
-        if has_any_alarm:
-            self.alarm_player.play()
-        else:
-            self.alarm_player.stop()
-
-    def create_box(self, x=100, y=100, w=150, h=40, name="区域", lower=0.0, mid_val=50.0, upper=100.0, decimal_places=0, box_id=None):
-        if box_id is None:
-            box_id = int(time.time() * 1000) % 1000000
-
-        box = OverlayRegionWidget(box_id, x, y, w, h, name, lower, mid_val, upper, decimal_places)
-        box.log_interval_min = self.spin_log_interval.value()
-        box.set_max_log_count(self.spin_count.value())
+    def _on_box_picked(self, x, y, w, h):
+        self.show()
+        if w <= 0 or h <= 0: return
+        box_id = int(time.time() * 1000) % 100000
+        box = OverlayRegionWidget(box_id, x, y, w, h, name=f"区域_{len(self.boxes)+1}")
         box.delete_requested.connect(self._delete_box)
-        box.alarm_cleared.connect(self._on_box_alarm_cleared)
         box.config_changed.connect(self.save_config)
-        box.set_edit_mode(self.is_editing)
-        box.set_panel_hidden(self.boxes_panel_hidden)
         box.show()
-
         self.boxes.append(box)
         self.save_config()
-        return box
-
-    def _add_box_picker(self):
-        self.hide()
-        for b in self.boxes: b.hide()
-        time.sleep(0.2)
-
-        self.picker = CoordinatePicker()
-
-        def on_picked(x, y, w, h):
-            self.show()
-            for b in self.boxes: b.show()
-            if w > 0 and h > 0:
-                name_idx = len(self.boxes) + 1
-                self.create_box(x, y, w, h, name=f"区域{name_idx}")
-
-        self.picker.coord_selected.connect(on_picked)
-        self.picker.showFullScreen()
 
     def _delete_box(self, box):
         if box in self.boxes:
@@ -2783,73 +1642,64 @@ class GlobalControlPanel(QWidget):
             box.close()
             self.save_config()
 
-        has_any_alarm = any(b.is_alarm and not b.is_muted for b in self.boxes)
-        if not has_any_alarm:
-            self.alarm_player.stop()
-
-    def _on_box_alarm_cleared(self):
-        has_any_alarm = any(b.is_alarm and not b.is_muted for b in self.boxes)
-        if not has_any_alarm:
-            self.alarm_player.stop()
-
-    def _toggle_edit(self):
-        self.is_editing = not self.is_editing
+    def save_config(self):
+        cfg = []
         for b in self.boxes:
-            b.set_edit_mode(self.is_editing)
+            cfg.append({
+                'id': b.box_id, 'x': b.capture_x, 'y': b.capture_y,
+                'w': b.capture_w, 'h': b.capture_h, 'name': b.name,
+                'lower': b.lower, 'mid_val': b.mid_val, 'upper': b.upper,
+                'decimal_places': b.decimal_places
+            })
+        with open(self.config_file, 'w', encoding='utf-8') as f:
+            json.dump(cfg, f, ensure_ascii=False, indent=2)
 
-        if self.is_editing:
-            self.btn_edit.setVisible(False)
-            self.widget_edit_tools.setVisible(True)
-        else:
-            self.btn_edit.setVisible(True)
-            self.widget_edit_tools.setVisible(False)
-            self.save_config()
+    def load_config(self):
+        if not os.path.exists(self.config_file): return
+        try:
+            with open(self.config_file, 'r', encoding='utf-8') as f:
+                cfg = json.load(f)
+            for item in cfg:
+                box = OverlayRegionWidget(
+                    item.get('id', int(time.time()*1000)%100000),
+                    item.get('x', 100), item.get('y', 100),
+                    item.get('w', 100), item.get('h', 50),
+                    name=item.get('name', '区域'),
+                    lower=item.get('lower', 0.0),
+                    mid_val=item.get('mid_val', 50.0),
+                    upper=item.get('upper', 100.0),
+                    decimal_places=item.get('decimal_places', 0)
+                )
+                box.delete_requested.connect(self._delete_box)
+                box.config_changed.connect(self.save_config)
+                box.show()
+                self.boxes.append(box)
+        except Exception as e:
+            print("加载配置失败:", e)
 
-    def _toggle_hide_boxes(self):
-        self.boxes_panel_hidden = not self.boxes_panel_hidden
-        for b in self.boxes:
-            b.set_panel_hidden(self.boxes_panel_hidden)
-        if self.boxes_panel_hidden:
-            self.btn_toggle_hide.setText("👁 显示")
-            self.btn_toggle_hide.setStyleSheet("background-color: rgba(255,255,255,0.12); color: #aaa; border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; padding: 0px 8px; font-size: 11px; font-weight: bold;")
-        else:
-            self.btn_toggle_hide.setText("👁 隐藏")
-            self.btn_toggle_hide.setStyleSheet("background-color: rgba(255,255,255,0.12); color: #00ff8c; border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; padding: 0px 8px; font-size: 11px; font-weight: bold;")
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self._drag_pos = event.globalPosition().toPoint() - self.pos()
+            event.accept()
 
-    def _toggle_collapse(self):
-        self.is_collapsed = not self.is_collapsed
-        if self.is_collapsed:
-            self.row1_card.setVisible(False)
-            self.grille_card.setVisible(False)
-            self.row2_extra_container.setVisible(False)
-            self.btn_collapse.setText("▶")
-        else:
-            self.row1_card.setVisible(True)
-            self.grille_card.setVisible(True)
-            self.row2_extra_container.setVisible(True)
-            self.btn_collapse.setText("◀")
-        self.adjustSize()
+    def mouseMoveEvent(self, event):
+        if event.buttons() & Qt.LeftButton and self._drag_pos:
+            self.move(event.globalPosition().toPoint() - self._drag_pos)
+            event.accept()
 
     def close_app(self):
-        self.save_config()
-        self.save_users()
-        if self.f12_listener: self.f12_listener.stop()
-        if self.monitor_thread: self.monitor_thread.stop()
-        if self.grille_thread: self.grille_thread.stop()
-        if self.web_thread: self.web_thread.stop()
-        self.alarm_player.stop()
-
-        for b in self.boxes: b.close()
+        # 退出前安全关闭所有子线程
+        self.f12_listener.stop()
+        self._stop_monitor()
+        self._stop_grille()
+        for b in self.boxes:
+            b.close()
         self.close()
-        QApplication.quit()
 
 
-# ==================== 程序主入口 ====================
 if __name__ == "__main__":
     app = QApplication(sys.argv)
-    app.setQuitOnLastWindowClosed(False)
-
     panel = GlobalControlPanel()
+    panel.move(100, 100)
     panel.show()
-
     sys.exit(app.exec())
