@@ -593,7 +593,7 @@ class OverlayRegionWidget(QWidget):
         row4_layout.addStretch()
         panel_layout.addWidget(self.row4_container)
 
-        # 日志容器（由“日志”按钮控制显示/折叠，默认折叠）
+        # 日志容器
         self.log_container = QWidget()
         log_layout = QVBoxLayout(self.log_container)
         log_layout.setContentsMargins(0, 3, 0, 0)
@@ -615,7 +615,6 @@ class OverlayRegionWidget(QWidget):
                 border-bottom: 1px solid rgba(255, 255, 255, 0.05);
             }
         """)
-        # 【修改项 1】点击识别窗列表中的日志，在新窗口弹窗显示日志内容
         self.list_widget.itemClicked.connect(self._show_log_detail_dialog)
 
         log_layout.addWidget(self.list_widget)
@@ -629,7 +628,6 @@ class OverlayRegionWidget(QWidget):
         self.setMouseTracking(True)
 
     def _show_log_detail_dialog(self, item):
-        """【修改项 1 实现】点击识别窗列表中的日志，弹窗显示日志内容"""
         log_text = item.text()
         dialog = QDialog(self)
         dialog.setWindowTitle(f"📜 日志详情 - {self.name}")
@@ -950,7 +948,8 @@ class MonitorThread(QThread):
     value_updated = Signal(object, str, object, str)
     countdown_tick = Signal(float)
 
-    def __init__(self, boxes, interval=1.0, ocr_params=None, scale=1.0, parent=None):
+    # 【修改项 1】识别间隔默认 10 秒
+    def __init__(self, boxes, interval=10.0, ocr_params=None, scale=1.0, parent=None):
         super().__init__(parent)
         self.boxes = boxes
         self.interval = max(0.1, interval)
@@ -1161,7 +1160,7 @@ MOBILE_HTML_TEMPLATE = """
         .btn-alarm-on { background: #2e9a58; color: #ffffff; border: 1px solid #3fb950; }
         .btn-alarm-off { background: #4a4d52; color: #cccccc; border: 1px solid #666666; }
 
-        .value-box { text-align: center; margin: 8px 0; }
+        .value-box { text-align: center; margin: 8px 0; display: flex; align-items: center; justify-content: center; gap: 10px; }
         .val-text { font-size: 32px; font-weight: bold; color: #00ff8c; font-family: monospace; }
         .val-text.alarm-text { color: #ff4d4d; }
         .val-text.warning-text { color: #ffaa00; }
@@ -1183,6 +1182,22 @@ MOBILE_HTML_TEMPLATE = """
         .modal-content { background: #1a1a26; border: 1px solid rgba(255,255,255,0.2); border-radius: 10px; width: 90%; max-width: 420px; padding: 16px; color: #e0e0e0; }
         .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 8px; }
         .modal-close { cursor: pointer; color: #ff4d4d; font-weight: bold; font-size: 16px; }
+
+        /* 【修改项 2 & 3 增加的 CSS 样式】 */
+        .diff-text { font-size: 13px; font-weight: bold; font-family: monospace; padding: 2px 6px; border-radius: 4px; background: rgba(0,0,0,0.3); }
+        .diff-up { color: #ff4d4d !important; }   /* 上涨 红色 */
+        .diff-down { color: #00ff8c !important; } /* 下降 绿色 */
+        .diff-zero { color: #888888 !important; }
+
+        /* 布局容器模式 */
+        #cards-container.strip-mode { display: flex; flex-direction: column; gap: 10px; }
+        #cards-container.square-mode { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 10px; }
+
+        /* 正方形卡片内部排版 */
+        .square-card { text-align: center; display: flex; flex-direction: column; justify-content: center; align-items: center; padding: 14px 8px; }
+        .square-card .sq-row1 { font-size: 14px; font-weight: bold; color: #ffffff; margin-bottom: 4px; width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .square-card .sq-row2 { font-size: 30px; font-weight: bold; font-family: monospace; color: #00ff8c; margin: 4px 0; }
+        .square-card .sq-row3 { font-size: 13px; font-weight: bold; font-family: monospace; }
     </style>
 </head>
 <body>
@@ -1195,6 +1210,14 @@ MOBILE_HTML_TEMPLATE = """
                 <div id="status" class="status">初始化...</div>
             </div>
             <div class="header-actions">
+                <!-- 【修改项 2 & 3】自定义时间对比输入框 + 模式切换按钮 -->
+                <div style="display: flex; align-items: center; gap: 4px; font-size: 12px; color: #aaa; background: rgba(255,255,255,0.05); padding: 2px 6px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.1);">
+                    <span>对比:</span>
+                    <input type="number" id="compare-mins" value="5" min="1" style="width: 40px; background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; color: #00ff8c; font-weight: bold; text-align: center; padding: 2px;" onchange="refreshData()">
+                    <span>分</span>
+                </div>
+                <button id="btn-mode-toggle" class="btn-top" style="background: #6c5ce7;" onclick="toggleDisplayMode()">📱 长条模式</button>
+
                 <!-- 登录按钮 -->
                 <div id="login-box" style="display: inline-flex; align-items: center; gap: 4px;">
                     <button class="btn-fold-tool" style="background:#0088cc; color:white; border:none;" onclick="openLoginModal()">🔐 登录</button>
@@ -1211,7 +1234,7 @@ MOBILE_HTML_TEMPLATE = """
             </div>
         </div>
 
-        <div id="cards-container"></div>
+        <div id="cards-container" class="strip-mode"></div>
     </div>
 
     <!-- 独立登录界面弹窗 -->
@@ -1280,6 +1303,73 @@ MOBILE_HTML_TEMPLATE = """
         let alarmTimer = null;
         let cachedBoxes = [];
 
+        // 【修改项 2 & 3】本地数据对比与显示模式全局变量
+        const historyStore = {}; // { boxId: [ { time: timestamp, val: number }, ... ] }
+        let displayMode = localStorage.getItem('displayMode') || 'strip'; // 'strip' 或 'square'
+
+        function toggleDisplayMode() {
+            displayMode = (displayMode === 'strip') ? 'square' : 'strip';
+            localStorage.setItem('displayMode', displayMode);
+            updateDisplayModeUI();
+            forceReRenderCards();
+            refreshData();
+        }
+
+        function updateDisplayModeUI() {
+            const btn = document.getElementById('btn-mode-toggle');
+            const container = document.getElementById('cards-container');
+            if (btn) {
+                btn.innerText = (displayMode === 'strip') ? '📱 长条模式' : '🔳 正方形模式';
+            }
+            if (container) {
+                container.className = (displayMode === 'square') ? 'square-mode' : 'strip-mode';
+            }
+        }
+
+        // 记录数值历史用于对比
+        function recordHistory(boxId, valStr) {
+            const num = parseFloat(valStr);
+            if (isNaN(num)) return;
+            if (!historyStore[boxId]) historyStore[boxId] = [];
+            const now = Date.now();
+            historyStore[boxId].push({ time: now, val: num });
+            // 保留最近 3 小时的历史点
+            const threeHoursAgo = now - 3 * 3600 * 1000;
+            historyStore[boxId] = historyStore[boxId].filter(h => h.time >= threeHoursAgo);
+        }
+
+        // 【修改项 2】计算指定分钟前的数据对比，上涨红色，下降绿色
+        function getCompareDiff(boxId, currentValStr) {
+            const currentVal = parseFloat(currentValStr);
+            if (isNaN(currentVal)) return { text: '--', cls: 'diff-zero' };
+
+            const mins = parseFloat(document.getElementById('compare-mins')?.value || 5);
+            const targetTime = Date.now() - mins * 60 * 1000;
+
+            const history = historyStore[boxId] || [];
+            if (history.length === 0) return { text: '0.00', cls: 'diff-zero' };
+
+            let closest = history[0];
+            let minDiff = Math.abs(history[0].time - targetTime);
+
+            for (let i = 1; i < history.length; i++) {
+                const diff = Math.abs(history[i].time - targetTime);
+                if (diff < minDiff) {
+                    minDiff = diff;
+                    closest = history[i];
+                }
+            }
+
+            const diffVal = currentVal - closest.val;
+            if (Math.abs(diffVal) < 0.0001) {
+                return { text: '0.00', cls: 'diff-zero' };
+            } else if (diffVal > 0) {
+                return { text: '+' + diffVal.toFixed(2), cls: 'diff-up' };
+            } else {
+                return { text: diffVal.toFixed(2), cls: 'diff-down' };
+            }
+        }
+
         function toggleMainPanelFold() {
             isMainPanelCollapsed = !isMainPanelCollapsed;
             updateMainPanelFoldUI();
@@ -1300,7 +1390,7 @@ MOBILE_HTML_TEMPLATE = """
                 if (icon) icon.innerText = '▼';
                 if (statusEl) statusEl.style.display = 'block';
                 if (actionsEl) actionsEl.style.display = 'flex';
-                if (cardsEl) cardsEl.style.display = 'block';
+                if (cardsEl) cardsEl.style.display = (displayMode === 'square') ? 'grid' : 'flex';
             }
         }
 
@@ -1573,7 +1663,21 @@ MOBILE_HTML_TEMPLATE = """
                 valColor = '#ffaa00';
             }
 
-            /* 【修改项 2 实现】收起时只显示标题（紧邻收起图标）与数值 */
+            // 【修改项 2 & 3】获取自定义对比差值
+            const diff = getCompareDiff(b.id, b.value);
+
+            // 【修改项 3】正方形模式渲染逻辑（第一行名字，第二行大数字，第三行对比）
+            if (displayMode === 'square') {
+                cardEl.className = `card square-card ${b.is_alarm ? 'alarm' : (isWarning ? 'warning' : '')}`;
+                cardEl.innerHTML = `
+                    <div class="sq-row1">${b.name}</div>
+                    <div class="sq-row2" style="color: ${valColor};">${b.value}</div>
+                    <div class="sq-row3 diff-text ${diff.cls}">${diff.text}</div>
+                `;
+                return;
+            }
+
+            // 长条模式渲染逻辑
             if (stateChanged) {
                 cardEl.setAttribute('data-collapsed', String(isCollapsed));
                 
@@ -1584,7 +1688,11 @@ MOBILE_HTML_TEMPLATE = """
                                 <span class="card-title">${b.name}</span>
                                 <span style="font-size:12px; color:#888; margin-left:4px;">▶</span>
                             </div>
-                            <span id="collapsed-val-${b.id}" style="font-size: 16px; font-weight: bold; font-family: monospace; color: ${valColor};">${b.value}</span>
+                            <!-- 【修改项 2】数值前面增加自定义时间对比 -->
+                            <div style="display:flex; align-items:center; gap:8px;">
+                                <span id="diff-tag-${b.id}" class="diff-text ${diff.cls}">${diff.text}</span>
+                                <span id="collapsed-val-${b.id}" style="font-size: 16px; font-weight: bold; font-family: monospace; color: ${valColor};">${b.value}</span>
+                            </div>
                         </div>
                     `;
                     return;
@@ -1603,6 +1711,8 @@ MOBILE_HTML_TEMPLATE = """
                             </div>
                         </div>
                         <div class="value-box">
+                            <!-- 【修改项 2】数值前面增加自定义时间对比 -->
+                            <span id="diff-tag-${b.id}" class="diff-text ${diff.cls}">${diff.text}</span>
                             <div class="val-text" id="val-text-${b.id}">${b.value}</div>
                         </div>
                         <div class="fold-body">
@@ -1678,11 +1788,18 @@ MOBILE_HTML_TEMPLATE = """
                     logListEl.innerHTML = logsHtml;
                 }
             }
+
+            const diffTag = document.getElementById(`diff-tag-${b.id}`);
+            if (diffTag) {
+                diffTag.innerText = diff.text;
+                diffTag.className = `diff-text ${diff.cls}`;
+            }
         }
 
         async function refreshData() {
             try {
                 updateLoginUI();
+                updateDisplayModeUI();
 
                 if (lastLoggedInState !== isLoggedIn) {
                     lastLoggedInState = isLoggedIn;
@@ -1719,7 +1836,7 @@ MOBILE_HTML_TEMPLATE = """
                 const container = document.getElementById('cards-container');
 
                 if (!data.boxes || data.boxes.length === 0) {
-                    container.innerHTML = '<div style="text-align:center; padding: 40px; color: #666;">未添加监控选框</div>';
+                    container.innerHTML = '<div style="text-align:center; padding: 40px; color: #666; grid-column: 1 / -1;">未添加监控选框</div>';
                     stopWebAlarmSound();
                     return;
                 }
@@ -1728,6 +1845,8 @@ MOBILE_HTML_TEMPLATE = """
                 let hasAnyWebAlarm = false;
 
                 data.boxes.forEach(b => {
+                    recordHistory(b.id, b.value);
+
                     if (collapsedMap[b.id] === undefined) {
                         collapsedMap[b.id] = true;
                     }
@@ -1749,11 +1868,11 @@ MOBILE_HTML_TEMPLATE = """
                     const isCollapsed = collapsedMap[b.id];
                     
                     if (b.is_alarm) {
-                        cardEl.className = 'card alarm';
+                        cardEl.className = (displayMode === 'square') ? 'card square-card alarm' : 'card alarm';
                     } else if (isWarning) {
-                        cardEl.className = 'card warning';
+                        cardEl.className = (displayMode === 'square') ? 'card square-card warning' : 'card warning';
                     } else {
-                        cardEl.className = 'card';
+                        cardEl.className = (displayMode === 'square') ? 'card square-card' : 'card';
                     }
 
                     renderCardDOM(cardEl, b, isCollapsed, isWarning, data.time);
@@ -1767,6 +1886,7 @@ MOBILE_HTML_TEMPLATE = """
         }
 
         updateMainPanelFoldUI();
+        updateDisplayModeUI();
         setInterval(refreshData, 1000);
         refreshData();
     </script>
@@ -1992,8 +2112,11 @@ class GlobalControlPanel(QWidget):
         self.spin_interval.setButtonSymbols(QAbstractSpinBox.NoButtons)
         self.spin_interval.setAlignment(Qt.AlignCenter)
         self.spin_interval.setFixedSize(42, 26)
-        self.spin_interval.setRange(0.1, 10.0)
-        self.spin_interval.setValue(1.0)
+        
+        # 【修改项 1】设置识别间隔范围与默认值为 10 秒
+        self.spin_interval.setRange(0.1, 3600.0)
+        self.spin_interval.setValue(10.0)
+        
         self.spin_interval.setSingleStep(0.5)
         self.spin_interval.valueChanged.connect(self._on_interval_changed)
         self.row1_layout.addWidget(self.spin_interval)
@@ -2315,104 +2438,6 @@ class GlobalControlPanel(QWidget):
         if self.monitor_thread:
             self.monitor_thread.set_reader(reader)
 
-    def add_box(self, x, y, w, h, name="区域", lower=0.0, mid_val=50.0, upper=100.0, decimal_places=0):
-        box_id = len(self.boxes) + 1
-        box = OverlayRegionWidget(box_id, x, y, w, h, name, lower, mid_val, upper, decimal_places)
-        box.log_interval_min = self.spin_log_interval.value()
-        box.max_log_count = self.spin_count.value()
-        box.delete_requested.connect(self._remove_box)
-        box.alarm_cleared.connect(self._check_global_alarm)
-        box.set_edit_mode(self.is_editing)
-        box.set_panel_hidden(self.boxes_panel_hidden)
-        box.show()
-        self.boxes.append(box)
-        if self.monitor_thread:
-            self.monitor_thread.boxes = self.boxes
-        return box
-
-    def add_box_from_cfg(self, b_cfg):
-        box = self.add_box(
-            b_cfg.get('x', 100),
-            b_cfg.get('y', 100),
-            b_cfg.get('w', 120),
-            b_cfg.get('h', 40),
-            b_cfg.get('name', '区域'),
-            b_cfg.get('lower', 0.0),
-            b_cfg.get('mid_val', 50.0),
-            b_cfg.get('upper', 100.0),
-            b_cfg.get('decimal_places', 0)
-        )
-        box.box_id = b_cfg.get('id', box.box_id)
-        box.log_interval_min = b_cfg.get('log_interval_min', self.spin_log_interval.value())
-        box.max_log_count = b_cfg.get('max_log_count', self.spin_count.value())
-
-    def _add_box_picker(self):
-        self.picker = CoordinatePicker()
-        def on_picked(x, y, w, h):
-            if w > 0 and h > 0:
-                self.add_box(x, y, w, h)
-        self.picker.coord_selected.connect(on_picked)
-        self.picker.showFullScreen()
-
-    def _remove_box(self, box):
-        if box in self.boxes:
-            self.boxes.remove(box)
-            box.close()
-            if self.monitor_thread:
-                self.monitor_thread.boxes = self.boxes
-            self._check_global_alarm()
-
-    def _check_global_alarm(self):
-        any_alarm = any(b.is_alarm and not b.is_muted for b in self.boxes)
-        if any_alarm:
-            self.alarm_player.play()
-        else:
-            self.alarm_player.stop()
-
-    def _on_value_updated(self, box, time_str, val, raw_text):
-        box.update_result_display(val, raw_text)
-        box.add_log_val(time_str, val, raw_text)
-
-        if val is not None:
-            if val > box.upper or val < box.lower:
-                box.set_alarm_state(True)
-            else:
-                box.set_alarm_state(False)
-        self._check_global_alarm()
-
-    def _toggle_monitor(self):
-        if self.monitoring:
-            self.monitoring = False
-            if self.monitor_thread:
-                self.monitor_thread.stop()
-                self.monitor_thread.quit()
-                self.monitor_thread.wait()
-                self.monitor_thread = None
-            self.btn_monitor.setText("▶ 开始监控")
-        else:
-            self.monitoring = True
-            screen = QApplication.primaryScreen()
-            scale = screen.devicePixelRatio() if screen else 1.0
-            self.monitor_thread = MonitorThread(
-                boxes=self.boxes,
-                interval=self.spin_interval.value(),
-                ocr_params=self.ocr_params,
-                scale=scale
-            )
-            if self.reader:
-                self.monitor_thread.set_reader(self.reader)
-            self.monitor_thread.value_updated.connect(self._on_value_updated)
-            self.monitor_thread.start()
-            self.btn_monitor.setText("⏹ 停止监控")
-        self._update_button_styles()
-
-    def _toggle_edit(self):
-        self.is_editing = not self.is_editing
-        self.btn_edit.setVisible(not self.is_editing)
-        self.widget_edit_tools.setVisible(self.is_editing)
-        for box in self.boxes:
-            box.set_edit_mode(self.is_editing)
-
     def _on_interval_changed(self, val):
         if self.monitor_thread:
             self.monitor_thread.update_params(interval=val)
@@ -2425,80 +2450,163 @@ class GlobalControlPanel(QWidget):
         for box in self.boxes:
             box.log_interval_min = val
 
-    def load_config(self):
-        if os.path.exists(self.config_file):
-            try:
-                with open(self.config_file, 'r', encoding='utf-8') as f:
-                    cfg = json.load(f)
-                    self.spin_interval.setValue(cfg.get('interval', 1.0))
-                    self.spin_count.setValue(cfg.get('max_log_count', 30))
-                    self.spin_log_interval.setValue(cfg.get('log_interval', 1.0))
-                    self.spin_grille_interval.setValue(cfg.get('grille_interval', 2.0))
-                    self.chk_grille.setChecked(cfg.get('grille_enabled', False))
-                    self.chk_web.setChecked(cfg.get('web_enabled', False))
-                    self.ocr_params = cfg.get('ocr_params', self.ocr_params)
+    def _toggle_edit(self):
+        self.is_editing = not self.is_editing
+        self.btn_edit.setVisible(not self.is_editing)
+        self.widget_edit_tools.setVisible(self.is_editing)
+        for box in self.boxes:
+            box.set_edit_mode(self.is_editing)
+        if not self.is_editing:
+            self.save_config()
 
-                    boxes_cfg = cfg.get('boxes', [])
-                    for b_cfg in boxes_cfg:
-                        self.add_box_from_cfg(b_cfg)
-            except Exception as e:
-                print("加载配置文件失败:", e)
+    def _add_box_picker(self):
+        self.picker = CoordinatePicker()
+        def on_picked(x, y, w, h):
+            if w > 0 and h > 0:
+                box = self.add_box(x, y, w, h)
+                box.set_edit_mode(True)
+                self.save_config()
+        self.picker.coord_selected.connect(on_picked)
+        self.picker.showFullScreen()
+
+    def add_box(self, x, y, w, h, name="区域", lower=0.0, mid_val=50.0, upper=100.0, decimal_places=0):
+        box_id = len(self.boxes) + 1
+        box = OverlayRegionWidget(box_id, x, y, w, h, name, lower, mid_val, upper, decimal_places)
+        box.log_interval_min = self.spin_log_interval.value()
+        box.set_max_log_count(self.spin_count.value())
+        box.delete_requested.connect(self._delete_box)
+        box.alarm_cleared.connect(self._check_global_alarm_state)
+        box.mute_toggled.connect(self._check_global_alarm_state)
+        box.show()
+        self.boxes.append(box)
+        return box
+
+    def _delete_box(self, box):
+        if box in self.boxes:
+            self.boxes.remove(box)
+            box.close()
+            self._check_global_alarm_state()
+            self.save_config()
+
+    def _toggle_monitor(self):
+        if self.monitoring:
+            self.stop_monitor()
+        else:
+            self.start_monitor()
+
+    def start_monitor(self):
+        if not self.boxes: return
+        self.monitoring = True
+        self.btn_monitor.setText("⏹ 停止监控")
+        self._update_button_styles()
+
+        screen = QApplication.primaryScreen()
+        scale = screen.devicePixelRatio() if screen else 1.0
+
+        self.monitor_thread = MonitorThread(self.boxes, interval=self.spin_interval.value(), ocr_params=self.ocr_params, scale=scale)
+        if self.reader:
+            self.monitor_thread.set_reader(self.reader)
+        self.monitor_thread.value_updated.connect(self._on_value_updated)
+        self.monitor_thread.countdown_tick.connect(self._on_monitor_countdown_tick)
+        self.monitor_thread.start()
+
+    def stop_monitor(self):
+        self.monitoring = False
+        if self.monitor_thread:
+            thread = self.monitor_thread
+            self.monitor_thread = None
+            thread.stop()
+            thread.quit()
+            if not thread.wait(1000):
+                thread.terminate()
+                thread.wait()
+        self.curr_monitor_cd = 0.0
+        self.btn_monitor.setText("▶ 开始监控")
+        self._update_button_styles()
+        self.alarm_player.stop()
+
+    def _on_monitor_countdown_tick(self, rem_sec):
+        self.curr_monitor_cd = rem_sec
+
+    def _on_value_updated(self, box, time_str, val, raw_text):
+        if not self.monitoring: return
+        box.update_result_display(val, raw_text)
+        box.add_log_val(time_str, val, raw_text)
+
+        if val is not None:
+            if val > box.upper or val < box.lower:
+                if not box.user_cleared_alarm:
+                    box.set_alarm_state(True)
+            else:
+                box.user_cleared_alarm = False
+                box.set_alarm_state(False)
+
+        self._check_global_alarm_state()
+
+    def _check_global_alarm_state(self):
+        has_alarm = any(b.is_alarm and not b.is_muted for b in self.boxes)
+        if has_alarm:
+            self.alarm_player.play()
+        else:
+            self.alarm_player.stop()
 
     def save_config(self):
-        boxes_cfg = []
-        for box in self.boxes:
-            boxes_cfg.append({
-                'id': box.box_id,
-                'x': box.capture_x,
-                'y': box.capture_y,
-                'w': box.capture_w,
-                'h': box.capture_h,
-                'name': box.name,
-                'lower': box.lower,
-                'mid_val': getattr(box, 'mid_val', 50.0),
-                'upper': box.upper,
-                'decimal_places': box.decimal_places,
-                'log_interval_min': box.log_interval_min,
-                'max_log_count': box.max_log_count
-            })
-
-        cfg = {
-            'interval': self.spin_interval.value(),
-            'max_log_count': self.spin_count.value(),
-            'log_interval': self.spin_log_interval.value(),
-            'grille_interval': self.spin_grille_interval.value(),
-            'grille_enabled': self.chk_grille.isChecked(),
-            'web_enabled': self.chk_web.isChecked(),
-            'ocr_params': self.ocr_params,
-            'boxes': boxes_cfg
+        data = {
+            "interval": self.spin_interval.value(),
+            "count": self.spin_count.value(),
+            "log_interval": self.spin_log_interval.value(),
+            "ocr_params": self.ocr_params,
+            "boxes": []
         }
+        for b in self.boxes:
+            data["boxes"].append({
+                "x": b.capture_x, "y": b.capture_y, "w": b.capture_w, "h": b.capture_h,
+                "name": b.name, "lower": b.lower, "mid_val": getattr(b, 'mid_val', 50.0),
+                "upper": b.upper, "decimal_places": b.decimal_places
+            })
         try:
-            with open(self.config_file, 'w', encoding='utf-8') as f:
-                json.dump(cfg, f, ensure_ascii=False, indent=2)
+            with open(self.config_file, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
         except Exception as e:
-            print("保存配置文件失败:", e)
+            print("保存配置失败:", e)
+
+    def load_config(self):
+        if not os.path.exists(self.config_file): return
+        try:
+            with open(self.config_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+
+            self.spin_interval.setValue(data.get("interval", 10.0))
+            self.spin_count.setValue(data.get("count", 30))
+            self.spin_log_interval.setValue(data.get("log_interval", 1.0))
+            self.ocr_params = data.get("ocr_params", self.ocr_params)
+
+            for item in data.get("boxes", []):
+                self.add_box(
+                    item["x"], item["y"], item["w"], item["h"],
+                    item.get("name", "区域"),
+                    item.get("lower", 0.0),
+                    item.get("mid_val", 50.0),
+                    item.get("upper", 100.0),
+                    item.get("decimal_places", 0)
+                )
+        except Exception as e:
+            print("加载配置失败:", e)
 
     def close_app(self):
-        self.save_config()
-        self.f12_listener.stop()
-        self.f12_listener.wait()
-        if self.monitor_thread:
-            self.monitor_thread.stop()
-            self.monitor_thread.wait()
-        if self.grille_thread:
-            self.grille_thread.stop()
-            self.grille_thread.wait()
+        self.stop_grille()
+        self.stop_monitor()
         if self.web_thread:
             self.web_thread.stop()
-        self.alarm_player.stop()
-        for box in self.boxes:
-            box.close()
-        self.close()
+        if self.f12_listener:
+            self.f12_listener.stop()
+            self.f12_listener.quit()
+            self.f12_listener.wait()
+        self.save_config()
         QApplication.quit()
 
 
-# ==================== 入口函数 ====================
-if __name__ == '__main__':
+if __name__ == "__main__":
     app = QApplication(sys.argv)
     panel = GlobalControlPanel()
     panel.show()
