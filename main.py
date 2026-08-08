@@ -607,6 +607,7 @@ class OverlayRegionWidget(QWidget):
         self._update_bar_visibility()
         self._update_geometry()
 
+    # 一.修改点：没有点击“调整窗口”时，上限/预警值/下限 所在行 (row2_container) 不显示
     def _update_bar_visibility(self):
         if self.panel_hidden:
             if self.is_alarm:
@@ -626,7 +627,10 @@ class OverlayRegionWidget(QWidget):
             self.control_panel.setVisible(True)
             self.control_panel.setStyleSheet("background-color: rgba(0, 0, 0, 0.8); border-bottom-left-radius: 6px; border-bottom-right-radius: 6px;")
             self.row1_container.setVisible(True)
-            self.row2_container.setVisible(True)
+            
+            # 【需求一】仅在点击“调整窗口”(is_editing == True) 时显示上限、预警值、下限控制行
+            self.row2_container.setVisible(self.is_editing)
+            
             self.row3_container.setVisible(True)
             self.log_container.setVisible(True)
 
@@ -647,7 +651,7 @@ class OverlayRegionWidget(QWidget):
         if self.panel_hidden:
             panel_h = 28 if self.is_alarm else 0
         else:
-            panel_h = 181
+            panel_h = 181 if self.is_editing else 155
 
         self.capture_spacer.setFixedHeight(self.capture_h)
         total_h = self.capture_h + panel_h
@@ -999,14 +1003,17 @@ MOBILE_HTML_TEMPLATE = """
         .container { max-width: 600px; margin: 0 auto; width: 100%; }
 
         .header { background: #1a1a26; border-radius: 10px; padding: 12px 14px; margin-bottom: 12px; border: 1px solid rgba(255,255,255,0.1); display: flex; flex-direction: column; gap: 10px; }
-        .header-row1 { display: flex; justify-content: space-between; align-items: center; width: 100%; flex-wrap: wrap; gap: 8px; }
+        
+        /* 头部排版划分 */
+        .header-row1 { display: flex; justify-content: space-between; align-items: center; width: 100%; }
         .header-title-box { display: flex; align-items: center; gap: 6px; }
         .title { font-size: 16px; font-weight: bold; color: #00ff8c; }
         .toggle-icon { cursor: pointer; font-size: 14px; color: #00ff8c; font-weight: bold; user-select: none; padding: 2px 6px; border-radius: 4px; background: rgba(0,255,140,0.1); }
         .toggle-icon:hover { background: rgba(0,255,140,0.2); }
 
-        .header-right-actions { display: flex; gap: 8px; align-items: center; margin-left: auto; }
+        .header-row2 { display: flex; justify-content: flex-end; align-items: center; gap: 8px; width: 100%; }
         
+        /* 四.修改点：开始监控和开始操作在第三排 */
         .header-row3 { display: flex; gap: 10px; width: 100%; }
         
         .btn-top { flex: 1; background: #2e9a58; color: #fff; border: none; border-radius: 6px; padding: 8px 12px; font-size: 13px; font-weight: bold; cursor: pointer; transition: background 0.2s; text-align: center; }
@@ -1029,9 +1036,12 @@ MOBILE_HTML_TEMPLATE = """
 
         .card.warning { border: 2px solid #ffaa00; background: rgba(255, 170, 0, 0.08); }
 
-        .card-header { display: flex; justify-content: space-between; align-items: center; font-size: 13px; color: #888; font-weight: bold; }
-        .card-title-box { display: flex; align-items: center; gap: 8px; cursor: pointer; flex-grow: 1; }
+        /* 三.修改点：卡片头部单行布局（名字在左，数值/消除/声音在右） */
+        .card-header { display: flex; justify-content: space-between; align-items: center; font-size: 13px; color: #888; font-weight: bold; width: 100%; }
+        .card-title-box { display: flex; align-items: center; gap: 8px; flex-grow: 1; overflow: hidden; }
         .card-title { color: #ffffff; font-size: 15px; font-weight: bold; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+        .card-header-right { display: flex; align-items: center; gap: 8px; margin-left: auto; }
 
         .btn-action { color: #fff; border-radius: 6px; padding: 4px 8px; font-size: 11px; font-weight: bold; cursor: pointer; border: none; }
         .btn-action:active { opacity: 0.8; }
@@ -1040,13 +1050,13 @@ MOBILE_HTML_TEMPLATE = """
         .btn-alarm-on { background: #2e9a58; color: #ffffff; border: 1px solid #3fb950; }
         .btn-alarm-off { background: #4a4d52; color: #cccccc; border: 1px solid #666666; }
 
-        .value-box { text-align: center; margin: 8px 0; }
-        .val-text { font-size: 32px; font-weight: bold; color: #00ff8c; font-family: monospace; }
+        .val-text { font-size: 18px; font-weight: bold; color: #00ff8c; font-family: monospace; }
         .val-text.alarm-text { color: #ff4d4d; }
         .val-text.warning-text { color: #ffaa00; }
 
         .fold-body { margin-top: 8px; border-top: 1px dashed rgba(255,255,255,0.1); padding-top: 8px; }
 
+        /* 五.修改点：设置排布局及上限后的保存按钮 */
         .setting-row { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; font-size: 11px; flex-wrap: wrap; }
         .setting-row label { color: #ffaa00; font-weight: bold; }
         .setting-input { background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; color: #00ff8c; font-weight: bold; padding: 4px 2px; width: 50px; text-align: center; font-size: 11px; }
@@ -1067,26 +1077,28 @@ MOBILE_HTML_TEMPLATE = """
 <body>
     <div class="container">
         <div class="header">
+            <!-- 第一排：标题与折叠开关 -->
             <div class="header-row1">
                 <div class="header-title-box">
                     <span class="title">📱 中控数据面板</span>
                     <span id="btn-toggle-all" class="toggle-icon" onclick="toggleCollapseAll()">▲</span>
                 </div>
-                <div class="header-right-actions">
-                    <button id="btn-sound" class="btn-sound" onclick="toggleWebSound()">🔊 声音</button>
-                    <!-- 登录/用户管理按钮 -->
-                    <div id="login-box" style="display: inline-flex; align-items: center; gap: 4px;">
-                        <button class="btn-fold-tool" style="background:#0088cc; color:white; border:none;" onclick="openLoginModal()">🔐 登录</button>
-                    </div>
-                    <div id="user-box" style="display: none; align-items: center; gap: 4px;">
-                        <span id="current-username" style="color:#00ff8c; font-size:12px; font-weight:bold;">👤 已登录</span>
-                        <button class="btn-action" style="background:#e65100; color:white;" onclick="openUserMgmtModal()">⚙️ 用户</button>
-                        <button class="btn-action" style="background:#555; color:white;" onclick="handleLogout()">🚪 退出</button>
-                    </div>
+            </div>
+
+            <!-- 第二排：声音控制与登录/账号管理 -->
+            <div class="header-row2">
+                <button id="btn-sound" class="btn-sound" onclick="toggleWebSound()">🔊 声音</button>
+                <div id="login-box" style="display: inline-flex; align-items: center; gap: 4px;">
+                    <button class="btn-fold-tool" style="background:#0088cc; color:white; border:none;" onclick="openLoginModal()">🔐 登录</button>
+                </div>
+                <div id="user-box" style="display: none; align-items: center; gap: 4px;">
+                    <span id="current-username" style="color:#00ff8c; font-size:12px; font-weight:bold;">👤 已登录</span>
+                    <button class="btn-action" style="background:#e65100; color:white;" onclick="openUserMgmtModal()">⚙️ 用户</button>
+                    <button class="btn-action" style="background:#555; color:white;" onclick="handleLogout()">🚪 退出</button>
                 </div>
             </div>
 
-            <!-- 第三排：开始监控 与 开始操作 -->
+            <!-- 四.修改点：第三排：开始监控 与 开始操作 -->
             <div class="header-row3">
                 <button id="btn-monitor" class="btn-top" onclick="postAction('toggle_monitor', -1)">▶ 开始监控</button>
                 <button id="btn-grille" class="btn-top btn-grille" onclick="postAction('toggle_grille', -1)">▶ 开始操作</button>
@@ -1256,12 +1268,20 @@ MOBILE_HTML_TEMPLATE = """
             postAction('set_limits', boxId, {lower, mid_val, upper});
         }
 
+        /* 二.修改点：采用增量式 DOM 更新，当焦点在输入框时不覆盖输入值；
+           三.修改点：卡片头部单行集成 名字(左)、数值/消除报警/声音(右)；
+           五.修改点：上限后面紧跟保存按钮。*/
         function renderCards(boxes) {
             const container = document.getElementById('cards-container');
-            container.innerHTML = '';
 
             boxes.forEach(box => {
-                const card = document.createElement('div');
+                let card = document.getElementById('card-' + box.id);
+                if (!card) {
+                    card = document.createElement('div');
+                    card.id = 'card-' + box.id;
+                    container.appendChild(card);
+                }
+
                 let cardClass = 'card';
                 let valClass = 'val-text';
                 if (box.is_alarm) {
@@ -1273,36 +1293,83 @@ MOBILE_HTML_TEMPLATE = """
                 }
                 card.className = cardClass;
 
-                const logsHtml = (box.logs || []).map(l => `<div class="log-item">${l}</div>`).join('');
+                let header = card.querySelector('.card-header');
+                if (!header) {
+                    const logsHtml = (box.logs || []).map(l => `<div class="log-item">${l}</div>`).join('');
+                    card.innerHTML = `
+                        <div class="card-header">
+                            <div class="card-title-box">
+                                <span class="card-title">${box.name}</span>
+                            </div>
+                            <div class="card-header-right">
+                                <span id="val-${box.id}" class="${valClass}">${box.val_text}</span>
+                                <span id="alarm-btn-box-${box.id}">
+                                    ${box.is_alarm ? `<button class="btn-action btn-clear" onclick="postAction('clear_alarm', ${box.id})">🚨 消除</button>` : ''}
+                                </span>
+                                <button id="mute-btn-${box.id}" class="btn-action ${box.is_muted ? 'btn-alarm-off' : 'btn-alarm-on'}" onclick="postAction('toggle_mute', ${box.id})">${box.is_muted ? '🔇 静音' : '🔊 声音'}</button>
+                            </div>
+                        </div>
+                        <div class="fold-body" style="display: ${isExpanded ? 'block' : 'none'};">
+                            <div class="setting-row">
+                                <label>下限:</label>
+                                <input id="lower-${box.id}" type="number" step="0.1" class="setting-input" value="${box.lower}">
+                                <label>预警:</label>
+                                <input id="mid-${box.id}" type="number" step="0.1" class="setting-input" value="${box.mid_val}">
+                                <label>上限:</label>
+                                <input id="upper-${box.id}" type="number" step="0.1" class="setting-input" value="${box.upper}">
+                                <button class="btn-action" style="background:#0088cc; padding:2px 8px; margin-left:4px;" onclick="updateLimits(${box.id})">保存</button>
+                            </div>
+                            <div class="log-title">📊 历史日志</div>
+                            <div id="logs-${box.id}" class="log-list">${logsHtml}</div>
+                        </div>
+                    `;
+                } else {
+                    const valEl = document.getElementById('val-' + box.id);
+                    if (valEl) {
+                        valEl.className = valClass;
+                        valEl.innerText = box.val_text;
+                    }
 
-                card.innerHTML = `
-                    <div class="card-header">
-                        <div class="card-title-box">
-                            <span class="card-title">${box.name}</span>
-                        </div>
-                        <div>
-                            ${box.is_alarm ? `<button class="btn-action btn-clear" onclick="postAction('clear_alarm', ${box.id})">🚨 消除</button>` : ''}
-                            <button class="btn-action ${box.is_muted ? 'btn-alarm-off' : 'btn-alarm-on'}" onclick="postAction('toggle_mute', ${box.id})">${box.is_muted ? '🔇 静音' : '🔊 声音'}</button>
-                        </div>
-                    </div>
-                    <div class="value-box">
-                        <div class="${valClass}">${box.val_text}</div>
-                    </div>
-                    <div class="fold-body" style="display: ${isExpanded ? 'block' : 'none'};">
-                        <div class="setting-row">
-                            <label>下限:</label>
-                            <input id="lower-${box.id}" type="number" step="0.1" class="setting-input" value="${box.lower}">
-                            <label>预警:</label>
-                            <input id="mid-${box.id}" type="number" step="0.1" class="setting-input" value="${box.mid_val}">
-                            <label>上限:</label>
-                            <input id="upper-${box.id}" type="number" step="0.1" class="setting-input" value="${box.upper}">
-                            <button class="btn-action" style="background:#0088cc; padding:2px 8px; margin-left:4px;" onclick="updateLimits(${box.id})">保存</button>
-                        </div>
-                        <div class="log-title">📊 历史日志</div>
-                        <div class="log-list">${logsHtml}</div>
-                    </div>
-                `;
-                container.appendChild(card);
+                    const alarmBox = document.getElementById('alarm-btn-box-' + box.id);
+                    if (alarmBox) {
+                        alarmBox.innerHTML = box.is_alarm ? `<button class="btn-action btn-clear" onclick="postAction('clear_alarm', ${box.id})">🚨 消除</button>` : '';
+                    }
+
+                    const muteBtn = document.getElementById('mute-btn-' + box.id);
+                    if (muteBtn) {
+                        muteBtn.className = `btn-action ${box.is_muted ? 'btn-alarm-off' : 'btn-alarm-on'}`;
+                        muteBtn.innerText = box.is_muted ? '🔇 静音' : '🔊 声音';
+                    }
+
+                    // 校验并保护输入框焦点，防止自动刷新导致输入中断
+                    const lowerInput = document.getElementById('lower-' + box.id);
+                    if (lowerInput && document.activeElement !== lowerInput) {
+                        lowerInput.value = box.lower;
+                    }
+
+                    const midInput = document.getElementById('mid-' + box.id);
+                    if (midInput && document.activeElement !== midInput) {
+                        midInput.value = box.mid_val;
+                    }
+
+                    const upperInput = document.getElementById('upper-' + box.id);
+                    if (upperInput && document.activeElement !== upperInput) {
+                        upperInput.value = box.upper;
+                    }
+
+                    const logsBox = document.getElementById('logs-' + box.id);
+                    if (logsBox) {
+                        logsBox.innerHTML = (box.logs || []).map(l => `<div class="log-item">${l}</div>`).join('');
+                    }
+                }
+            });
+
+            // 清理已删除区域卡片
+            const currentIds = boxes.map(b => 'card-' + b.id);
+            Array.from(container.children).forEach(child => {
+                if (!currentIds.includes(child.id)) {
+                    container.removeChild(child);
+                }
             });
         }
 
@@ -1898,7 +1965,7 @@ class GlobalControlPanel(QWidget):
         }
         for b in self.boxes:
             data['boxes'].append({
-                'id': b.box_id,
+                'box_id': b.box_id,
                 'x': b.capture_x,
                 'y': b.capture_y,
                 'w': b.capture_w,
@@ -1921,43 +1988,31 @@ class GlobalControlPanel(QWidget):
         try:
             with open(self.config_file, 'r', encoding='utf-8') as f:
                 data = json.load(f)
+
             self.spin_interval.setValue(data.get('interval', 1.0))
             self.spin_count.setValue(data.get('max_count', 30))
             self.spin_log_interval.setValue(data.get('log_interval', 1.0))
             self.ocr_params = data.get('ocr_params', self.ocr_params)
 
-            for b_data in data.get('boxes', []):
+            for b_info in data.get('boxes', []):
                 self.create_box(
-                    x=b_data['x'],
-                    y=b_data['y'],
-                    w=b_data['w'],
-                    h=b_data['h'],
-                    box_id=b_data.get('id'),
-                    name=b_data.get('name'),
-                    lower=b_data.get('lower', 0.0),
-                    mid_val=b_data.get('mid_val', 50.0),
-                    upper=b_data.get('upper', 100.0),
-                    decimal_places=b_data.get('decimal_places', 0)
+                    x=b_info['x'],
+                    y=b_info['y'],
+                    w=b_info['w'],
+                    h=b_info['h'],
+                    box_id=b_info.get('box_id'),
+                    name=b_info.get('name', '区域'),
+                    lower=b_info.get('lower', 0.0),
+                    mid_val=b_info.get('mid_val', 50.0),
+                    upper=b_info.get('upper', 100.0),
+                    decimal_places=b_info.get('decimal_places', 0)
                 )
         except Exception as e:
-            print("读取配置失败:", e)
-
-    def close_app(self):
-        if self.monitor_thread:
-            self.monitor_thread.stop()
-            self.monitor_thread.wait()
-        if self.web_thread:
-            self.web_thread.stop()
-        self.alarm_player.stop()
-        self.f12_listener.stop()
-        self.f12_listener.wait()
-        for b in self.boxes:
-            b.close()
-        self.close()
+            print("加载配置失败:", e)
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
-            self._drag_pos = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+            self._drag_pos = event.globalPosition().toPoint() - self.pos()
             event.accept()
 
     def mouseMoveEvent(self, event):
@@ -1965,9 +2020,29 @@ class GlobalControlPanel(QWidget):
             self.move(event.globalPosition().toPoint() - self._drag_pos)
             event.accept()
 
+    def close_app(self):
+        self.save_config()
+        self.save_users()
+        if self.monitor_thread:
+            self.monitor_thread.stop()
+            self.monitor_thread.wait()
+        if self.web_thread:
+            self.web_thread.stop()
+        if self.f12_listener:
+            self.f12_listener.stop()
+            self.f12_listener.wait()
+        for b in self.boxes:
+            b.close()
+        self.close()
+
+    def closeEvent(self, event):
+        self.close_app()
+        event.accept()
+
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
+    app.setQuitOnLastWindowClosed(False)
     panel = GlobalControlPanel()
     panel.show()
     sys.exit(app.exec())
