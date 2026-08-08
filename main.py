@@ -6,9 +6,6 @@ import re
 import threading
 import ctypes
 import socket
-
-# 识别历史记录文件
-RECORD_FILE = '记录.txt'
 from datetime import datetime
 
 # 开启 Windows 高 DPI 屏幕兼容支持
@@ -549,7 +546,7 @@ class OverlayRegionWidget(QWidget):
         self.spin_mid.setAlignment(Qt.AlignCenter)
         self.spin_mid.setRange(-99999.0, 99999.0)
         self.spin_mid.setValue(self.mid_val)
-        self.spin_mid.setFixedSize(80, 20)
+        self.spin_mid.setFixedSize(60, 20)
         self.spin_mid.setStyleSheet("background-color: rgba(26, 26, 38, 0.5); color: #ffaa00; border: 1px solid #ffaa00; font-size: 10px; border-radius: 2px;")
         self.spin_mid.valueChanged.connect(self._on_mid_changed)
 
@@ -569,14 +566,14 @@ class OverlayRegionWidget(QWidget):
         self.btn_mute.setStyleSheet("QPushButton { background-color: rgba(255,255,255,0.15); color: white; border: none; border-radius: 3px; font-size: 10px; } QPushButton:hover { background-color: rgba(255,255,255,0.3); }")
         self.btn_mute.clicked.connect(self._toggle_mute)
 
-        self.lbl_dec = QLabel("小数点:")
+        self.lbl_dec = QLabel("小数点(0-4):")
         self.lbl_dec.setStyleSheet("color: #a0a0a0; font-size: 10px; font-weight: bold;")
         self.spin_dec = QSpinBox()
         self.spin_dec.setButtonSymbols(QAbstractSpinBox.NoButtons)
         self.spin_dec.setAlignment(Qt.AlignCenter)
         self.spin_dec.setRange(0, 4)
         self.spin_dec.setValue(self.decimal_places)
-        self.spin_dec.setFixedSize(40, 20)
+        self.spin_dec.setFixedSize(26, 20)
         self.spin_dec.setStyleSheet("background-color: rgba(26, 26, 38, 0.5); color: #00ff8c; border: 1px solid #00ff8c; font-size: 10px; border-radius: 2px;")
         self.spin_dec.valueChanged.connect(self._on_dec_changed)
 
@@ -584,9 +581,9 @@ class OverlayRegionWidget(QWidget):
         self.btn_clear_alarm.setStyleSheet("QPushButton { background-color: #ff4d4d; color: white; border: none; border-radius: 3px; padding: 2px 8px; font-size: 10px; font-weight: bold; } QPushButton:hover { background-color: #ff6666; }")
         self.btn_clear_alarm.clicked.connect(self._on_clear_alarm)
 
-        self.btn_log = QPushButton("📜 日志")
+        self.btn_log = QPushButton("📜 日志（弹窗）")
         self.btn_log.setStyleSheet("QPushButton { background-color: rgba(255,255,255,0.15); color: white; border: none; border-radius: 3px; font-size: 10px; padding: 2px 6px; } QPushButton:hover { background-color: rgba(255,255,255,0.3); }")
-        self.btn_log.clicked.connect(lambda: self.log_widget.setVisible(True) if hasattr(self, "log_widget") else None)
+        self.btn_log.clicked.connect(self._toggle_log)
 
         row4_layout.addWidget(self.btn_mute)
         row4_layout.addWidget(self.lbl_dec)
@@ -1231,7 +1228,7 @@ MOBILE_HTML_TEMPLATE = """
             </div>
         </div>
 
-        <div style="margin-bottom:10px;color:#aaa;font-size:12px;">对比（分钟）：<input id="compare-min" class="setting-input" value="10"><button class="btn-action" onclick="localStorage.setItem('compareMinutes',document.getElementById('compare-min').value)">保存</button></div><div id="cards-container" class="strip-mode"></div>
+        <div style="margin-bottom:10px;color:#aaa;font-size:12px;">对比（分钟）：<input id="compare-min" class="setting-input" value="10" onchange="localStorage.setItem('compareMinutes',this.value)"></div><div id="cards-container" class="strip-mode"></div><script>localStorage.setItem("defaultFold","true");</script>
     </div>
 
     <!-- 独立登录界面弹窗 -->
@@ -1291,7 +1288,6 @@ MOBILE_HTML_TEMPLATE = """
 
     <script>
         const collapsedMap = {};
-        window.addEventListener("load",()=>{const e=document.getElementById("compare-min"); if(e)e.value=localStorage.getItem("compareMinutes")||10;});
         let isMainPanelCollapsed = false;
         let isLoggedIn = localStorage.getItem('isLoggedIn') === 'true';
         let currentUser = localStorage.getItem('currentUser') || '';
@@ -1344,8 +1340,8 @@ MOBILE_HTML_TEMPLATE = """
             const old = (historyStore[boxId]||[]).filter(x=>Date.now()-x.time>=min*60000).pop();
             if (!old) return {text:'', cls:'diff-zero'};
             const d = num-old.val;
-            if(d>0) return {text:'↑ '+d.toString(), cls:'diff-up'};
-            if(d<0) return {text:'↓ '+Math.abs(d).toString(), cls:'diff-down'};
+            if(d>0) return {text:'↑ '+Number(d.toFixed(4)).toString(), cls:'diff-up'};
+            if(d<0) return {text:'↓ '+Number(Math.abs(d).toFixed(4)).toString(), cls:'diff-down'};
             return {text:'=', cls:'diff-zero'};
         }
 
@@ -1638,9 +1634,8 @@ MOBILE_HTML_TEMPLATE = """
             const lowerVal = parseFloat(document.getElementById(`input-lower-${boxId}`).value);
             const midVal = parseFloat(document.getElementById(`input-mid-${boxId}`).value);
             const upperVal = parseFloat(document.getElementById(`input-upper-${boxId}`).value);
-            const decimalVal = parseInt(document.getElementById(`input-decimal-${boxId}`)?.value || 0);
             if (!isNaN(lowerVal) && !isNaN(midVal) && !isNaN(upperVal)) {
-                postAction('set_limits', boxId, { lower: lowerVal, mid_val: midVal, upper: upperVal, decimal_places: decimalVal });
+                postAction('set_limits', boxId, { lower: lowerVal, mid_val: midVal, upper: upperVal });
             } else {
                 alert("请输入有效的数值！");
             }
@@ -1680,7 +1675,7 @@ MOBILE_HTML_TEMPLATE = """
                         <div class="card-header" onclick="toggleFold(${b.id})" style="cursor:pointer; padding: 4px 0;">
                             <div class="card-title-box">
                                 <span class="card-title">${b.name}</span>
-                                
+                                <span style="font-size:12px; color:#888; margin-left:4px;">▶</span>
                             </div>
                             
                             <div style="display:flex; align-items:center; gap:8px;">
@@ -1699,7 +1694,7 @@ MOBILE_HTML_TEMPLATE = """
                         <div class="card-header">
                             <div class="card-title-box" onclick="toggleFold(${b.id})">
                                 <span class="card-title">${b.name}</span>
-                                
+                                <span style="font-size:12px; color:#888; margin-left:4px;">▼</span>
                             </div>
                             <div style="display: flex; gap: 6px; align-items: center;" id="action-btns-${b.id}">
                             </div>
@@ -1711,13 +1706,11 @@ MOBILE_HTML_TEMPLATE = """
                         <div class="fold-body">
                             <div class="setting-row" id="setting-row-${b.id}">
                                 
-                                <input id="input-lower-${b.id}" class="setting-input" type="number" step="0.1" value="${b.lower}">
+                                <input id="input-lower-${b.id}" class="setting-input" type="number" style="width:140px" step="0.0001" value="${b.lower}">
                                 <label>预警值:</label>
-                                <input id="input-mid-${b.id}" class="setting-input" type="number" step="0.0001" value="${b.mid_val}">
-                                <label>小数位:</label>
-                                <input id="input-decimal-${b.id}" class="setting-input" type="number" min="0" max="4" step="1" value="${b.decimal_places || 0}">
+                                <input id="input-mid-${b.id}" class="setting-input" type="number" style="width:140px" step="0.0001" value="${b.mid_val}">
                                 <label>上限:</label>
-                                <input id="input-upper-${b.id}" class="setting-input" type="number" step="0.1" value="${b.upper}">
+                                <input id="input-upper-${b.id}" class="setting-input" type="number" style="width:140px" step="0.0001" value="${b.upper}">
                                 <button class="btn-action" style="background:#0088cc; color:white; margin-left:auto;" onclick="saveLimits(${b.id})">💾 保存</button>
                             </div>
                             <div class="log-title">📜 历史日志:</div>
@@ -1857,10 +1850,6 @@ MOBILE_HTML_TEMPLATE = """
                     if (!cardEl) {
                         cardEl = document.createElement('div');
                         cardEl.id = `card-${b.id}`;
-                         cardEl.draggable = true;
-                         cardEl.ondragstart = (e)=>{e.dataTransfer.setData("text/plain", b.id);};
-                         cardEl.ondragover = (e)=>e.preventDefault();
-                         cardEl.ondrop = (e)=>{e.preventDefault(); const from=e.dataTransfer.getData("text/plain"); const src=document.getElementById(`card-${from}`); if(src && src!==cardEl) cardEl.parentNode.insertBefore(src,cardEl);};
                         container.appendChild(cardEl);
                     }
 
@@ -2044,8 +2033,8 @@ class GlobalControlPanel(QWidget):
         self.is_collapsed = False
         self.boxes_panel_hidden = False
         self.reader = None
-        self.record_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "记录.txt")
         self.config_file = "monitor_config.json"
+        self.record_file = "记录.txt"
         self.users_file = "users_config.json"
         
         self.users = self.load_users()
@@ -2532,14 +2521,7 @@ class GlobalControlPanel(QWidget):
         if not self.monitoring: return
         box.update_result_display(val, raw_text)
         box.add_log_val(time_str, val, raw_text)
-        try:
-            with open(self.record_file, "a", encoding="utf-8") as rf:
-                rf.write(f"{time_str},{box.name},{val},{raw_text}\n")
-        except Exception:
-            pass
 
-        if val is not None and getattr(box, "decimal_places", 0):
-            val = val / (10 ** box.decimal_places)
         if val is not None:
             if val > box.upper or val < box.lower:
                 if not box.user_cleared_alarm:
@@ -2557,6 +2539,13 @@ class GlobalControlPanel(QWidget):
         else:
             self.alarm_player.stop()
 
+    def save_record(self, value):
+        try:
+            with open(self.record_file, "a", encoding="utf-8") as f:
+                f.write(f"{datetime.now()} {value}\n")
+        except Exception:
+            pass
+
     def save_config(self):
         data = {
             "interval": self.spin_interval.value(),
@@ -2565,7 +2554,7 @@ class GlobalControlPanel(QWidget):
             "ocr_params": self.ocr_params,
             "window": {"x": self.x(), "y": self.y()},
             "grille_interval": self.spin_grille_interval.value(),
-            "grille_checked": self.chk_grille.isChecked(),
+            "grille_enable": self.chk_grille.isChecked(),
             "web_service": self.chk_web.isChecked(),
             "boxes": []
         }
@@ -2592,8 +2581,7 @@ class GlobalControlPanel(QWidget):
             self.spin_log_interval.setValue(data.get("log_interval", 1.0))
             self.spin_grille_interval.setValue(data.get("grille_interval", 2.0))
             self.chk_web.setChecked(data.get("web_service", False))
-            if hasattr(self, "chk_grille"):
-                self.chk_grille.setChecked(data.get("grille_checked", False))
+            self.chk_grille.setChecked(data.get("grille_enable", False))
             self.ocr_params = data.get("ocr_params", self.ocr_params)
 
             win = data.get("window", {})
