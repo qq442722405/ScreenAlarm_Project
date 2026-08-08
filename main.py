@@ -566,7 +566,7 @@ class OverlayRegionWidget(QWidget):
         self.btn_mute.setStyleSheet("QPushButton { background-color: rgba(255,255,255,0.15); color: white; border: none; border-radius: 3px; font-size: 10px; } QPushButton:hover { background-color: rgba(255,255,255,0.3); }")
         self.btn_mute.clicked.connect(self._toggle_mute)
 
-        self.lbl_dec = QLabel("小数点:")
+        self.lbl_dec = QLabel("小数点(0-4):")
         self.lbl_dec.setStyleSheet("color: #a0a0a0; font-size: 10px; font-weight: bold;")
         self.spin_dec = QSpinBox()
         self.spin_dec.setButtonSymbols(QAbstractSpinBox.NoButtons)
@@ -1228,7 +1228,7 @@ MOBILE_HTML_TEMPLATE = """
             </div>
         </div>
 
-        <div style="margin-bottom:10px;color:#aaa;font-size:12px;">对比分钟：<input id="compare-min" class="setting-input" value="10" onchange="localStorage.setItem('compareMinutes',this.value)"></div><div id="cards-container" class="strip-mode"></div>
+        <div style="margin-bottom:10px;color:#aaa;font-size:12px;">对比（分钟）：<input id="compare-min" class="setting-input" value="10" onchange="localStorage.setItem('compareMinutes',this.value)"></div><div id="cards-container" class="strip-mode"></div><script>localStorage.setItem("defaultFold","true");</script>
     </div>
 
     <!-- 独立登录界面弹窗 -->
@@ -1706,11 +1706,11 @@ MOBILE_HTML_TEMPLATE = """
                         <div class="fold-body">
                             <div class="setting-row" id="setting-row-${b.id}">
                                 
-                                <input id="input-lower-${b.id}" class="setting-input" type="number" step="0.1" value="${b.lower}">
+                                <input id="input-lower-${b.id}" class="setting-input" type="number" style="width:140px" step="0.0001" value="${b.lower}">
                                 <label>预警值:</label>
-                                <input id="input-mid-${b.id}" class="setting-input" type="number" step="0.1" value="${b.mid_val}">
+                                <input id="input-mid-${b.id}" class="setting-input" type="number" style="width:140px" step="0.0001" value="${b.mid_val}">
                                 <label>上限:</label>
-                                <input id="input-upper-${b.id}" class="setting-input" type="number" step="0.1" value="${b.upper}">
+                                <input id="input-upper-${b.id}" class="setting-input" type="number" style="width:140px" step="0.0001" value="${b.upper}">
                                 <button class="btn-action" style="background:#0088cc; color:white; margin-left:auto;" onclick="saveLimits(${b.id})">💾 保存</button>
                             </div>
                             <div class="log-title">📜 历史日志:</div>
@@ -2034,6 +2034,7 @@ class GlobalControlPanel(QWidget):
         self.boxes_panel_hidden = False
         self.reader = None
         self.config_file = "monitor_config.json"
+        self.record_file = "记录.txt"
         self.users_file = "users_config.json"
         
         self.users = self.load_users()
@@ -2538,6 +2539,13 @@ class GlobalControlPanel(QWidget):
         else:
             self.alarm_player.stop()
 
+    def save_record(self, value):
+        try:
+            with open(self.record_file, "a", encoding="utf-8") as f:
+                f.write(f"{datetime.now()} {value}\n")
+        except Exception:
+            pass
+
     def save_config(self):
         data = {
             "interval": self.spin_interval.value(),
@@ -2546,6 +2554,7 @@ class GlobalControlPanel(QWidget):
             "ocr_params": self.ocr_params,
             "window": {"x": self.x(), "y": self.y()},
             "grille_interval": self.spin_grille_interval.value(),
+            "grille_enable": self.chk_grille.isChecked(),
             "web_service": self.chk_web.isChecked(),
             "boxes": []
         }
@@ -2572,6 +2581,7 @@ class GlobalControlPanel(QWidget):
             self.spin_log_interval.setValue(data.get("log_interval", 1.0))
             self.spin_grille_interval.setValue(data.get("grille_interval", 2.0))
             self.chk_web.setChecked(data.get("web_service", False))
+            self.chk_grille.setChecked(data.get("grille_enable", False))
             self.ocr_params = data.get("ocr_params", self.ocr_params)
 
             win = data.get("window", {})
