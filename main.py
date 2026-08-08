@@ -1169,7 +1169,7 @@ MOBILE_HTML_TEMPLATE = """
 
         .setting-row { display: flex; align-items: center; gap: 4px; margin-bottom: 8px; font-size: 11px; flex-wrap: wrap; }
         .setting-row label { color: #ffaa00; font-weight: bold; }
-        .setting-input { background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; color: #00ff8c; font-weight: bold; padding: 4px 2px; width: 50px; text-align: center; font-size: 11px; }
+        .setting-input { background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; color: #00ff8c; font-weight: bold; padding: 4px 2px; width: 90px; text-align: center; font-size: 11px; }
 
         .log-title { margin-top: 6px; font-size: 11px; color: #888; font-weight: bold; }
         .log-list { margin-top: 4px; background: rgba(0,0,0,0.4); border-radius: 6px; padding: 6px 8px; font-size: 11px; font-family: monospace; height: 110px; overflow-y: auto; color: #00ff8c; }
@@ -1194,9 +1194,9 @@ MOBILE_HTML_TEMPLATE = """
         #cards-container.square-mode { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }
 
         /* 正方形卡片内部排版 */
-        .square-card { min-width:260px; min-height:220px; text-align: center; display: flex; flex-direction: column; justify-content: center; align-items: center; padding: 14px 8px; }
-        .square-card .sq-row1 { font-size: 14px; font-weight: bold; color: #ffffff; margin-bottom: 4px; width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .square-card .sq-row2 { font-size: 38px; font-weight: bold; font-family: monospace; color: #00ff8c; margin: 4px 0; }
+        .square-card { min-width:280px; min-height:240px; text-align: center; display: flex; flex-direction: column; justify-content: center; align-items: center; padding: 14px 8px; }
+        .square-card .sq-row1 { font-size: 18px; font-weight: bold; color: #ffffff; margin-bottom: 4px; width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .square-card .sq-row2 { font-size: 44px; font-weight: bold; font-family: monospace; color: #00ff8c; margin: 4px 0; }
         .square-card .sq-row3 { font-size: 13px; font-weight: bold; font-family: monospace; }
     </style>
 </head>
@@ -1228,7 +1228,7 @@ MOBILE_HTML_TEMPLATE = """
             </div>
         </div>
 
-        <div id="cards-container" class="strip-mode"></div>
+        <div style="margin-bottom:10px;color:#aaa;font-size:12px;">对比分钟：<input id="compare-min" class="setting-input" value="10" onchange="localStorage.setItem('compareMinutes',this.value)"></div><div id="cards-container" class="strip-mode"></div>
     </div>
 
     <!-- 独立登录界面弹窗 -->
@@ -1334,7 +1334,15 @@ MOBILE_HTML_TEMPLATE = """
 
         // 已关闭网页端时间对比功能
         function getCompareDiff(boxId, currentValStr) {
-            return { text: '', cls: 'diff-zero' };
+            const num = parseFloat(currentValStr);
+            if (isNaN(num)) return {text:'', cls:'diff-zero'};
+            const min = parseFloat(localStorage.getItem('compareMinutes') || '10');
+            const old = (historyStore[boxId]||[]).filter(x=>Date.now()-x.time>=min*60000).pop();
+            if (!old) return {text:'', cls:'diff-zero'};
+            const d = num-old.val;
+            if(d>0) return {text:'↑ '+d.toFixed(4), cls:'diff-up'};
+            if(d<0) return {text:'↓ '+Math.abs(d).toFixed(4), cls:'diff-down'};
+            return {text:'=', cls:'diff-zero'};
         }
 
 
@@ -1679,7 +1687,7 @@ MOBILE_HTML_TEMPLATE = """
                     return;
                 } else {
                     let logsHtml = (b.logs && b.logs.length > 0)
-                        ? b.logs.map(l => `<div class="log-item" onclick="openLogWindow('历史日志', JSON.stringify(l))">${l}</div>`).join('')
+                        ? b.logs.map(l => `<div class="log-item" onclick="openLogWindow('历史日志', JSON.stringify(l).replace(/"/g, "&quot;"))">${l}</div>`).join('')
                         : '<div class="log-item">无历史记录</div>';
 
                     cardEl.innerHTML = `
@@ -1763,7 +1771,7 @@ MOBILE_HTML_TEMPLATE = """
                 const logListEl = document.getElementById(`log-list-${b.id}`);
                 if (logListEl) {
                     let logsHtml = (b.logs && b.logs.length > 0)
-                        ? b.logs.map(l => `<div class="log-item" onclick="openLogWindow('历史日志', JSON.stringify(l))">${l}</div>`).join('')
+                        ? b.logs.map(l => `<div class="log-item" onclick="openLogWindow('历史日志', JSON.stringify(l).replace(/"/g, "&quot;"))">${l}</div>`).join('')
                         : '<div class="log-item">无历史记录</div>';
                     logListEl.innerHTML = logsHtml;
                 }
@@ -2537,6 +2545,8 @@ class GlobalControlPanel(QWidget):
             "log_interval": self.spin_log_interval.value(),
             "ocr_params": self.ocr_params,
             "window": {"x": self.x(), "y": self.y()},
+            "grille_interval": self.spin_grille_interval.value(),
+            "web_service": self.chk_web.isChecked(),
             "boxes": []
         }
         for b in self.boxes:
@@ -2560,6 +2570,8 @@ class GlobalControlPanel(QWidget):
             self.spin_interval.setValue(data.get("interval", 10.0))
             self.spin_count.setValue(data.get("count", 30))
             self.spin_log_interval.setValue(data.get("log_interval", 1.0))
+            self.spin_grille_interval.setValue(data.get("grille_interval", 2.0))
+            self.chk_web.setChecked(data.get("web_service", False))
             self.ocr_params = data.get("ocr_params", self.ocr_params)
 
             win = data.get("window", {})
