@@ -1144,7 +1144,7 @@ MOBILE_HTML_TEMPLATE = """
 
         .card { background: #1a1a26; border-radius: 12px; padding: 12px 14px; margin-bottom: 10px; border: 1px solid rgba(255,255,255,0.1); transition: all 0.3s; }
         
-        .card.alarm { border: 2px solid #ff4d4d; background: rgba(255, 77, 77, 0.08); animation: blink 1s infinite alternate; }
+        .card.alarm { background:#fff3cd; border:2px solid #ffc107; border: 2px solid #ff4d4d; background: rgba(255, 77, 77, 0.08); animation: blink 1s infinite alternate; }
         @keyframes blink { from { box-shadow: 0 0 5px rgba(255,77,77,0.3); } to { box-shadow: 0 0 15px rgba(255,77,77,0.8); } }
 
         .card.warning { border: 2px solid #ffaa00; background: rgba(255, 170, 0, 0.08); }
@@ -1194,7 +1194,7 @@ MOBILE_HTML_TEMPLATE = """
         #cards-container.square-mode { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }
 
         /* 正方形卡片内部排版 */
-        .square-card { text-align: center; display: flex; flex-direction: column; justify-content: center; align-items: center; padding: 14px 8px; }
+        .square-card { min-width:260px; min-height:220px; text-align: center; display: flex; flex-direction: column; justify-content: center; align-items: center; padding: 14px 8px; }
         .square-card .sq-row1 { font-size: 14px; font-weight: bold; color: #ffffff; margin-bottom: 4px; width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .square-card .sq-row2 { font-size: 38px; font-weight: bold; font-family: monospace; color: #00ff8c; margin: 4px 0; }
         .square-card .sq-row3 { font-size: 13px; font-weight: bold; font-family: monospace; }
@@ -1647,7 +1647,7 @@ MOBILE_HTML_TEMPLATE = """
             // 【修改项 2 & 3】获取自定义对比差值
             const diff = getCompareDiff(b.id, b.value);
 
-            // 【修改项 3】正方形模式渲染逻辑（第一行名字，第二行大数字，第三行对比）
+            // 【修改项 3】正方形模式渲染逻辑（第一行名字，第二行大数字，固定显示）
             if (displayMode === 'square') {
                 cardEl.className = `card square-card ${b.is_alarm ? 'alarm' : (isWarning ? 'warning' : '')}`;
                 cardEl.innerHTML = `
@@ -1669,7 +1669,7 @@ MOBILE_HTML_TEMPLATE = """
                                 <span class="card-title">${b.name}</span>
                                 <span style="font-size:12px; color:#888; margin-left:4px;">▶</span>
                             </div>
-                            <!-- 【修改项 2】数值前面增加自定义时间对比 -->
+                            
                             <div style="display:flex; align-items:center; gap:8px;">
                                 <span id="diff-tag-${b.id}" class="diff-text ${diff.cls}">${diff.text}</span>
                                 <span id="collapsed-val-${b.id}" style="font-size: 16px; font-weight: bold; font-family: monospace; color: ${valColor};">${b.value}</span>
@@ -1679,7 +1679,7 @@ MOBILE_HTML_TEMPLATE = """
                     return;
                 } else {
                     let logsHtml = (b.logs && b.logs.length > 0)
-                        ? b.logs.map(l => `<div class="log-item" onclick="openLogWindow('历史日志', ${JSON.stringify('<div class="log">'+l+'</div>')})">${l}</div>`).join('')
+                        ? b.logs.map(l => `<div class="log-item" onclick="openLogWindow('历史日志', JSON.stringify(l))">${l}</div>`).join('')
                         : '<div class="log-item">无历史记录</div>';
 
                     cardEl.innerHTML = `
@@ -1697,7 +1697,7 @@ MOBILE_HTML_TEMPLATE = """
                         </div>
                         <div class="fold-body">
                             <div class="setting-row" id="setting-row-${b.id}">
-                                <label>下限:</label>
+                                
                                 <input id="input-lower-${b.id}" class="setting-input" type="number" step="0.1" value="${b.lower}">
                                 <label>预警值:</label>
                                 <input id="input-mid-${b.id}" class="setting-input" type="number" step="0.1" value="${b.mid_val}">
@@ -1763,7 +1763,7 @@ MOBILE_HTML_TEMPLATE = """
                 const logListEl = document.getElementById(`log-list-${b.id}`);
                 if (logListEl) {
                     let logsHtml = (b.logs && b.logs.length > 0)
-                        ? b.logs.map(l => `<div class="log-item" onclick="openLogWindow('历史日志', ${JSON.stringify('<div class="log">'+l+'</div>')})">${l}</div>`).join('')
+                        ? b.logs.map(l => `<div class="log-item" onclick="openLogWindow('历史日志', JSON.stringify(l))">${l}</div>`).join('')
                         : '<div class="log-item">无历史记录</div>';
                     logListEl.innerHTML = logsHtml;
                 }
@@ -2536,6 +2536,7 @@ class GlobalControlPanel(QWidget):
             "count": self.spin_count.value(),
             "log_interval": self.spin_log_interval.value(),
             "ocr_params": self.ocr_params,
+            "window": {"x": self.x(), "y": self.y()},
             "boxes": []
         }
         for b in self.boxes:
@@ -2561,6 +2562,10 @@ class GlobalControlPanel(QWidget):
             self.spin_log_interval.setValue(data.get("log_interval", 1.0))
             self.ocr_params = data.get("ocr_params", self.ocr_params)
 
+            win = data.get("window", {})
+            if "x" in win and "y" in win:
+                self.move(win["x"], win["y"])
+
             for item in data.get("boxes", []):
                 self.add_box(
                     item["x"], item["y"], item["w"], item["h"],
@@ -2572,6 +2577,10 @@ class GlobalControlPanel(QWidget):
                 )
         except Exception as e:
             print("加载配置失败:", e)
+
+    def closeEvent(self, event):
+        self.save_config()
+        event.accept()
 
     def close_app(self):
         self.stop_grille()
