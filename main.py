@@ -8,7 +8,7 @@ import ctypes
 import socket
 from datetime import datetime
 
-# Enable Windows High DPI Scaling
+# 开启 Windows 高 DPI 屏幕兼容支持
 os.environ["QT_ENABLE_HIGHDPI_SCALING"] = "1"
 os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "1"
 
@@ -28,6 +28,12 @@ import numpy as np
 import cv2
 
 try:
+    import ddddocr
+    DDDDOCR_AVAILABLE = True
+except ImportError:
+    DDDDOCR_AVAILABLE = False
+
+try:
     import pygame
     PYGAME_AVAILABLE = True
 except ImportError:
@@ -40,7 +46,7 @@ except ImportError:
     FLASK_AVAILABLE = False
 
 
-# ==================== Local IP Detection ====================
+# ==================== 获取本机局域网 IP ====================
 def get_local_ip():
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -52,9 +58,9 @@ def get_local_ip():
         return "127.0.0.1"
 
 
-# ==================== Clean DoubleSpinBox ====================
+# ==================== 自定义无冗余 .00 的 SpinBox ====================
 class CleanDoubleSpinBox(QDoubleSpinBox):
-    """Clean SpinBox that removes redundant trailing .00"""
+    """自动消除末尾 .00 / 冗余 0 的输入框"""
     def textFromValue(self, val):
         s = f"{val:.2f}"
         if s.endswith('.00'):
@@ -64,7 +70,7 @@ class CleanDoubleSpinBox(QDoubleSpinBox):
         return s
 
 
-# ==================== Global F12 Listener Thread ====================
+# ==================== 1. 全局 F12 键盘监听线程 ====================
 class GlobalF12Listener(QThread):
     f12_triggered = Signal()
 
@@ -88,7 +94,7 @@ class GlobalF12Listener(QThread):
             self.msleep(50)
 
 
-# ==================== Alarm Sound Player ====================
+# ==================== 2. 报警声音播放器 ====================
 class AlarmSoundPlayer:
     def __init__(self):
         self.is_playing = False
@@ -166,7 +172,7 @@ class AlarmSoundPlayer:
             except: pass
 
 
-# ==================== Fine Grille Thread ====================
+# ==================== 3. 细格栅自动点击线程 ====================
 class FineGrilleThread(QThread):
     countdown_tick = Signal(float)
 
@@ -216,7 +222,7 @@ class FineGrilleThread(QThread):
             if not self._safe_sleep(wait_sec): break
 
 
-# ==================== OCR Parameter Dialog ====================
+# ==================== 4. OCR 识别参数调整对话框 ====================
 class OCRAdjustDialog(QDialog):
     def __init__(self, params, reader=None, parent=None):
         super().__init__(parent)
@@ -415,13 +421,14 @@ class OCRAdjustDialog(QDialog):
         }
 
 
-# ==================== Floating OCR Selection Widget ====================
+# ==================== 5. 悬浮识别选框窗口 ====================
 class OverlayRegionWidget(QWidget):
     delete_requested = Signal(object)
     alarm_cleared = Signal()
     mute_toggled = Signal()
+    changed = Signal()
 
-    def __init__(self, box_id, x, y, w, h, name="", lower=0.0, mid_val=0.0, upper=0.0, decimal_places=0, parent=None):
+    def __init__(self, box_id, x, y, w, h, name="区域", lower=0.0, mid_val=50.0, upper=100.0, decimal_places=0, parent=None):
         super().__init__(None)
         self.box_id = box_id
         self.capture_x = x
@@ -608,23 +615,28 @@ class OverlayRegionWidget(QWidget):
 
     def _on_lower_changed(self, val):
         self.lower = val
+        self.changed.emit()
 
     def _on_mid_changed(self, val):
         self.mid_val = val
+        self.changed.emit()
 
     def _on_upper_changed(self, val):
         self.upper = val
+        self.changed.emit()
 
     def _on_dec_changed(self, val):
         self.decimal_places = val
+        self.changed.emit()
 
     def _on_title_changed(self, text):
         self.name = text
         self.lbl_title.setText(text)
+        self.changed.emit()
 
     def update_result_display(self, val, raw_text=""):
         if val is not None:
-            dp = getattr(self, 'decimal_places', 0)
+            dp = getattr(self, 'decimal_places', 2)
             self.lbl_result.setText(f"{val:.{dp}f}")
             if val > self.upper or val < self.lower:
                 self.lbl_result.setStyleSheet("color: #ff4d4d; font-size: 11px; font-weight: bold; margin-left: 2px;")
@@ -641,7 +653,7 @@ class OverlayRegionWidget(QWidget):
         now_ts = time.time()
         if self.last_log_time == 0.0 or (now_ts - self.last_log_time >= self.log_interval_min * 60.0):
             self.last_log_time = now_ts
-            dp = getattr(self, 'decimal_places', 0)
+            dp = getattr(self, 'decimal_places', 2)
             msg = f"[{time_str}] {val:.{dp}f}" if val is not None else f"[{time_str}] ❌未检测到"
             self.list_widget.insertItem(0, msg)
             while self.list_widget.count() > self.max_log_count:
@@ -728,6 +740,7 @@ class OverlayRegionWidget(QWidget):
         self.btn_mute.setText(btn_txt)
         self.btn_mute.setStyleSheet(btn_style)
         self.mute_toggled.emit()
+        self.changed.emit()
 
     def _get_hit_mode(self, pos):
         x, y = pos.x(), pos.y()
@@ -746,6 +759,10 @@ class OverlayRegionWidget(QWidget):
             self._drag_pos = event.globalPosition().toPoint() - QPoint(self.capture_x, self.capture_y)
             self._resize_mode = self._get_hit_mode(event.position().toPoint())
             event.accept()
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.LeftButton and self.is_editing:
+            self.changed.emit()
 
     def mouseMoveEvent(self, event):
         if not self.is_editing: return
@@ -800,7 +817,7 @@ class OverlayRegionWidget(QWidget):
         painter.drawRect(box_rect.adjusted(1, 1, -1, -1))
 
 
-# ==================== Screen Coordinate Picker ====================
+# ==================== 6. 屏幕选区拾取器 ====================
 class CoordinatePicker(QWidget):
     coord_selected = Signal(int, int, int, int)
     def __init__(self, parent=None):
@@ -868,12 +885,11 @@ class CoordinatePicker(QWidget):
             self.close()
 
 
-# ==================== Background Monitor Thread ====================
+# ==================== 7. 后台识别线程 ====================
 class MonitorThread(QThread):
     value_updated = Signal(object, str, object, str)
     countdown_tick = Signal(float)
 
-    # 识别间隔 默认10秒
     def __init__(self, boxes, interval=10.0, ocr_params=None, scale=1.0, parent=None):
         super().__init__(parent)
         self.boxes = boxes
@@ -1033,7 +1049,7 @@ class MonitorThread(QThread):
                     self.msleep(50)
 
 
-# ==================== Flask Web UI Template ====================
+# ==================== 8. Flask 网页/手机端 WEB 交互界面 ====================
 MOBILE_HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="zh-CN">
@@ -1055,28 +1071,15 @@ MOBILE_HTML_TEMPLATE = """
         .status { font-size: 11px; color: #aaa; font-weight: bold; margin-left: auto; }
 
         .header-actions { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; width: 100%; }
-        .btn-top { background: #2e9a58; color: #fff; border: none; border-radius: 6px; padding: 6px 10px; font-size: 12px; font-weight: bold; cursor: pointer; transition: background 0.2s; }
+        .btn-top { background: #2e9a58; color: #fff; border: none; border-radius: 6px; padding: 6px 10px; font-size: 12px; font-weight: bold; cursor: pointer; transition: background 0.2s; height: 28px; line-height: 16px; display: inline-flex; align-items: center; justify-content: center; }
         .btn-top:active { opacity: 0.8; }
         .btn-top.active { background: #b03a3a; }
         .btn-top.btn-grille { background: #0088cc; }
         .btn-top.btn-grille.active { background: #cc3333; }
         
-        /* 统一基础按纽尺寸样式: 声音与用户管理、退出按纽具有相同尺寸 padding/font-size */
-        .btn-ctrl-fixed { 
-            height: 28px; 
-            padding: 0 10px; 
-            font-size: 12px; 
-            font-weight: bold; 
-            border-radius: 6px; 
-            cursor: pointer; 
-            border: none; 
-            display: inline-flex; 
-            align-items: center; 
-            justify-content: center;
-        }
+        .btn-sound { background: rgba(255,255,255,0.15); color: #00ff8c; border: 1px solid rgba(255,255,255,0.2); border-radius: 6px; padding: 6px 8px; font-size: 12px; font-weight: bold; cursor: pointer; height: 28px; line-height: 16px; display: inline-flex; align-items: center; justify-content: center; }
 
-        .btn-sound { background: rgba(255,255,255,0.15); color: #00ff8c; border: 1px solid rgba(255,255,255,0.2); }
-        .btn-fold-tool { background: rgba(255,255,255,0.1); color: #00ff8c; border: 1px solid rgba(0,255,140,0.3); border-radius: 6px; padding: 6px 8px; font-size: 12px; font-weight: bold; cursor: pointer; }
+        .btn-fold-tool { background: rgba(255,255,255,0.1); color: #00ff8c; border: 1px solid rgba(0,255,140,0.3); border-radius: 6px; padding: 6px 8px; font-size: 12px; font-weight: bold; cursor: pointer; height: 28px; line-height: 16px; display: inline-flex; align-items: center; justify-content: center; }
         .btn-fold-tool:active { background: rgba(0,255,140,0.2); }
 
         .login-input { background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; color: #00ff8c; font-weight: bold; padding: 4px 6px; width: 100%; font-size: 12px; }
@@ -1085,9 +1088,10 @@ MOBILE_HTML_TEMPLATE = """
         #cards-container.list-view { display: flex; flex-direction: column; gap: 10px; }
         
         #cards-container.grid-view { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 10px; }
-        #cards-container.grid-view .card { margin-bottom: 0; height: 130px; display: flex; flex-direction: column; justify-content: space-between; padding: 10px; }
-        #cards-container.grid-view .card .val-text { font-size: 22px; }
-        #cards-container.grid-view .card .fold-body { display: none !important; }
+        #cards-container.grid-view .card { margin-bottom: 0; height: 130px; display: flex; flex-direction: column; justify-content: space-between; padding: 10px; text-align: center; }
+        #cards-container.grid-view .card .grid-row-1 { font-size: 14px; font-weight: bold; color: #ffffff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        #cards-container.grid-view .card .grid-row-2 { font-size: 26px; font-weight: bold; font-family: monospace; }
+        #cards-container.grid-view .card .grid-row-3 { font-size: 12px; }
 
         .card { background: #1a1a26; border-radius: 12px; padding: 12px 14px; margin-bottom: 10px; border: 1px solid rgba(255,255,255,0.1); transition: all 0.2s; user-select: none; }
         .card.dragging { opacity: 0.4; border: 2px dashed #00ff8c; }
@@ -1103,7 +1107,7 @@ MOBILE_HTML_TEMPLATE = """
         .card-title-box { display: flex; align-items: center; gap: 8px; cursor: pointer; flex-grow: 1; }
         .card-title { color: #ffffff; font-size: 15px; font-weight: bold; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-        .btn-action { color: #fff; border-radius: 6px; padding: 4px 8px; font-size: 11px; font-weight: bold; cursor: pointer; border: none; }
+        .btn-action { color: #fff; border-radius: 6px; padding: 6px 8px; font-size: 12px; font-weight: bold; cursor: pointer; border: none; height: 28px; line-height: 16px; display: inline-flex; align-items: center; justify-content: center; }
         .btn-action:active { opacity: 0.8; }
         .btn-clear { background: #ff4d4d; color: white; }
 
@@ -1144,17 +1148,17 @@ MOBILE_HTML_TEMPLATE = """
                 <button id="btn-toggle-all" class="btn-fold-tool" onclick="toggleCollapseAll()">📂 展开</button>
                 <button id="btn-layout" class="btn-fold-tool" onclick="toggleLayoutView()">🔲 方块视图</button>
 
-                <!-- 登录/用户配置模块 -->
+                <!-- 登录按钮 -->
                 <div id="login-box" style="display: inline-flex; align-items: center; gap: 4px;">
-                    <button class="btn-ctrl-fixed" style="background:#0088cc; color:white;" onclick="openLoginModal()">🔐 登录</button>
+                    <button class="btn-fold-tool" style="background:#0088cc; color:white; border:none;" onclick="openLoginModal()">🔐 登录</button>
                 </div>
-                <div id="user-box" style="display: none; align-items: center; gap: 4px;">
+                <div id="user-box" style="display: none; align-items: center; gap: 6px;">
                     <span id="current-username" style="color:#00ff8c; font-size:12px; font-weight:bold;">👤 已登录</span>
-                    <button class="btn-ctrl-fixed" style="background:#e65100; color:white;" onclick="openUserMgmtModal()">⚙️ 用户管理</button>
-                    <button class="btn-ctrl-fixed" style="background:#555; color:white;" onclick="handleLogout()">🚪 退出</button>
+                    <button class="btn-sound" style="background:rgba(255,255,255,0.15); color:white;" onclick="openUserMgmtModal()">⚙️ 用户管理</button>
+                    <button class="btn-sound" style="background:rgba(255,255,255,0.15); color:white;" onclick="handleLogout()">🚪 退出</button>
                 </div>
 
-                <button id="btn-sound" class="btn-ctrl-fixed btn-sound" onclick="toggleWebSound()">🔊 声音</button>
+                <button id="btn-sound" class="btn-sound" onclick="toggleWebSound()">🔊 声音</button>
                 <button id="btn-monitor" class="btn-top" onclick="postAction('toggle_monitor', -1)">▶ 开始监控</button>
                 <button id="btn-grille" class="btn-top btn-grille" onclick="postAction('toggle_grille', -1)">▶ 开始操作</button>
 
@@ -1409,7 +1413,7 @@ MOBILE_HTML_TEMPLATE = """
                     container.innerHTML = data.users.map(u => `
                         <div style="display:flex; justify-content:space-between; align-items:center; padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,0.05); font-size:12px;">
                             <span>👤 ${u}</span>
-                            ${u !== 'admin' ? `<button class="btn-action" style="background:#ff4d4d; color:white;" onclick="handleDeleteUser('${u}')">删除</button>` : '<span style="color:#888; font-size:11px;">(默认管理员)</span>'}
+                            ${u !== 'admin' ? `<button class="btn-action" style="background:#ff4d4d; color:white; height:24px; padding:2px 6px;" onclick="handleDeleteUser('${u}')">删除</button>` : '<span style="color:#888; font-size:11px;">(默认管理员)</span>'}
                         </div>
                     `).join('');
                 } else {
@@ -1521,9 +1525,10 @@ MOBILE_HTML_TEMPLATE = """
             }
         }
 
+        /* 支持动态小数点精度的 2H 对比计算 */
         function formatTwoHourCompare(b, currentTimeStr) {
             const currVal = parseFloat(b.value);
-            const dp = b.decimal_places !== undefined ? b.decimal_places : 0;
+            const dp = b.decimal_places !== undefined ? b.decimal_places : 2;
             
             if (isNaN(currVal) || !b.logs || b.logs.length === 0 || !currentTimeStr) {
                 return '<span style="font-size:11px; color:#666; margin-right:4px;">(--)</span>';
@@ -1578,6 +1583,7 @@ MOBILE_HTML_TEMPLATE = """
                    `</span>`;
         }
 
+        /* 拖拽排序事件绑定 (仅登录有效) */
         function attachDragEvents(cardEl, boxId) {
             if (!isLoggedIn) {
                 cardEl.removeAttribute('draggable');
@@ -1630,9 +1636,6 @@ MOBILE_HTML_TEMPLATE = """
         }
 
         function renderCardDOM(cardEl, b, isCollapsed, isWarning, currentTimeStr) {
-            const currentFoldState = cardEl.getAttribute('data-collapsed');
-            const stateChanged = (currentFoldState !== String(isCollapsed));
-
             let valColor = '#00ff8c';
             if (b.is_alarm) {
                 valColor = '#ff4d4d';
@@ -1642,6 +1645,20 @@ MOBILE_HTML_TEMPLATE = """
 
             const compareHtml = formatTwoHourCompare(b, currentTimeStr);
             attachDragEvents(cardEl, b.id);
+
+            /* ===== 二. 方块视图渲染机制 ===== */
+            if (isGridView) {
+                cardEl.innerHTML = `
+                    <div class="grid-row-1">${b.name}</div>
+                    <div class="grid-row-2" style="color: ${valColor};">${b.value}</div>
+                    <div class="grid-row-3">${compareHtml}</div>
+                `;
+                return;
+            }
+
+            /* ===== 长条视图渲染机制 ===== */
+            const currentFoldState = cardEl.getAttribute('data-collapsed');
+            const stateChanged = (currentFoldState !== String(isCollapsed));
 
             if (stateChanged) {
                 cardEl.setAttribute('data-collapsed', String(isCollapsed));
@@ -1953,9 +1970,9 @@ class WebServerThread(QThread):
                     'name': b.name,
                     'value': b.lbl_result.text(),
                     'lower': b.lower,
-                    'mid_val': getattr(b, 'mid_val', 0.0),
+                    'mid_val': getattr(b, 'mid_val', 50.0),
                     'upper': b.upper,
-                    'decimal_places': getattr(b, 'decimal_places', 0),
+                    'decimal_places': getattr(b, 'decimal_places', 2),
                     'is_alarm': b.is_alarm,
                     'is_muted': b.is_muted,
                     'logs': logs
@@ -1989,323 +2006,447 @@ class WebServerThread(QThread):
             self.server = make_server(self.host, self.port, app, threaded=True)
             self.server.serve_forever()
         except Exception as e:
-            print("Web Server Error:", e)
-
-    def stop(self):
-        if self.server:
-            try:
-                self.server.shutdown()
-            except Exception:
-                pass
+            print("Web Server Exception:", e)
 
 
-# ==================== Global Control Panel (Main Window) ====================
-class GlobalControlPanel(QWidget):
+# ==================== 9. 主控制面板 GUI ====================
+class MainControlPanel(QWidget):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("🖥️ OCR 智能多区域监控中控台")
-        self.setGeometry(100, 100, 420, 520)
-        self.setWindowFlags(Qt.WindowStaysOnTopHint)
-
-        self.users = {"admin": "123456"}
-        self.load_users()
-
         self.boxes = []
         self.next_box_id = 1
         self.monitoring = False
+        self.global_muted = False
         self.curr_monitor_cd = 0.0
         self.curr_grille_cd = 0.0
-
-        self.alarm_player = AlarmSoundPlayer()
-        self.grille_thread = None
-        self.web_thread = None
+        self.reader = None
 
         self.ocr_params = {'scale': 3.0, 'clahe': 2.0, 'thresh_block': 11, 'thresh_c': 2}
-        
-        # 默认 10 秒识别间隔
-        self.monitor_thread = MonitorThread(self.boxes, interval=10.0, ocr_params=self.ocr_params)
-        self.monitor_thread.value_updated.connect(self._on_value_updated)
-        self.monitor_thread.countdown_tick.connect(self._on_monitor_cd_tick)
+        self.users = {"admin": "123456"}
+
+        self.sound_player = AlarmSoundPlayer()
+        self.config_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
+
+        self.init_ui()
+        self.load_users()
+        self.init_ocr()
 
         self.f12_listener = GlobalF12Listener()
-        self.f12_listener.f12_triggered.connect(self.toggle_panel_visibility)
+        self.f12_listener.f12_triggered.connect(self._on_f12_pressed)
         self.f12_listener.start()
 
-        self.reader = None
-        self._init_ocr()
+        self.grille_thread = None
+        self.web_thread = WebServerThread(self)
+        self.web_thread.action_requested.connect(self._handle_web_action)
+        self.web_thread.start()
 
-        self._init_ui()
-        self._start_web_server()
+        # 加载所有填空和勾选状态
+        self.load_settings()
 
-    def _init_ocr(self):
-        def _load():
-            try:
-                import ddddocr
-                self.reader = ddddocr.DdddOcr(show_ad=False)
-                self.monitor_thread.set_reader(self.reader)
-            except Exception as e:
-                print("DdddOcr 初始化失败:", e)
-        threading.Thread(target=_load, daemon=True).start()
-
-    def load_users(self):
-        cfg_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "users.json")
-        if os.path.exists(cfg_path):
-            try:
-                with open(cfg_path, 'r', encoding='utf-8') as f:
-                    self.users = json.load(f)
-            except Exception:
-                pass
-
-    def save_users(self):
-        cfg_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "users.json")
-        try:
-            with open(cfg_path, 'w', encoding='utf-8') as f:
-                json.dump(self.users, f, ensure_ascii=False, indent=2)
-        except Exception:
-            pass
-
-    def _init_ui(self):
+    def init_ui(self):
+        self.setWindowTitle("🖥️ 多区域数值监控系统 (主控端)")
+        self.setWindowFlags(Qt.WindowStaysOnTopHint)
+        self.resize(360, 480)
         self.setStyleSheet("""
-            QWidget { background-color: #121218; color: #e0e0e0; font-family: "Microsoft YaHei", sans-serif; }
-            QLabel { font-size: 12px; font-weight: bold; }
-            QPushButton { background-color: #2b2d42; color: white; border: 1px solid rgba(255,255,255,0.15); border-radius: 6px; padding: 6px 12px; font-size: 12px; font-weight: bold; }
-            QPushButton:hover { background-color: #3d405b; }
-            QDoubleSpinBox, QSpinBox, QLineEdit { background-color: rgba(0,0,0,0.5); color: #00ff8c; border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; padding: 4px; font-weight: bold; }
-            QCheckBox { font-size: 12px; font-weight: bold; color: #ffaa00; }
+            QWidget { background-color: #121218; color: #e0e0e0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+            QLabel { font-weight: bold; font-size: 11px; }
+            QPushButton {
+                background-color: #2a2a3c; color: white; border: 1px solid rgba(255,255,255,0.15);
+                border-radius: 4px; padding: 6px 12px; font-weight: bold; font-size: 11px;
+            }
+            QPushButton:hover { background-color: #3b3b54; }
+            QPushButton:pressed { background-color: #1a1a26; }
+            QDoubleSpinBox, QSpinBox {
+                background-color: rgba(26,26,38,0.8); color: #00ff8c; border: 1px solid rgba(255,255,255,0.2);
+                border-radius: 4px; padding: 2px 4px; font-weight: bold; font-size: 11px;
+            }
+            QCheckBox { font-weight: bold; font-size: 11px; color: #aaa; }
+            QCheckBox::indicator { width: 14px; height: 14px; }
         """)
 
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(10)
 
-        ip_str = get_local_ip()
-        lbl_info = QLabel(f"🌐 网页中控地址: http://{ip_str}:5000")
-        lbl_info.setStyleSheet("color: #00ff8c; font-size: 13px; background: rgba(0,0,0,0.4); padding: 8px; border-radius: 6px;")
-        layout.addWidget(lbl_info)
+        # 头部标题
+        lbl_header = QLabel("⚡ 多选框识别与监控中心")
+        lbl_header.setStyleSheet("color: #00ff8c; font-size: 14px; font-weight: bold;")
+        lbl_header.setAlignment(Qt.AlignCenter)
+        layout.addWidget(lbl_header)
 
-        # 所有的填空和打勾 都需要自己配置 (空值 / 不勾选)
-        cfg_box = QFrame()
-        cfg_box.setStyleSheet("background: #1a1a26; border-radius: 8px; padding: 8px;")
-        form = QFormLayout(cfg_box)
-
+        # 间隔设置区
+        row_interval = QHBoxLayout()
+        lbl_int = QLabel("识别间隔 (秒):")
         self.spin_interval = QDoubleSpinBox()
-        self.spin_interval.setRange(0.1, 3600.0)
-        self.spin_interval.setValue(10.0) # 识别间隔 默认10秒
-        self.spin_interval.setSuffix(" 秒")
+        self.spin_interval.setRange(0.2, 3600.0)
+        # 三. 三. 识别间隔 默认10秒
+        self.spin_interval.setValue(10.0)
+        self.spin_interval.setSingleStep(1.0)
+        self.spin_interval.valueChanged.connect(self._on_interval_changed)
 
-        self.spin_grille_min = QDoubleSpinBox()
-        self.spin_grille_min.setRange(0.1, 1440.0)
-        self.spin_grille_min.setValue(0.0) # 空配置
-        self.spin_grille_min.setSuffix(" 分钟")
+        row_interval.addWidget(lbl_int)
+        row_interval.addWidget(self.spin_interval)
+        layout.addLayout(row_interval)
 
-        self.chk_hide_panels = QCheckBox("隐藏选框操控面板")
-        self.chk_hide_panels.setChecked(False) # 不打勾
-        self.chk_hide_panels.stateChanged.connect(self._toggle_hide_panels)
+        # 细格栅自动操作区
+        row_grille = QHBoxLayout()
+        lbl_grille = QLabel("网格间隔 (分):")
+        self.spin_grille_interval = QDoubleSpinBox()
+        self.spin_grille_interval.setRange(0.1, 1440.0)
+        self.spin_grille_interval.setValue(2.0)
+        self.spin_grille_interval.setSingleStep(0.5)
 
-        form.addRow("识别间隔 (秒):", self.spin_interval)
-        form.addRow("格栅点击周期 (分):", self.spin_grille_min)
-        form.addRow("", self.chk_hide_panels)
+        self.btn_toggle_grille = QPushButton("▶ 开始操作")
+        self.btn_toggle_grille.setStyleSheet("background-color: #0088cc; color: white;")
+        self.btn_toggle_grille.clicked.connect(self.toggle_grille)
 
-        layout.addWidget(cfg_box)
+        row_grille.addWidget(lbl_grille)
+        row_grille.addWidget(self.spin_grille_interval)
+        row_grille.addWidget(self.btn_toggle_grille)
+        layout.addLayout(row_grille)
 
-        btn_ocr_cfg = QPushButton("⚙️ 图像识别参数调优/预览")
-        btn_ocr_cfg.clicked.connect(self._open_ocr_adjust_dialog)
-        layout.addWidget(btn_ocr_cfg)
+        # 控制按钮区
+        grid_btn = QHBoxLayout()
+        self.btn_add_box = QPushButton("➕ 添加选框")
+        self.btn_add_box.clicked.connect(self.add_box)
 
-        btn_add = QPushButton("➕ 添加监控选框")
-        btn_add.setStyleSheet("background-color: #0088cc; font-size: 13px;")
-        btn_add.clicked.connect(self._add_box_picker)
-        layout.addWidget(btn_add)
+        self.btn_ocr_adjust = QPushButton("⚙️ 识别调整")
+        self.btn_ocr_adjust.clicked.connect(self.open_ocr_adjust)
 
-        self.btn_toggle_monitor = QPushButton("▶ 开始全局监控")
-        self.btn_toggle_monitor.setStyleSheet("background-color: #2e9a58; font-size: 13px;")
+        grid_btn.addWidget(self.btn_add_box)
+        grid_btn.addWidget(self.btn_ocr_adjust)
+        layout.addLayout(grid_btn)
+
+        # 监控控制主按钮
+        self.btn_toggle_monitor = QPushButton("▶ 开始监控 (F12)")
+        self.btn_toggle_monitor.setStyleSheet("background-color: #2e9a58; color: white; font-size: 13px; font-weight: bold; padding: 10px;")
         self.btn_toggle_monitor.clicked.connect(self.toggle_monitoring)
         layout.addWidget(self.btn_toggle_monitor)
 
-        self.btn_toggle_grille = QPushButton("▶ 开始细格栅自动点击")
-        self.btn_toggle_grille.setStyleSheet("background-color: #d97706; font-size: 13px;")
-        self.btn_toggle_grille.clicked.connect(self.toggle_grille)
-        layout.addWidget(self.btn_toggle_grille)
+        # 勾选设置控制
+        grid_chk = QHBoxLayout()
+        self.chk_edit_mode = QCheckBox("编辑模式")
+        self.chk_edit_mode.setChecked(True)
+        self.chk_edit_mode.toggled.connect(self._toggle_edit_mode)
+
+        self.chk_topmost = QCheckBox("全局置顶")
+        self.chk_topmost.setChecked(True)
+        self.chk_topmost.toggled.connect(self._toggle_topmost)
+
+        grid_chk.addWidget(self.chk_edit_mode)
+        grid_chk.addWidget(self.chk_topmost)
+        layout.addLayout(grid_chk)
+
+        grid_chk2 = QHBoxLayout()
+        self.chk_global_mute = QCheckBox("全局静音")
+        self.chk_global_mute.toggled.connect(self._toggle_global_mute)
+
+        self.chk_hide_panels = QCheckBox("收起控制面板")
+        self.chk_hide_panels.toggled.connect(self._toggle_hide_panels)
+
+        grid_chk2.addWidget(self.chk_global_mute)
+        grid_chk2.addWidget(self.chk_hide_panels)
+        layout.addLayout(grid_chk2)
+
+        # 绑定自动保存配置的事件监听
+        self.spin_grille_interval.valueChanged.connect(self.save_settings)
+        self.chk_edit_mode.toggled.connect(self.save_settings)
+        self.chk_topmost.toggled.connect(self.save_settings)
+        self.chk_global_mute.toggled.connect(self.save_settings)
+        self.chk_hide_panels.toggled.connect(self.save_settings)
+
+        # 网页服务与地址提示
+        local_ip = get_local_ip()
+        lbl_web_info = QLabel(f"🌐 网页/手机访问地址:\nhttp://{local_ip}:5000")
+        lbl_web_info.setStyleSheet("color: #00ff8c; background: rgba(0,255,140,0.1); padding: 8px; border-radius: 4px; font-family: monospace;")
+        lbl_web_info.setAlignment(Qt.AlignCenter)
+        layout.addWidget(lbl_web_info)
 
         layout.addStretch()
 
-        lbl_tip = QLabel("💡 提示: 按 F12 即可一键显示/隐藏悬浮区域")
-        lbl_tip.setStyleSheet("color: #aaa; font-size: 11px;")
-        lbl_tip.setAlignment(Qt.AlignCenter)
-        layout.addWidget(lbl_tip)
+    def init_ocr(self):
+        if DDDDOCR_AVAILABLE:
+            def load_thread():
+                try:
+                    self.reader = ddddocr.DdddOcr(show_ad=False)
+                except: pass
+            threading.Thread(target=load_thread, daemon=True).start()
 
-    def _open_ocr_adjust_dialog(self):
-        dlg = OCRAdjustDialog(self.ocr_params, reader=self.reader, parent=self)
-        if dlg.exec() == QDialog.Accepted:
-            self.ocr_params = dlg.get_params()
-            self.monitor_thread.update_params(ocr_params=self.ocr_params)
+    def _on_f12_pressed(self):
+        self.toggle_monitoring()
 
-    def _toggle_hide_panels(self, state):
-        hidden = (state == Qt.Checked.value) if hasattr(Qt, 'Checked') else bool(state)
+    def _on_interval_changed(self, val):
+        if hasattr(self, 'monitor_thread') and self.monitor_thread:
+            self.monitor_thread.update_params(interval=val)
+        self.save_settings()
+
+    def _toggle_edit_mode(self, checked):
         for b in self.boxes:
-            b.set_panel_hidden(hidden)
+            b.set_edit_mode(checked)
 
-    def _add_box_picker(self):
-        self.hide()
-        time.sleep(0.2)
-        self.picker = CoordinatePicker()
+    def _toggle_topmost(self, checked):
+        flags = self.windowFlags()
+        if checked:
+            flags |= Qt.WindowStaysOnTopHint
+        else:
+            flags &= ~Qt.WindowStaysOnTopHint
+        self.setWindowFlags(flags)
+        self.show()
 
-        def on_picked(x, y, w, h):
-            self.show()
-            if w > 0 and h > 0:
-                box = OverlayRegionWidget(
-                    box_id=self.next_box_id,
-                    x=x, y=y, w=w, h=h,
-                    name="", # 默认为空
-                    lower=0.0, mid_val=0.0, upper=0.0, decimal_places=0 # 默认为空配置
-                )
-                self.next_box_id += 1
-                box.delete_requested.connect(self._delete_box)
-                box.alarm_cleared.connect(self._check_global_alarm)
-                box.set_edit_mode(not self.monitoring)
-                box.set_panel_hidden(self.chk_hide_panels.isChecked())
-                box.show()
-                self.boxes.append(box)
+    def _toggle_global_mute(self, checked):
+        self.global_muted = checked
+        if checked:
+            self.sound_player.stop()
 
-        self.picker.coord_selected.connect(on_picked)
-        self.picker.showFullScreen()
+    def _toggle_hide_panels(self, checked):
+        for b in self.boxes:
+            b.set_panel_hidden(checked)
 
-    def _delete_box(self, box):
+    def open_ocr_adjust(self):
+        dialog = OCRAdjustDialog(self.ocr_params, reader=self.reader, parent=self)
+        if dialog.exec_() == QDialog.Accepted:
+            self.ocr_params = dialog.get_params()
+            if hasattr(self, 'monitor_thread') and self.monitor_thread:
+                self.monitor_thread.update_params(ocr_params=self.ocr_params)
+            self.save_settings()
+
+    def add_box(self, box_data=None):
+        if box_data:
+            b_id = box_data.get('id', self.next_box_id)
+            self.next_box_id = max(self.next_box_id, b_id + 1)
+            x, y = box_data.get('x', 100), box_data.get('y', 100)
+            w, h = box_data.get('w', 120), box_data.get('h', 40)
+            name = box_data.get('name', f"选框{b_id}")
+            lower = box_data.get('lower', 0.0)
+            mid_val = box_data.get('mid_val', 50.0)
+            upper = box_data.get('upper', 100.0)
+            dp = box_data.get('decimal_places', 0)
+        else:
+            b_id = self.next_box_id
+            self.next_box_id += 1
+            x, y, w, h = 100 + (b_id * 20), 100 + (b_id * 20), 120, 40
+            name = f"选框{b_id}"
+            lower, mid_val, upper, dp = 0.0, 50.0, 100.0, 0
+
+        box = OverlayRegionWidget(b_id, x, y, w, h, name=name, lower=lower, mid_val=mid_val, upper=upper, decimal_places=dp)
+        box.set_edit_mode(self.chk_edit_mode.isChecked())
+        box.set_panel_hidden(self.chk_hide_panels.isChecked())
+
+        box.delete_requested.connect(self.delete_box)
+        box.alarm_cleared.connect(self._check_global_alarm_state)
+        box.mute_toggled.connect(self._check_global_alarm_state)
+        box.changed.connect(self.save_settings)
+
+        box.show()
+        self.boxes.append(box)
+
+        if hasattr(self, 'monitor_thread') and self.monitor_thread:
+            self.monitor_thread.boxes = self.boxes
+
+        self.save_settings()
+
+    def delete_box(self, box):
         if box in self.boxes:
             self.boxes.remove(box)
             box.close()
             box.deleteLater()
-            self._check_global_alarm()
+
+        if hasattr(self, 'monitor_thread') and self.monitor_thread:
+            self.monitor_thread.boxes = self.boxes
+
+        self._check_global_alarm_state()
+        self.save_settings()
 
     def toggle_monitoring(self):
         self.monitoring = not self.monitoring
         if self.monitoring:
-            self.btn_toggle_monitor.setText("⏹ 停止全局监控")
-            self.btn_toggle_monitor.setStyleSheet("background-color: #b03a3a; font-size: 13px;")
-            for b in self.boxes:
-                b.set_edit_mode(False)
+            self.btn_toggle_monitor.setText("⏹ 停止监控 (F12)")
+            self.btn_toggle_monitor.setStyleSheet("background-color: #b03a3a; color: white; font-size: 13px; font-weight: bold; padding: 10px;")
 
             screen = QApplication.primaryScreen()
             scale = screen.devicePixelRatio() if screen else 1.0
-            interval = self.spin_interval.value()
-            self.monitor_thread.update_params(interval=interval, scale=scale, ocr_params=self.ocr_params)
+
+            self.monitor_thread = MonitorThread(self.boxes, interval=self.spin_interval.value(), ocr_params=self.ocr_params, scale=scale)
+            self.monitor_thread.set_reader(self.reader)
+            self.monitor_thread.value_updated.connect(self._on_value_updated)
+            self.monitor_thread.countdown_tick.connect(self._on_monitor_cd)
             self.monitor_thread.start()
         else:
-            self.btn_toggle_monitor.setText("▶ 开始全局监控")
-            self.btn_toggle_monitor.setStyleSheet("background-color: #2e9a58; font-size: 13px;")
-            self.monitor_thread.stop()
-            self.monitor_thread.wait()
-            for b in self.boxes:
-                b.set_edit_mode(True)
+            self.btn_toggle_monitor.setText("▶ 开始监控 (F12)")
+            self.btn_toggle_monitor.setStyleSheet("background-color: #2e9a58; color: white; font-size: 13px; font-weight: bold; padding: 10px;")
+            if hasattr(self, 'monitor_thread') and self.monitor_thread:
+                self.monitor_thread.stop()
+                self.monitor_thread.wait()
+                self.monitor_thread = None
+            self.sound_player.stop()
 
     def toggle_grille(self):
-        if self.grille_thread and self.grille_thread.isRunning():
-            self.grille_thread.stop()
-            self.grille_thread.wait()
-            self.btn_toggle_grille.setText("▶ 开始细格栅自动点击")
-            self.btn_toggle_grille.setStyleSheet("background-color: #d97706; font-size: 13px;")
-        else:
-            interval_min = self.spin_grille_min.value()
+        is_running = bool(self.grille_thread and self.grille_thread.isRunning())
+        if not is_running:
+            interval_min = self.spin_grille_interval.value()
             self.grille_thread = FineGrilleThread(cycle_interval_min=interval_min)
-            self.grille_thread.countdown_tick.connect(self._on_grille_cd_tick)
+            self.grille_thread.countdown_tick.connect(self._on_grille_cd)
             self.grille_thread.start()
-            self.btn_toggle_grille.setText("⏹ 停止细格栅自动点击")
-            self.btn_toggle_grille.setStyleSheet("background-color: #cc3333; font-size: 13px;")
-
-    def toggle_panel_visibility(self):
-        if self.isVisible():
-            self.hide()
+            self.btn_toggle_grille.setText("⏹ 停止操作")
+            self.btn_toggle_grille.setStyleSheet("background-color: #b03a3a; color: white;")
         else:
-            self.show()
-            self.raise_()
-            self.activateWindow()
+            if self.grille_thread:
+                self.grille_thread.stop()
+                self.grille_thread.wait()
+                self.grille_thread = None
+            self.btn_toggle_grille.setText("▶ 开始操作")
+            self.btn_toggle_grille.setStyleSheet("background-color: #0088cc; color: white;")
 
-    def _on_monitor_cd_tick(self, rem):
-        self.curr_monitor_cd = rem
+    def _on_grille_cd(self, cd_sec):
+        self.curr_grille_cd = cd_sec
 
-    def _on_grille_cd_tick(self, rem):
-        self.curr_grille_cd = rem
+    def _on_monitor_cd(self, cd_sec):
+        self.curr_monitor_cd = cd_sec
 
     def _on_value_updated(self, box, time_str, val, raw_text):
         if box not in self.boxes: return
+
         box.update_result_display(val, raw_text)
         box.add_log_val(time_str, val, raw_text)
 
         if val is not None:
-            is_alarm = (val > box.upper or val < box.lower)
-            if is_alarm:
-                if box.last_alarm_val != val:
+            if val > box.upper or val < box.lower:
+                if not box.user_cleared_alarm or box.last_alarm_val != val:
+                    box.set_alarm_state(True)
                     box.user_cleared_alarm = False
                     box.last_alarm_val = val
-
-                if not box.user_cleared_alarm:
-                    box.set_alarm_state(True)
             else:
+                box.set_alarm_state(False)
                 box.user_cleared_alarm = False
                 box.last_alarm_val = None
-                box.set_alarm_state(False)
 
-        self._check_global_alarm()
+        self._check_global_alarm_state()
 
-    def _check_global_alarm(self):
-        any_alarm = any(b.is_alarm and not b.is_muted for b in self.boxes)
-        if any_alarm:
-            self.alarm_player.play()
+    def _check_global_alarm_state(self):
+        has_alarm = any(b.is_alarm and not b.is_muted for b in self.boxes)
+        if has_alarm and not self.global_muted:
+            self.sound_player.play()
         else:
-            self.alarm_player.stop()
-
-    def _start_web_server(self):
-        if FLASK_AVAILABLE:
-            self.web_thread = WebServerThread(self, host='0.0.0.0', port=5000)
-            self.web_thread.action_requested.connect(self._handle_web_action)
-            self.web_thread.start()
+            self.sound_player.stop()
 
     def _handle_web_action(self, action, box_id, payload):
         if action == 'toggle_monitor':
             self.toggle_monitoring()
         elif action == 'toggle_grille':
             self.toggle_grille()
-        else:
-            box = next((b for b in self.boxes if b.box_id == box_id), None)
-            if not box: return
+        elif action == 'clear_alarm':
+            for b in self.boxes:
+                if b.box_id == box_id:
+                    b._on_clear_alarm()
+                    break
+        elif action == 'toggle_mute':
+            for b in self.boxes:
+                if b.box_id == box_id:
+                    b._toggle_mute()
+                    break
+        elif action == 'set_limits':
+            for b in self.boxes:
+                if b.box_id == box_id:
+                    if 'lower' in payload: b.spin_lower.setValue(payload['lower'])
+                    if 'mid_val' in payload: b.spin_mid.setValue(payload['mid_val'])
+                    if 'upper' in payload: b.spin_upper.setValue(payload['upper'])
+                    break
 
-            if action == 'clear_alarm':
-                box._on_clear_alarm()
-            elif action == 'toggle_mute':
-                box._toggle_mute()
-            elif action == 'set_limits':
-                lower = payload.get('lower')
-                mid_val = payload.get('mid_val')
-                upper = payload.get('upper')
-                if lower is not None:
-                    box.spin_lower.setValue(lower)
-                if mid_val is not None:
-                    box.spin_mid.setValue(mid_val)
-                if upper is not None:
-                    box.spin_upper.setValue(upper)
+    # 三. 所有的填空和打勾 都支持记住设置 下次打开自动加载
+    def save_settings(self):
+        boxes_data = []
+        for b in self.boxes:
+            boxes_data.append({
+                'id': b.box_id,
+                'x': b.capture_x,
+                'y': b.capture_y,
+                'w': b.capture_w,
+                'h': b.capture_h,
+                'name': b.name,
+                'lower': b.lower,
+                'mid_val': b.mid_val,
+                'upper': b.upper,
+                'decimal_places': b.decimal_places,
+                'is_muted': b.is_muted
+            })
+
+        data = {
+            'interval': self.spin_interval.value(),
+            'grille_interval': self.spin_grille_interval.value(),
+            'edit_mode': self.chk_edit_mode.isChecked(),
+            'topmost': self.chk_topmost.isChecked(),
+            'global_mute': self.chk_global_mute.isChecked(),
+            'hide_panels': self.chk_hide_panels.isChecked(),
+            'ocr_params': self.ocr_params,
+            'boxes': boxes_data
+        }
+
+        try:
+            with open(self.config_file, 'w', encoding='utf-8') as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            print("保存配置失败:", e)
+
+    def load_settings(self):
+        if not os.path.exists(self.config_file):
+            return
+
+        try:
+            with open(self.config_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+
+            if 'interval' in data:
+                self.spin_interval.setValue(float(data['interval']))
+            if 'grille_interval' in data:
+                self.spin_grille_interval.setValue(float(data['grille_interval']))
+            if 'edit_mode' in data:
+                self.chk_edit_mode.setChecked(bool(data['edit_mode']))
+            if 'topmost' in data:
+                self.chk_topmost.setChecked(bool(data['topmost']))
+            if 'global_mute' in data:
+                self.chk_global_mute.setChecked(bool(data['global_mute']))
+            if 'hide_panels' in data:
+                self.chk_hide_panels.setChecked(bool(data['hide_panels']))
+            if 'ocr_params' in data:
+                self.ocr_params = data['ocr_params']
+
+            if 'boxes' in data and isinstance(data['boxes'], list):
+                for b_data in data['boxes']:
+                    self.add_box(b_data)
+
+        except Exception as e:
+            print("自动加载配置失败:", e)
+
+    def load_users(self):
+        user_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "users.json")
+        if os.path.exists(user_file):
+            try:
+                with open(user_file, 'r', encoding='utf-8') as f:
+                    self.users = json.load(f)
+            except: pass
+
+    def save_users(self):
+        user_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "users.json")
+        try:
+            with open(user_file, 'w', encoding='utf-8') as f:
+                json.dump(self.users, f, ensure_ascii=False, indent=2)
+        except: pass
 
     def closeEvent(self, event):
-        self.alarm_player.stop()
-        self.f12_listener.stop()
-        self.f12_listener.wait()
-
-        if self.monitor_thread.isRunning():
+        self.save_settings()
+        if hasattr(self, 'monitor_thread') and self.monitor_thread:
             self.monitor_thread.stop()
-            self.monitor_thread.wait()
-
-        if self.grille_thread and self.grille_thread.isRunning():
+        if self.f12_listener:
+            self.f12_listener.stop()
+        if self.grille_thread:
             self.grille_thread.stop()
-            self.grille_thread.wait()
-
-        if self.web_thread:
-            self.web_thread.stop()
-
-        for b in self.boxes:
-            b.close()
+        self.sound_player.stop()
         event.accept()
 
 
-# ==================== Application Entry Point ====================
+# ==================== 10. 程序入口 ====================
 if __name__ == '__main__':
     app = QApplication(sys.argv)
-    panel = GlobalControlPanel()
-    panel.show()
+    main_window = MainControlPanel()
+    main_window.show()
     sys.exit(app.exec())
