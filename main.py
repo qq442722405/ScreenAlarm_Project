@@ -420,7 +420,6 @@ class OverlayRegionWidget(QWidget):
     delete_requested = Signal(object)
     alarm_cleared = Signal()
     mute_toggled = Signal()
-    config_changed = Signal()
 
     def __init__(self, box_id, x, y, w, h, name="区域", lower=0.0, mid_val=50.0, upper=100.0, decimal_places=0, parent=None):
         super().__init__(None)
@@ -609,24 +608,19 @@ class OverlayRegionWidget(QWidget):
 
     def _on_lower_changed(self, val):
         self.lower = val
-        self.config_changed.emit()
 
     def _on_mid_changed(self, val):
         self.mid_val = val
-        self.config_changed.emit()
 
     def _on_upper_changed(self, val):
         self.upper = val
-        self.config_changed.emit()
 
     def _on_dec_changed(self, val):
         self.decimal_places = val
-        self.config_changed.emit()
 
     def _on_title_changed(self, text):
         self.name = text
         self.lbl_title.setText(text)
-        self.config_changed.emit()
 
     def update_result_display(self, val, raw_text=""):
         if val is not None:
@@ -734,7 +728,6 @@ class OverlayRegionWidget(QWidget):
         self.btn_mute.setText(btn_txt)
         self.btn_mute.setStyleSheet(btn_style)
         self.mute_toggled.emit()
-        self.config_changed.emit()
 
     def _get_hit_mode(self, pos):
         x, y = pos.x(), pos.y()
@@ -785,11 +778,6 @@ class OverlayRegionWidget(QWidget):
 
             self._update_geometry()
             self.update()
-
-    def mouseReleaseEvent(self, event):
-        if self.is_editing and self._resize_mode:
-            self._resize_mode = None
-            self.config_changed.emit()
 
     def paintEvent(self, event):
         painter = QPainter(self)
@@ -1044,454 +1032,514 @@ class MonitorThread(QThread):
                     self.msleep(50)
 
 
-# ==================== 8. Flask 网页/手机端 WEB 交互界面 HTML 模版 ====================
+# ==================== 8. Flask 网页/手机端 WEB 交互界面 ====================
 MOBILE_HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>📱 远程控制与数据监控面板</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>📱 中控数据面板</title>
     <style>
-        * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
-        body { background-color: #121218; color: #e0e0e0; padding: 12px; font-size: 14px; line-height: 1.5; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { background: #121218; color: #e0e0e0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 12px; }
+        
         .container { max-width: 600px; margin: 0 auto; width: 100%; }
-        
-        /* 登录卡片 */
-        .login-card { background: #1a1a26; border-radius: 12px; padding: 24px; border: 1px solid rgba(255,255,255,0.1); margin-top: 50px; text-align: center; }
-        .login-card h2 { color: #00ff8c; margin-bottom: 20px; font-size: 20px; }
-        .input-group { margin-bottom: 15px; text-align: left; }
-        .input-group label { display: block; font-size: 12px; color: #aaa; margin-bottom: 5px; }
-        .input-field { width: 100%; height: 40px; background: rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.2); border-radius: 6px; padding: 0 12px; color: #fff; font-size: 14px; outline: none; }
-        .btn-primary { width: 100%; height: 42px; background: #0088cc; color: #fff; border: none; border-radius: 6px; font-size: 15px; font-weight: bold; cursor: pointer; }
-        
-        /* 顶部导航与操作栏 */
-        .header { background: #1a1a26; padding: 14px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); margin-bottom: 14px; }
-        .header-title { font-size: 16px; font-weight: bold; color: #00ff8c; display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
-        
-        /* 一. 网页端 用户管理、退出 和声音按钮大小一样 */
-        .top-action-bar { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 12px; }
-        .btn-equal {
-            flex: 1;
-            height: 38px;
-            padding: 0 6px;
-            font-size: 13px;
+
+        .header { display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; background: #1a1a26; border-radius: 10px; margin-bottom: 12px; border: 1px solid rgba(255,255,255,0.1); flex-wrap: wrap; gap: 8px; }
+        .header-title-box { display: flex; flex-direction: column; gap: 2px; }
+        .title { font-size: 15px; font-weight: bold; color: #00ff8c; }
+        .status { font-size: 11px; color: #aaa; font-weight: bold; margin-left: auto; }
+
+        .header-actions { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; width: 100%; }
+        .btn-top { background: #2e9a58; color: #fff; border: none; border-radius: 6px; padding: 6px 10px; font-size: 12px; font-weight: bold; cursor: pointer; transition: background 0.2s; }
+        .btn-top:active { opacity: 0.8; }
+        .btn-top.active { background: #b03a3a; }
+        .btn-top.btn-grille { background: #0088cc; }
+        .btn-top.btn-grille.active { background: #cc3333; }
+
+        /* 统一三按钮等宽等高样式类 */
+        .btn-hdr-equal {
+            height: 28px;
+            padding: 0 10px;
+            font-size: 12px;
             font-weight: bold;
-            color: #ffffff;
-            background: rgba(255, 255, 255, 0.12);
-            border: 1px solid rgba(255, 255, 255, 0.2);
             border-radius: 6px;
-            cursor: pointer;
+            border: 1px solid rgba(255,255,255,0.2);
             display: inline-flex;
             align-items: center;
             justify-content: center;
+            cursor: pointer;
             box-sizing: border-box;
-            transition: all 0.2s ease;
+            line-height: 1;
             white-space: nowrap;
         }
-        .btn-equal:active { background: rgba(255, 255, 255, 0.25); transform: scale(0.98); }
-        .btn-equal.active { background: #e65100; border-color: #ff9800; }
+        .btn-sound { background: rgba(255,255,255,0.15); color: #00ff8c; }
+        .btn-user-mgmt { background: #e65100; color: white; border: none; }
+        .btn-logout { background: #555; color: white; border: none; }
 
-        .global-controls { display: flex; gap: 8px; margin-top: 10px; }
-        .btn-ctrl { flex: 1; height: 36px; border-radius: 6px; border: none; font-weight: bold; color: white; cursor: pointer; font-size: 13px; }
-        .btn-monitor { background: #2e9a58; }
-        .btn-monitor.running { background: #b03a3a; }
-        .btn-grille { background: #0088cc; }
-        .btn-grille.running { background: #cc3333; }
+        .btn-fold-tool { background: rgba(255,255,255,0.1); color: #00ff8c; border: 1px solid rgba(0,255,140,0.3); border-radius: 6px; padding: 6px 8px; font-size: 12px; font-weight: bold; cursor: pointer; }
+        .btn-fold-tool:active { background: rgba(0,255,140,0.2); }
 
-        /* 二. 网页端 方块视图 数值框 第一行名字 第二行数字 第三行对比 */
-        .grid-container { display: flex; flex-direction: column; gap: 12px; }
-        .box-card {
-            background: #1a1a26;
-            border: 1px solid rgba(255, 255, 255, 0.15);
-            border-radius: 10px;
-            padding: 12px 14px;
-            position: relative;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-        }
-        .box-card.alarm { border-color: #ff4d4d; background: rgba(80, 10, 10, 0.4); }
+        .login-input { background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; color: #00ff8c; font-weight: bold; padding: 4px 6px; width: 100%; font-size: 12px; }
 
-        /* 第一行：名字 */
-        .box-row-1 { display: flex; justify-content: space-between; align-items: center; padding-bottom: 4px; border-bottom: 1px solid rgba(255,255,255,0.08); }
-        .box-name { font-size: 15px; font-weight: bold; color: #00ff8c; }
-        .box-status-badge { font-size: 11px; padding: 2px 6px; border-radius: 4px; font-weight: bold; background: rgba(0,255,140,0.15); color: #00ff8c; }
-        .box-status-badge.alarm { background: rgba(255,77,77,0.2); color: #ff4d4d; }
+        /* 卡片容器与视图模式 */
+        #cards-container.list-view { display: flex; flex-direction: column; gap: 10px; }
+        
+        #cards-container.grid-view { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 10px; }
+        #cards-container.grid-view .card { margin-bottom: 0; height: 130px; display: flex; flex-direction: column; justify-content: space-between; padding: 10px; }
+        #cards-container.grid-view .card .val-text { font-size: 22px; }
+        #cards-container.grid-view .card .fold-body { display: none !important; }
 
-        /* 第二行：数字 */
-        .box-row-2 { text-align: center; padding: 10px 0; }
-        .box-val { font-size: 32px; font-weight: 900; color: #ffffff; font-family: "Consolas", monospace; letter-spacing: 1px; }
-        .box-val.alarm { color: #ff4d4d; }
+        .card { background: #1a1a26; border-radius: 12px; padding: 12px 14px; margin-bottom: 10px; border: 1px solid rgba(255,255,255,0.1); transition: all 0.2s; user-select: none; }
+        .card.alarm { border: 2px solid #ff4d4d; background: rgba(255, 77, 77, 0.08); animation: blink 1s infinite alternate; }
+        @keyframes blink { from { box-shadow: 0 0 5px rgba(255,77,77,0.3); } to { box-shadow: 0 0 15px rgba(255,77,77,0.8); } }
 
-        /* 第三行：对比 */
-        .box-row-3 { background: rgba(0,0,0,0.3); border-radius: 6px; padding: 6px 10px; font-size: 12px; color: #aaa; display: flex; justify-content: space-between; align-items: center; }
-        .box-compare-label { font-weight: bold; color: #ffaa00; }
-        .box-compare-val { font-family: monospace; color: #ddd; }
+        .card-header { display: flex; justify-content: space-between; align-items: center; font-size: 13px; color: #888; font-weight: bold; }
+        .card-title-box { display: flex; align-items: center; gap: 8px; cursor: pointer; flex-grow: 1; }
+        .card-title { color: #ffffff; font-size: 15px; font-weight: bold; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-        .box-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; }
-        .btn-sm { padding: 4px 10px; font-size: 11px; font-weight: bold; border-radius: 4px; border: 1px solid rgba(255,255,255,0.2); background: rgba(255,255,255,0.1); color: #fff; cursor: pointer; }
-        .btn-sm.btn-danger { background: #ff4d4d; border: none; }
-        .btn-sm.btn-warn { background: #e65100; border: none; }
+        .btn-action { color: #fff; border-radius: 6px; padding: 4px 8px; font-size: 11px; font-weight: bold; cursor: pointer; border: none; }
+        .btn-action:active { opacity: 0.8; }
+        .btn-clear { background: #ff4d4d; color: white; }
 
-        /* 模态框 */
-        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); justify-content: center; align-items: center; z-index: 1000; }
-        .modal-content { background: #1a1a26; width: 90%; max-width: 400px; padding: 20px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.2); }
-        .modal-title { font-size: 16px; font-weight: bold; color: #00ff8c; margin-bottom: 15px; }
-        .modal-buttons { display: flex; gap: 10px; margin-top: 15px; }
-        .modal-btn { flex: 1; height: 36px; border-radius: 6px; border: none; font-weight: bold; cursor: pointer; }
-        .modal-btn-cancel { background: rgba(255,255,255,0.2); color: #fff; }
-        .modal-btn-confirm { background: #0088cc; color: #fff; }
+        .btn-alarm-on { background: #2e9a58; color: #ffffff; border: 1px solid #3fb950; }
+        .btn-alarm-off { background: #4a4d52; color: #cccccc; border: 1px solid #666666; }
 
-        /* 用户项 */
-        .user-item { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,0.1); }
-        .user-item span { font-weight: bold; color: #fff; }
+        .value-box { text-align: center; margin: 8px 0; }
+        .val-text { font-size: 32px; font-weight: bold; color: #00ff8c; font-family: monospace; }
+        .val-text.alarm-text { color: #ff4d4d; }
+
+        .fold-body { margin-top: 8px; border-top: 1px dashed rgba(255,255,255,0.1); padding-top: 8px; }
+
+        .setting-row { display: flex; align-items: center; gap: 4px; margin-bottom: 8px; font-size: 11px; flex-wrap: wrap; }
+        .setting-row label { color: #ffaa00; font-weight: bold; }
+        .setting-input { background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; color: #00ff8c; font-weight: bold; padding: 4px 2px; width: 50px; text-align: center; font-size: 11px; }
+
+        .log-title { margin-top: 6px; font-size: 11px; color: #888; font-weight: bold; }
+        .log-list { margin-top: 4px; background: rgba(0,0,0,0.4); border-radius: 6px; padding: 6px 8px; font-size: 11px; font-family: monospace; height: 110px; overflow-y: auto; color: #00ff8c; }
+        .log-list::-webkit-scrollbar { width: 4px; }
+        .log-list::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); border-radius: 2px; }
+        .log-item { padding: 2px 0; border-bottom: 1px solid rgba(255,255,255,0.05); white-space: nowrap; }
+
+        /* 模态框弹窗样式 */
+        .modal-overlay { display: none; position: fixed; top:0; left:0; width:100%; height:100%; background: rgba(0,0,0,0.7); z-index: 1000; justify-content: center; align-items: center; }
+        .modal-content { background: #1a1a26; border: 1px solid rgba(255,255,255,0.2); border-radius: 10px; width: 90%; max-width: 420px; padding: 16px; color: #e0e0e0; }
+        .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 8px; }
+        .modal-close { cursor: pointer; color: #ff4d4d; font-weight: bold; font-size: 16px; }
     </style>
 </head>
 <body>
     <div class="container">
-        <!-- 登录视图 -->
-        <div id="login-view" class="login-card">
-            <h2>🔐 监控系统网页端登录</h2>
-            <div class="input-group">
-                <label>用户名</label>
-                <input type="text" id="login-username" class="input-field" placeholder="请输入用户名" value="admin">
+        <div class="header">
+            <div class="header-title-box">
+                <div class="title">📱 中控数据面板</div>
             </div>
-            <div class="input-group">
-                <label>密码</label>
-                <input type="password" id="login-password" class="input-field" placeholder="请输入密码" value="admin">
+            <div class="header-actions">
+                <button id="btn-toggle-all" class="btn-fold-tool" onclick="toggleCollapseAll()">📂 展开</button>
+                <button id="btn-layout" class="btn-fold-tool" onclick="toggleLayoutView()">🔲 方块视图</button>
+
+                <!-- 登录框/用户信息 -->
+                <div id="login-box" style="display: inline-flex; align-items: center; gap: 4px;">
+                    <button class="btn-fold-tool" style="background:#0088cc; color:white; border:none;" onclick="openLoginModal()">🔐 登录</button>
+                </div>
+                <div id="user-box" style="display: none; align-items: center; gap: 6px;">
+                    <span id="current-username" style="color:#00ff8c; font-size:12px; font-weight:bold;">👤 已登录</span>
+                    <button class="btn-hdr-equal btn-user-mgmt" onclick="openUserMgmtModal()">⚙️ 用户管理</button>
+                    <button class="btn-hdr-equal btn-logout" onclick="handleLogout()">🚪 退出</button>
+                </div>
+
+                <button id="btn-sound" class="btn-hdr-equal btn-sound" onclick="toggleWebSound()">🔊 声音</button>
+                <button id="btn-monitor" class="btn-top" onclick="postAction('toggle_monitor', -1)">▶ 开始监控</button>
+                <button id="btn-grille" class="btn-top btn-grille" onclick="postAction('toggle_grille', -1)">▶ 开始操作</button>
+
+                <div id="status" class="status">初始化...</div>
             </div>
-            <button class="btn-primary" onclick="doLogin()">登录</button>
         </div>
 
-        <!-- 主界面视图 -->
-        <div id="main-view" style="display: none;">
-            <div class="header">
-                <div class="header-title">
-                    <span>📱 监控控制台</span>
-                    <span id="user-display" style="font-size: 12px; color: #aaa;">用户: --</span>
-                </div>
-
-                <!-- 一. 网页端 用户管理、退出 和声音按钮大小一样 -->
-                <div class="top-action-bar">
-                    <button class="btn-equal" onclick="openUsersModal()">👥 用户管理</button>
-                    <button class="btn-equal" id="btn-sound-toggle" onclick="toggleWebSound()">🔊 声音</button>
-                    <button class="btn-equal" onclick="doLogout()">🚪 退出</button>
-                </div>
-
-                <div class="global-controls">
-                    <button id="btn-toggle-monitor" class="btn-ctrl btn-monitor" onclick="triggerAction('toggle_monitor')">▶ 开始监控</button>
-                    <button id="btn-toggle-grille" class="btn-ctrl btn-grille" onclick="triggerAction('toggle_grille')">▶ 开始细格栅</button>
-                </div>
-            </div>
-
-            <!-- 二. 方块视图区域 (第一行名字 第二行数字 第三行对比) -->
-            <div id="grid-boxes" class="grid-container"></div>
-        </div>
+        <div id="cards-container" class="list-view"></div>
     </div>
 
-    <!-- 阈值设置模态框 -->
-    <div id="modal-limits" class="modal">
-        <div class="modal-content">
-            <div class="modal-title">⚙️ 修改阈值 - <span id="limit-box-name"></span></div>
-            <input type="hidden" id="limit-box-id">
-            <div class="input-group">
-                <label>下限数值</label>
-                <input type="number" step="any" id="limit-lower" class="input-field">
+    <!-- 登录弹窗 -->
+    <div id="login-modal" class="modal-overlay">
+        <div class="modal-content" style="max-width: 320px;">
+            <div class="modal-header">
+                <span style="font-weight:bold; color:#00ff8c; font-size:14px;">🔐 用户登录</span>
+                <span class="modal-close" onclick="closeLoginModal()">✖</span>
             </div>
-            <div class="input-group">
-                <label>预警数值</label>
-                <input type="number" step="any" id="limit-mid" class="input-field">
-            </div>
-            <div class="input-group">
-                <label>上限数值</label>
-                <input type="number" step="any" id="limit-upper" class="input-field">
-            </div>
-            <div class="modal-buttons">
-                <button class="modal-btn modal-btn-cancel" onclick="closeModal('modal-limits')">取消</button>
-                <button class="modal-btn modal-btn-confirm" onclick="saveLimits()">保存修改</button>
+            <div style="display: flex; flex-direction: column; gap: 10px; margin-top: 8px;">
+                <div>
+                    <label style="font-size:12px; color:#aaa; font-weight:bold; display:block; margin-bottom:4px;">账号：</label>
+                    <input type="text" id="login-user" placeholder="请输入账号" class="login-input" style="height: 32px; padding: 4px 8px;">
+                </div>
+                <div>
+                    <label style="font-size:12px; color:#aaa; font-weight:bold; display:block; margin-bottom:4px;">密码：</label>
+                    <input type="password" id="login-pass" placeholder="请输入密码" class="login-input" style="height: 32px; padding: 4px 8px;">
+                </div>
+                <button class="btn-action" style="background:#0088cc; color:white; height: 34px; margin-top: 6px; font-size: 13px;" onclick="handleLogin()">登录</button>
             </div>
         </div>
     </div>
 
     <!-- 用户管理模态框 -->
-    <div id="modal-users" class="modal">
+    <div id="user-modal" class="modal-overlay">
         <div class="modal-content">
-            <div class="modal-title">👥 用户管理</div>
-            <div id="users-list-container" style="max-height: 150px; overflow-y: auto; margin-bottom: 15px;"></div>
-            <hr style="border: 0; border-top: 1px solid rgba(255,255,255,0.1); margin: 10px 0;">
-            <div class="modal-title" style="font-size: 14px;">➕ 添加/修改用户</div>
-            <div class="input-group">
-                <label>用户名</label>
-                <input type="text" id="new-user-name" class="input-field" placeholder="新用户名">
+            <div class="modal-header">
+                <span style="font-weight:bold; color:#00ff8c; font-size:14px;">⚙️ 用户管理面板</span>
+                <span class="modal-close" onclick="closeUserMgmtModal()">✖</span>
             </div>
-            <div class="input-group">
-                <label>密码</label>
-                <input type="password" id="new-user-pwd" class="input-field" placeholder="新密码">
+            
+            <div style="margin-bottom: 14px; padding-bottom: 10px; border-bottom: 1px dashed rgba(255,255,255,0.1);">
+                <div style="font-size:12px; color:#aaa; margin-bottom:6px; font-weight:bold;">🔑 修改当前密码 (<span id="modal-curr-user" style="color:#00ff8c;"></span>)</div>
+                <div class="setting-row">
+                    <input type="password" id="old-pass" placeholder="旧密码" class="setting-input" style="width:85px;">
+                    <input type="password" id="new-pass" placeholder="新密码" class="setting-input" style="width:85px;">
+                    <button class="btn-action" style="background:#0088cc; color:white; margin-left: auto;" onclick="handleChangePassword()">修改密码</button>
+                </div>
             </div>
-            <div class="modal-buttons">
-                <button class="modal-btn modal-btn-cancel" onclick="closeModal('modal-users')">关闭</button>
-                <button class="modal-btn modal-btn-confirm" onclick="saveUser()">添加/保存</button>
+
+            <div>
+                <div style="font-size:12px; color:#aaa; margin-bottom:6px; font-weight:bold;">➕ 新增用户</div>
+                <div class="setting-row" style="margin-bottom:10px;">
+                    <input type="text" id="new-user-name" placeholder="新账号" class="setting-input" style="width:85px;">
+                    <input type="password" id="new-user-pass" placeholder="新密码" class="setting-input" style="width:85px;">
+                    <button class="btn-action" style="background:#2e9a58; color:white; margin-left: auto;" onclick="handleAddUser()">添加用户</button>
+                </div>
+
+                <div style="font-size:12px; color:#aaa; margin-bottom:6px; font-weight:bold;">👥 用户账号列表</div>
+                <div id="user-list-container" style="max-height: 120px; overflow-y: auto;"></div>
             </div>
         </div>
     </div>
 
     <script>
-        let currentUser = localStorage.getItem('web_user') || '';
-        let soundEnabled = true;
+        let isMuted = true;
+        let currentUser = null;
+        let isGridView = false;
+        let allExpanded = false;
         let audioCtx = null;
+        let alarmOsc = null;
 
-        if (currentUser) {
-            showMainView();
+        function toggleWebSound() {
+            isMuted = !isMuted;
+            const btn = document.getElementById('btn-sound');
+            if (!isMuted) {
+                btn.innerText = "🔊 声音关";
+                btn.style.background = "#e65100";
+                if (!audioCtx) {
+                    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                }
+            } else {
+                btn.innerText = "🔇 声音开";
+                btn.style.background = "rgba(255,255,255,0.15)";
+                stopAlarmSound();
+            }
         }
 
-        function doLogin() {
-            const u = document.getElementById('login-username').value;
-            const p = document.getElementById('login-password').value;
-            fetch('/api/login', {
+        function playAlarmSound() {
+            if (isMuted || !audioCtx) return;
+            if (audioCtx.state === 'suspended') {
+                audioCtx.resume();
+            }
+            if (!alarmOsc) {
+                alarmOsc = audioCtx.createOscillator();
+                let gain = audioCtx.createGain();
+                alarmOsc.type = 'sawtooth';
+                alarmOsc.frequency.setValueAtTime(800, audioCtx.currentTime);
+                gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
+                alarmOsc.connect(gain);
+                gain.connect(audioCtx.destination);
+                alarmOsc.start();
+            }
+        }
+
+        function stopAlarmSound() {
+            if (alarmOsc) {
+                try { alarmOsc.stop(); } catch(e){}
+                alarmOsc = null;
+            }
+        }
+
+        function toggleCollapseAll() {
+            allExpanded = !allExpanded;
+            document.getElementById('btn-toggle-all').innerText = allExpanded ? "📁 折叠" : "📂 展开";
+            const foldBodies = document.querySelectorAll('.fold-body');
+            foldBodies.forEach(el => el.style.display = allExpanded ? 'block' : 'none');
+        }
+
+        function toggleLayoutView() {
+            isGridView = !isGridView;
+            const container = document.getElementById('cards-container');
+            const btn = document.getElementById('btn-layout');
+            if (isGridView) {
+                container.className = 'grid-view';
+                btn.innerText = "📜 列表视图";
+            } else {
+                container.className = 'list-view';
+                btn.innerText = "🔲 方块视图";
+            }
+        }
+
+        function openLoginModal() { document.getElementById('login-modal').style.display = 'flex'; }
+        function closeLoginModal() { document.getElementById('login-modal').style.display = 'none'; }
+        function openUserMgmtModal() {
+            if (!currentUser) return alert('请先登录');
+            document.getElementById('user-modal').style.display = 'flex';
+            document.getElementById('modal-curr-user').innerText = currentUser;
+            loadUserList();
+        }
+        function closeUserMgmtModal() { document.getElementById('user-modal').style.display = 'none'; }
+
+        async function handleLogin() {
+            const u = document.getElementById('login-user').value.trim();
+            const p = document.getElementById('login-pass').value.trim();
+            if(!u || !p) return alert('请输入账号和密码');
+            
+            const res = await fetch('/api/login', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({username: u, password: p})
-            })
-            .then(res => res.json())
-            .then(data => {
-                if (data.success) {
-                    currentUser = u;
-                    localStorage.setItem('web_user', u);
-                    showMainView();
-                } else {
-                    alert(data.message || '登录失败');
-                }
-            });
-        }
+            }).then(r => r.json());
 
-        function doLogout() {
-            currentUser = '';
-            localStorage.removeItem('web_user');
-            document.getElementById('login-view').style.display = 'block';
-            document.getElementById('main-view').style.display = 'none';
-        }
-
-        function showMainView() {
-            document.getElementById('login-view').style.display = 'none';
-            document.getElementById('main-view').style.display = 'block';
-            document.getElementById('user-display').innerText = '用户: ' + currentUser;
-            refreshStatus();
-            setInterval(refreshStatus, 1000);
-        }
-
-        function toggleWebSound() {
-            soundEnabled = !soundEnabled;
-            const btn = document.getElementById('btn-sound-toggle');
-            if (soundEnabled) {
-                btn.innerText = '🔊 声音';
-                btn.classList.remove('active');
+            if(res.status === 'ok') {
+                currentUser = res.username;
+                document.getElementById('login-box').style.display = 'none';
+                document.getElementById('user-box').style.display = 'inline-flex';
+                document.getElementById('current-username').innerText = "👤 " + currentUser;
+                closeLoginModal();
             } else {
-                btn.innerText = '🔇 静音';
-                btn.classList.add('active');
+                alert(res.message || '登录失败');
             }
         }
 
-        function triggerWebBeep() {
-            if (!soundEnabled) return;
-            try {
-                if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-                let osc = audioCtx.createOscillator();
-                let gain = audioCtx.createGain();
-                osc.connect(gain);
-                gain.connect(audioCtx.destination);
-                osc.type = 'sine';
-                osc.frequency.value = 800;
-                gain.gain.value = 0.3;
-                osc.start();
-                osc.stop(audioCtx.currentTime + 0.2);
-            } catch(e) {}
+        function handleLogout() {
+            currentUser = null;
+            document.getElementById('login-box').style.display = 'inline-flex';
+            document.getElementById('user-box').style.display = 'none';
         }
 
-        function refreshStatus() {
-            if (!currentUser) return;
-            fetch('/api/status')
-            .then(res => res.json())
-            .then(data => {
-                // 更新监控按钮
-                const btnMon = document.getElementById('btn-toggle-monitor');
+        async function loadUserList() {
+            const res = await fetch('/api/user_mgmt', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({cmd: 'get_users', curr_user: currentUser})
+            }).then(r => r.json());
+
+            if(res.status === 'ok') {
+                renderUserList(res.users);
+            }
+        }
+
+        function renderUserList(users) {
+            const container = document.getElementById('user-list-container');
+            container.innerHTML = users.map(u => `
+                <div style="display:flex; justify-content:space-between; align-items:center; padding:4px 8px; background:rgba(0,0,0,0.3); border-radius:4px; margin-bottom:4px; font-size:12px;">
+                    <span style="color:#00ff8c; font-weight:bold;">${u}</span>
+                    ${u !== 'admin' ? `<button class="btn-action" style="background:#ff3333;" onclick="handleDeleteUser('${u}')">删除</button>` : '<span style="color:#888; font-size:10px;">(系统管理员)</span>'}
+                </div>
+            `).join('');
+        }
+
+        async function handleChangePassword() {
+            const oldP = document.getElementById('old-pass').value.trim();
+            const newP = document.getElementById('new-pass').value.trim();
+            if(!oldP || !newP) return alert('请输入完整密码信息');
+
+            const res = await fetch('/api/user_mgmt', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({cmd: 'change_pass', curr_user: currentUser, old_pass: oldP, new_pass: newP})
+            }).then(r => r.json());
+
+            alert(res.message);
+            if(res.status === 'ok') {
+                document.getElementById('old-pass').value = '';
+                document.getElementById('new-pass').value = '';
+            }
+        }
+
+        async function handleAddUser() {
+            const newU = document.getElementById('new-user-name').value.trim();
+            const newP = document.getElementById('new-user-pass').value.trim();
+            if(!newU || !newP) return alert('请输入新账号和新密码');
+
+            const res = await fetch('/api/user_mgmt', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({cmd: 'add_user', curr_user: currentUser, new_user: newU, new_pass: newP})
+            }).then(r => r.json());
+
+            alert(res.message);
+            if(res.status === 'ok') {
+                document.getElementById('new-user-name').value = '';
+                document.getElementById('new-user-pass').value = '';
+                renderUserList(res.users);
+            }
+        }
+
+        async function handleDeleteUser(userToDelete) {
+            if(!confirm(`确定要删除用户 ${userToDelete} 吗？`)) return;
+
+            const res = await fetch('/api/user_mgmt', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({cmd: 'delete_user', curr_user: currentUser, del_user: userToDelete})
+            }).then(r => r.json());
+
+            alert(res.message);
+            if(res.status === 'ok') {
+                renderUserList(res.users);
+            }
+        }
+
+        async function postAction(action, boxId, data = {}) {
+            await fetch('/api/action', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({action, box_id: boxId, data})
+            });
+            fetchData();
+        }
+
+        function updateCardLimit(boxId) {
+            const lower = document.getElementById(`lower-${boxId}`).value;
+            const mid = document.getElementById(`mid-${boxId}`).value;
+            const upper = document.getElementById(`upper-${boxId}`).value;
+            postAction('set_limits', boxId, {lower, mid_val: mid, upper});
+        }
+
+        async function fetchData() {
+            try {
+                const data = await fetch('/api/data').then(r => r.json());
+                
+                const btnMon = document.getElementById('btn-monitor');
                 if (data.monitoring) {
-                    btnMon.innerText = '⏹ 停止监控 (' + Math.ceil(data.monitor_cd) + 's)';
-                    btnMon.classList.add('running');
+                    btnMon.innerText = "⏹ 停止监控";
+                    btnMon.classList.add('active');
                 } else {
-                    btnMon.innerText = '▶ 开始监控';
-                    btnMon.classList.remove('running');
+                    btnMon.innerText = "▶ 开始监控";
+                    btnMon.classList.remove('active');
                 }
 
-                // 更新细格栅按钮
-                const btnGri = document.getElementById('btn-toggle-grille');
+                const btnGri = document.getElementById('btn-grille');
                 if (data.grille_running) {
-                    let m = Math.floor(data.grille_cd / 60);
-                    let s = Math.floor(data.grille_cd % 60);
-                    btnGri.innerText = '⏹ 停止细格栅 (' + (m<10?'0':'')+m + ':' + (s<10?'0':'')+s + ')';
-                    btnGri.classList.add('running');
+                    btnGri.innerText = "⏹ 停止操作";
+                    btnGri.classList.add('active');
                 } else {
-                    btnGri.innerText = '▶ 开始细格栅';
-                    btnGri.classList.remove('running');
+                    btnGri.innerText = "▶ 开始操作";
+                    btnGri.classList.remove('active');
                 }
 
-                // 二. 方块视图渲染（第一行名字 第二行数字 第三行对比）
-                const grid = document.getElementById('grid-boxes');
-                let hasAlarm = false;
+                document.getElementById('status').innerText = "🟢 已同步";
 
-                grid.innerHTML = data.boxes.map(b => {
-                    if (b.is_alarm && !b.is_muted) hasAlarm = true;
+                let hasAlarm = data.boxes.some(b => b.is_alarm && !b.is_muted);
+                if (hasAlarm) {
+                    playAlarmSound();
+                } else {
+                    stopAlarmSound();
+                }
 
-                    return `
-                        <div class="box-card ${b.is_alarm ? 'alarm' : ''}">
-                            <!-- 第一行：名字 -->
-                            <div class="box-row-1">
-                                <span class="box-name">📌 ${b.name}</span>
-                                <span class="box-status-badge ${b.is_alarm ? 'alarm' : ''}">
-                                    ${b.is_alarm ? '🚨 报警' : '✅ 正常'}
-                                </span>
-                            </div>
+                const container = document.getElementById('cards-container');
+                let html = '';
 
-                            <!-- 第二行：数字 -->
-                            <div class="box-row-2">
-                                <div class="box-val ${b.is_alarm ? 'alarm' : ''}">
-                                    ${b.val_text}
+                data.boxes.forEach(box => {
+                    let cardClass = 'card';
+                    let valClass = 'val-text';
+                    if (box.is_alarm) {
+                        cardClass += ' alarm';
+                        valClass += ' alarm-text';
+                    }
+
+                    let foldStyle = allExpanded ? 'display:block;' : 'display:none;';
+
+                    html += `
+                        <div class="${cardClass}" id="card-${box.id}">
+                            <div class="card-header">
+                                <div class="card-title-box" onclick="toggleCardBody(${box.id})">
+                                    <span class="card-title">📌 ${box.name}</span>
+                                </div>
+                                <div style="display:flex; gap:4px; align-items:center;">
+                                    ${box.is_alarm ? `<button class="btn-action btn-clear" onclick="postAction('clear_alarm', ${box.id})">🚨 消除</button>` : ''}
+                                    <button class="btn-action ${box.is_muted ? 'btn-alarm-off' : 'btn-alarm-on'}" onclick="postAction('toggle_mute', ${box.id})">
+                                        ${box.is_muted ? '🔇' : '🔊'}
+                                    </button>
                                 </div>
                             </div>
-
-                            <!-- 第三行：对比 -->
-                            <div class="box-row-3">
-                                <span class="box-compare-label">⚖️ 对比范围:</span>
-                                <span class="box-compare-val">下限 ${b.lower} | 预警 ${b.mid_val} | 上限 ${b.upper}</span>
+                            <div class="value-box">
+                                <span class="${valClass}">${box.last_val}</span>
                             </div>
-
-                            <div class="box-actions">
-                                <button class="btn-sm" onclick="openLimitModal(${b.id}, '${b.name}', ${b.lower}, ${b.mid_val}, ${b.upper})">⚙️ 阈值</button>
-                                <button class="btn-sm ${b.is_muted ? 'btn-warn' : ''}" onclick="triggerAction('toggle_mute', ${b.id})">
-                                    ${b.is_muted ? '🔇 静音中' : '🔊 声音'}
-                                </button>
-                                ${b.is_alarm ? `<button class="btn-sm btn-danger" onclick="triggerAction('clear_alarm', ${b.id})">🚨 消除报警</button>` : ''}
+                            <div class="fold-body" id="fold-${box.id}" style="${foldStyle}">
+                                <div class="setting-row">
+                                    <label>下限:</label>
+                                    <input type="number" id="lower-${box.id}" class="setting-input" value="${box.lower}" onchange="updateCardLimit(${box.id})">
+                                    <label>预警:</label>
+                                    <input type="number" id="mid-${box.id}" class="setting-input" value="${box.mid_val}" onchange="updateCardLimit(${box.id})">
+                                    <label>上限:</label>
+                                    <input type="number" id="upper-${box.id}" class="setting-input" value="${box.upper}" onchange="updateCardLimit(${box.id})">
+                                </div>
+                                <div class="log-title">📋 最近识别日志:</div>
+                                <div class="log-list">
+                                    ${box.logs.map(l => `<div class="log-item">${l}</div>`).join('')}
+                                </div>
                             </div>
                         </div>
                     `;
-                }).join('');
+                });
 
-                if (hasAlarm) {
-                    triggerWebBeep();
+                const activeEl = document.activeElement;
+                const activeId = activeEl ? activeEl.id : null;
+                const activeVal = activeEl ? activeEl.value : null;
+
+                container.innerHTML = html;
+
+                if (activeId && document.getElementById(activeId)) {
+                    const el = document.getElementById(activeId);
+                    el.focus();
+                    if (activeVal !== null) el.value = activeVal;
                 }
-            });
-        }
 
-        function triggerAction(action, box_id = 0, extra = {}) {
-            fetch('/api/action', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({action: action, box_id: box_id, ...extra})
-            })
-            .then(res => res.json())
-            .then(data => {
-                refreshStatus();
-            });
-        }
-
-        function openLimitModal(id, name, lower, mid, upper) {
-            document.getElementById('limit-box-id').value = id;
-            document.getElementById('limit-box-name').innerText = name;
-            document.getElementById('limit-lower').value = lower;
-            document.getElementById('limit-mid').value = mid;
-            document.getElementById('limit-upper').value = upper;
-            document.getElementById('modal-limits').style.display = 'flex';
-        }
-
-        function saveLimits() {
-            const id = parseInt(document.getElementById('limit-box-id').value);
-            const lower = parseFloat(document.getElementById('limit-lower').value);
-            const mid_val = parseFloat(document.getElementById('limit-mid').value);
-            const upper = parseFloat(document.getElementById('limit-upper').value);
-            
-            triggerAction('set_limits', id, {lower: lower, mid_val: mid_val, upper: upper});
-            closeModal('modal-limits');
-        }
-
-        function openUsersModal() {
-            fetch('/api/status')
-            .then(res => res.json())
-            .then(data => {
-                const container = document.getElementById('users-list-container');
-                container.innerHTML = data.users.map(u => `
-                    <div class="user-item">
-                        <span>👤 ${u}</span>
-                        <button class="btn-sm btn-danger" onclick="deleteUser('${u}')">删除</button>
-                    </div>
-                `).join('');
-                document.getElementById('modal-users').style.display = 'flex';
-            });
-        }
-
-        function saveUser() {
-            const u = document.getElementById('new-user-name').value;
-            const p = document.getElementById('new-user-pwd').value;
-            if (!u || !p) { alert('请输入完整信息'); return; }
-            triggerAction('add_user', 0, {username: u, password: p});
-            document.getElementById('new-user-name').value = '';
-            document.getElementById('new-user-pwd').value = '';
-            closeModal('modal-users');
-        }
-
-        function deleteUser(username) {
-            if (confirm('确定删除用户 ' + username + ' 吗?')) {
-                triggerAction('delete_user', 0, {username: username});
-                closeModal('modal-users');
+            } catch (e) {
+                document.getElementById('status').innerText = "🔴 断开连接";
             }
         }
 
-        function closeModal(id) {
-            document.getElementById(id).style.display = 'none';
+        function toggleCardBody(id) {
+            const el = document.getElementById(`fold-${id}`);
+            if (el) {
+                el.style.display = (el.style.display === 'none') ? 'block' : 'none';
+            }
         }
+
+        setInterval(fetchData, 1500);
+        fetchData();
     </script>
 </body>
 </html>
 """
 
 
-# ==================== 9. Web 服务后台线程 (Flask) ====================
+# ==================== 9. Web 服务后端线程 ====================
 class WebServerThread(QThread):
     action_requested = Signal(str, int, dict)
 
-    def __init__(self, panel, host='0.0.0.0', port=5000, parent=None):
+    def __init__(self, main_win, host='0.0.0.0', port=5000, parent=None):
         super().__init__(parent)
-        self.panel = panel
+        self.main_win = main_win
         self.host = host
         self.port = port
-        self.server = None
         self.app = Flask(__name__)
-        self.app.secret_key = "monitor_web_secret_key_123"
         self._setup_routes()
 
     def _setup_routes(self):
-        app = self.app
-
-        @app.route('/favicon.ico')
-        def favicon():
-            return "", 204
-
-        @app.route('/')
+        @self.app.route('/')
         def index():
             return render_template_string(MOBILE_HTML_TEMPLATE)
 
-        @app.route('/api/login', methods=['POST'])
-        def login():
-            data = request.json or {}
-            username = data.get('username', '')
-            password = data.get('password', '')
-            users = self.panel.users
-            if username in users and users[username] == password:
-                return jsonify({'success': True, 'username': username})
-            return jsonify({'success': False, 'message': '用户名或密码错误'})
-
-        @app.route('/api/status')
-        def status():
+        @self.app.route('/api/data')
+        def get_data():
             boxes_data = []
-            for b in self.panel.boxes:
-                val_text = b.lbl_result.text()
+            for b in self.main_win.boxes:
+                logs = [b.list_widget.item(i).text() for i in range(b.list_widget.count())]
                 boxes_data.append({
                     'id': b.box_id,
                     'name': b.name,
@@ -1501,73 +1549,92 @@ class WebServerThread(QThread):
                     'decimal_places': b.decimal_places,
                     'is_alarm': b.is_alarm,
                     'is_muted': b.is_muted,
-                    'val_text': val_text
+                    'last_val': b.lbl_result.text(),
+                    'logs': logs
                 })
-
             return jsonify({
-                'monitoring': self.panel.monitoring,
-                'grille_running': bool(self.panel.grille_thread and self.panel.grille_thread.isRunning()),
-                'grille_cd': self.panel.curr_grille_cd,
-                'monitor_cd': self.panel.curr_monitor_cd,
-                'boxes': boxes_data,
-                'users': list(self.panel.users.keys())
+                'monitoring': self.main_win.monitoring,
+                'grille_running': self.main_win.grille_thread is not None and self.main_win.grille_thread.isRunning(),
+                'boxes': boxes_data
             })
 
-        @app.route('/api/action', methods=['POST'])
-        def action():
+        @self.app.route('/api/action', methods=['POST'])
+        def handle_action():
             data = request.json or {}
-            act = data.get('action')
-            box_id = data.get('box_id', 0)
+            action = data.get('action')
+            box_id = data.get('box_id', -1)
+            payload = data.get('data', {})
+            self.action_requested.emit(action, box_id, payload)
+            return jsonify({'status': 'ok'})
 
-            if act == 'add_user':
-                uname = data.get('username')
-                pwd = data.get('password')
-                if uname and pwd:
-                    self.panel.users[uname] = pwd
-                    self.panel.save_users()
-                    return jsonify({'success': True})
-                return jsonify({'success': False, 'message': '参数不完整'})
+        @self.app.route('/api/login', methods=['POST'])
+        def handle_login():
+            data = request.json or {}
+            username = data.get('username')
+            password = data.get('password')
+            users = self.main_win.users
+            if username in users and users[username] == password:
+                return jsonify({'status': 'ok', 'username': username})
+            return jsonify({'status': 'error', 'message': '账号或密码错误'})
 
-            if act == 'delete_user':
-                uname = data.get('username')
-                if uname in self.panel.users:
-                    if len(self.panel.users) <= 1:
-                        return jsonify({'success': False, 'message': '至少保留一个用户'})
-                    del self.panel.users[uname]
-                    self.panel.save_users()
-                    return jsonify({'success': True})
-                return jsonify({'success': False, 'message': '用户不存在'})
+        @self.app.route('/api/user_mgmt', methods=['POST'])
+        def handle_user_mgmt():
+            data = request.json or {}
+            cmd = data.get('cmd')
+            curr_user = data.get('curr_user')
+            users = self.main_win.users
 
-            self.action_requested.emit(act, box_id, data)
-            return jsonify({'success': True})
+            if cmd == 'get_users':
+                return jsonify({'status': 'ok', 'users': list(users.keys())})
+            elif cmd == 'change_pass':
+                old_p = data.get('old_pass')
+                new_p = data.get('new_pass')
+                if users.get(curr_user) == old_p:
+                    users[curr_user] = new_p
+                    self.main_win.save_users()
+                    return jsonify({'status': 'ok', 'message': '密码修改成功'})
+                return jsonify({'status': 'error', 'message': '原密码错误'})
+            elif cmd == 'add_user':
+                new_u = data.get('new_user')
+                new_p = data.get('new_pass')
+                if new_u in users:
+                    return jsonify({'status': 'error', 'message': '用户已存在'})
+                users[new_u] = new_p
+                self.main_win.save_users()
+                return jsonify({'status': 'ok', 'message': '用户添加成功', 'users': list(users.keys())})
+            elif cmd == 'delete_user':
+                del_u = data.get('del_user')
+                if del_u == 'admin':
+                    return jsonify({'status': 'error', 'message': '不能删除 admin 账号'})
+                if del_u in users:
+                    del users[del_u]
+                    self.main_win.save_users()
+                    return jsonify({'status': 'ok', 'message': '用户已删除', 'users': list(users.keys())})
+                return jsonify({'status': 'error', 'message': '用户不存在'})
+
+            return jsonify({'status': 'error', 'message': '未知指令'})
 
     def run(self):
-        try:
-            from werkzeug.serving import make_server
-            self.server = make_server(self.host, self.port, self.app, threaded=True)
-            self.server.serve_forever()
-        except Exception as e:
-            print("WebServer 运行异常:", e)
+        import logging
+        log = logging.getLogger('werkzeug')
+        log.setLevel(logging.ERROR)
+        self.app.run(host=self.host, port=self.port, debug=False, use_reloader=False)
 
     def stop(self):
-        if self.server:
-            try:
-                self.server.shutdown()
-            except Exception:
-                pass
+        pass
 
 
-# ==================== 10. 全局控制面板界面 ====================
+# ==================== 10. 主控面板窗口 ====================
 class GlobalControlPanel(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("🎯 全局监控与格栅控制台")
+        self.setWindowTitle("⚙️ 全局监控与操作中心")
         self.setWindowFlags(Qt.WindowStaysOnTopHint | Qt.FramelessWindowHint | Qt.Tool)
         self.setAttribute(Qt.WA_TranslucentBackground, True)
-        self.monitoring = False
-        self.is_editing = False
-        self.boxes = []
 
+        self.boxes = []
+        self.is_editing = False
+        self.monitoring = False
         self.is_collapsed = False
         self.boxes_panel_hidden = False
         self.reader = None
@@ -1638,10 +1705,11 @@ class GlobalControlPanel(QWidget):
         self.spin_interval.setButtonSymbols(QAbstractSpinBox.NoButtons)
         self.spin_interval.setAlignment(Qt.AlignCenter)
         self.spin_interval.setFixedSize(42, 26)
-        self.spin_interval.setRange(0.1, 300.0)
-        self.spin_interval.setValue(10.0)  # 三. 识别间隔 默认 10 秒
-        self.spin_interval.setSingleStep(1.0)
+        self.spin_interval.setRange(0.1, 3600.0)
+        self.spin_interval.setValue(10.0)  # 默认设置为 10 秒
+        self.spin_interval.setSingleStep(0.5)
         self.spin_interval.valueChanged.connect(self._on_interval_changed)
+        self.spin_interval.valueChanged.connect(self.save_config)
         self.row1_layout.addWidget(self.spin_interval)
 
         self.row1_layout.addWidget(QLabel("📊 记录数:"))
@@ -1652,6 +1720,7 @@ class GlobalControlPanel(QWidget):
         self.spin_count.setRange(5, 200)
         self.spin_count.setValue(30)
         self.spin_count.valueChanged.connect(self._on_count_changed)
+        self.spin_count.valueChanged.connect(self.save_config)
         self.row1_layout.addWidget(self.spin_count)
 
         self.row1_layout.addWidget(QLabel("📝 记录间隔(分):"))
@@ -1663,6 +1732,7 @@ class GlobalControlPanel(QWidget):
         self.spin_log_interval.setValue(1.0)
         self.spin_log_interval.setSingleStep(0.5)
         self.spin_log_interval.valueChanged.connect(self._on_log_interval_changed)
+        self.spin_log_interval.valueChanged.connect(self.save_config)
         self.row1_layout.addWidget(self.spin_log_interval)
 
         self.btn_ocr_adjust = QPushButton("⚙️ 识别调整")
@@ -1754,7 +1824,7 @@ class GlobalControlPanel(QWidget):
         row3_layout.setSpacing(6)
 
         self.chk_grille = QCheckBox("细格栅")
-        self.chk_grille.toggled.connect(lambda: self.save_config())
+        self.chk_grille.toggled.connect(self.save_config)
         row3_layout.addWidget(self.chk_grille)
 
         row3_layout.addWidget(QLabel("执行间隔(分):"))
@@ -1766,6 +1836,7 @@ class GlobalControlPanel(QWidget):
         self.spin_grille_interval.setValue(2.0)
         self.spin_grille_interval.setSingleStep(0.5)
         self.spin_grille_interval.valueChanged.connect(self._on_grille_interval_changed)
+        self.spin_grille_interval.valueChanged.connect(self.save_config)
         row3_layout.addWidget(self.spin_grille_interval)
 
         self.lbl_grille_countdown = QLabel("⏳ --")
@@ -1776,6 +1847,7 @@ class GlobalControlPanel(QWidget):
 
         self.chk_web = QCheckBox("🌐 网页服务")
         self.chk_web.toggled.connect(self._toggle_web_service)
+        self.chk_web.toggled.connect(self.save_config)
         row3_layout.addWidget(self.chk_web)
 
         self.lbl_web_url = QLabel("手机访问: 未开启")
@@ -1838,7 +1910,6 @@ class GlobalControlPanel(QWidget):
             target_box._toggle_mute()
 
     def _toggle_web_service(self, checked):
-        self.save_config()
         if checked:
             if not FLASK_AVAILABLE:
                 self.lbl_web_url.setText("❌未安装flask (pip install flask)")
@@ -1851,9 +1922,10 @@ class GlobalControlPanel(QWidget):
             self.lbl_web_url.setText(f"📱 浏览器打开: {url_str}")
             self.lbl_web_url.setStyleSheet("color: #00ff8c; font-weight: bold;")
 
-            self.web_thread = WebServerThread(self, host='0.0.0.0', port=5000)
-            self.web_thread.action_requested.connect(self._handle_web_action)
-            self.web_thread.start()
+            if not self.web_thread:
+                self.web_thread = WebServerThread(self, host='0.0.0.0', port=5000)
+                self.web_thread.action_requested.connect(self._handle_web_action)
+                self.web_thread.start()
         else:
             if self.web_thread:
                 self.web_thread.stop()
@@ -1902,7 +1974,6 @@ class GlobalControlPanel(QWidget):
 
         self._update_button_styles()
         self.adjustSize()
-        self.save_config()
 
     def _toggle_hide_boxes(self):
         self.boxes_panel_hidden = not self.boxes_panel_hidden
@@ -1911,7 +1982,6 @@ class GlobalControlPanel(QWidget):
 
         self.btn_toggle_hide.setText("👁 显示" if self.boxes_panel_hidden else "👁 隐藏")
         self.btn_toggle_hide.setStyleSheet("background-color: #e65100; color: white;" if self.boxes_panel_hidden else "background-color: rgba(255,255,255,0.12); color: #00ff8c; border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; padding: 0px 8px; font-size: 11px; font-weight: bold;")
-        self.save_config()
 
     def _on_f12_pressed(self):
         if self.grille_thread and self.grille_thread.isRunning():
@@ -1920,7 +1990,6 @@ class GlobalControlPanel(QWidget):
     def _on_grille_interval_changed(self, val):
         if self.grille_thread and self.grille_thread.isRunning():
             self.grille_thread.set_interval(val)
-        self.save_config()
 
     def _toggle_grille(self):
         if self.grille_thread and self.grille_thread.isRunning():
@@ -1982,17 +2051,14 @@ class GlobalControlPanel(QWidget):
     def _on_interval_changed(self, val):
         if hasattr(self, 'monitor_thread') and self.monitor_thread:
             self.monitor_thread.update_params(interval=val)
-        self.save_config()
 
     def _on_count_changed(self, val):
         for box in self.boxes:
             box.set_max_log_count(val)
-        self.save_config()
 
     def _on_log_interval_changed(self, val):
         for box in self.boxes:
             box.log_interval_min = val
-        self.save_config()
 
     def _toggle_edit(self):
         self.is_editing = not self.is_editing
@@ -2019,7 +2085,14 @@ class GlobalControlPanel(QWidget):
         box.delete_requested.connect(self._delete_box)
         box.alarm_cleared.connect(self.check_and_update_alarm_sound)
         box.mute_toggled.connect(self.check_and_update_alarm_sound)
-        box.config_changed.connect(self.save_config)
+
+        # 绑定实时保存设置
+        box.spin_lower.valueChanged.connect(self.save_config)
+        box.spin_mid.valueChanged.connect(self.save_config)
+        box.spin_upper.valueChanged.connect(self.save_config)
+        box.spin_dec.valueChanged.connect(self.save_config)
+        box.edit_title.textChanged.connect(self.save_config)
+        box.mute_toggled.connect(self.save_config)
 
         box.set_panel_hidden(self.boxes_panel_hidden)
         box.set_edit_mode(self.is_editing)
@@ -2105,16 +2178,14 @@ class GlobalControlPanel(QWidget):
             self.alarm_player.stop()
 
     def save_config(self):
-        """三. 保存所有填空和打勾配置"""
+        """记录所有参数填空与打勾选项，下次自动读取恢复"""
         config_data = {
             "interval": self.spin_interval.value(),
             "max_count": self.spin_count.value(),
             "log_interval": self.spin_log_interval.value(),
-            "grille_interval": self.spin_grille_interval.value(),
             "chk_grille": self.chk_grille.isChecked(),
+            "grille_interval": self.spin_grille_interval.value(),
             "chk_web": self.chk_web.isChecked(),
-            "boxes_panel_hidden": self.boxes_panel_hidden,
-            "is_collapsed": self.is_collapsed,
             "ocr_params": self.ocr_params,
             "boxes": []
         }
@@ -2139,31 +2210,24 @@ class GlobalControlPanel(QWidget):
             print("保存配置异常:", e)
 
     def load_config(self):
-        """三. 加载已记忆的设置"""
         if not os.path.exists(self.config_file):
             return
         try:
             with open(self.config_file, "r", encoding="utf-8") as f:
                 config_data = json.load(f)
 
-            # 默认识别间隔10秒
             self.spin_interval.setValue(config_data.get("interval", 10.0))
             self.spin_count.setValue(config_data.get("max_count", 30))
             self.spin_log_interval.setValue(config_data.get("log_interval", 1.0))
-            self.spin_grille_interval.setValue(config_data.get("grille_interval", 2.0))
             
-            # 恢复勾选状态
-            if "chk_grille" in config_data:
-                self.chk_grille.setChecked(config_data["chk_grille"])
-            if "chk_web" in config_data:
-                self.chk_web.setChecked(config_data["chk_web"])
-            if config_data.get("boxes_panel_hidden", False):
-                self._toggle_hide_boxes()
-            if config_data.get("is_collapsed", False):
-                self._toggle_collapse()
+            # 读取细格栅及间隔设置
+            chk_grille_val = config_data.get("chk_grille", False)
+            self.chk_grille.setChecked(chk_grille_val)
+            self.spin_grille_interval.setValue(config_data.get("grille_interval", 2.0))
 
             self.ocr_params = config_data.get("ocr_params", self.ocr_params)
 
+            # 载入各选框设置
             for b_data in config_data.get("boxes", []):
                 box = OverlayRegionWidget(
                     b_data["id"], b_data["x"], b_data["y"], b_data["w"], b_data["h"],
@@ -2174,14 +2238,31 @@ class GlobalControlPanel(QWidget):
                     decimal_places=b_data.get("decimal_places", 0)
                 )
                 box.is_muted = b_data.get("is_muted", False)
+                if box.is_muted:
+                    box.btn_mute.setText("🔇")
+                    box.btn_mute.setStyleSheet("QPushButton { background-color: #e65100; color: white; border: none; border-radius: 3px; font-size: 10px; }")
+
                 box.delete_requested.connect(self._delete_box)
                 box.alarm_cleared.connect(self.check_and_update_alarm_sound)
                 box.mute_toggled.connect(self.check_and_update_alarm_sound)
-                box.config_changed.connect(self.save_config)
+
+                # 绑定修改即保存功能
+                box.spin_lower.valueChanged.connect(self.save_config)
+                box.spin_mid.valueChanged.connect(self.save_config)
+                box.spin_upper.valueChanged.connect(self.save_config)
+                box.spin_dec.valueChanged.connect(self.save_config)
+                box.edit_title.textChanged.connect(self.save_config)
+                box.mute_toggled.connect(self.save_config)
+
                 box.set_max_log_count(self.spin_count.value())
                 box.log_interval_min = self.spin_log_interval.value()
                 box.show()
                 self.boxes.append(box)
+
+            # 读取网页服务打勾设置
+            chk_web_val = config_data.get("chk_web", False)
+            if chk_web_val:
+                self.chk_web.setChecked(True)
 
         except Exception as e:
             print("读取配置异常:", e)
