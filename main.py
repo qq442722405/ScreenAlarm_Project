@@ -1191,12 +1191,12 @@ MOBILE_HTML_TEMPLATE = """
 
         /* 布局容器模式 */
         #cards-container.strip-mode { display: flex; flex-direction: column; gap: 10px; }
-        #cards-container.square-mode { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 10px; }
+        #cards-container.square-mode { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }
 
         /* 正方形卡片内部排版 */
         .square-card { text-align: center; display: flex; flex-direction: column; justify-content: center; align-items: center; padding: 14px 8px; }
         .square-card .sq-row1 { font-size: 14px; font-weight: bold; color: #ffffff; margin-bottom: 4px; width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .square-card .sq-row2 { font-size: 30px; font-weight: bold; font-family: monospace; color: #00ff8c; margin: 4px 0; }
+        .square-card .sq-row2 { font-size: 38px; font-weight: bold; font-family: monospace; color: #00ff8c; margin: 4px 0; }
         .square-card .sq-row3 { font-size: 13px; font-weight: bold; font-family: monospace; }
     </style>
 </head>
@@ -1210,7 +1210,7 @@ MOBILE_HTML_TEMPLATE = """
                 <div id="status" class="status">初始化...</div>
             </div>
             <div class="header-actions">
-                <button id="btn-mode-toggle" class="btn-top" style="background: #6c5ce7;" onclick="toggleDisplayMode()">📱 长条模式</button>
+                <button id="btn-mode-toggle" class="btn-top" style="background: #6c5ce7;" onclick="toggleDisplayMode()">模式切换</button>
 
                 <!-- 登录按钮 -->
                 <div id="login-box" style="display: inline-flex; align-items: center; gap: 4px;">
@@ -1313,7 +1313,7 @@ MOBILE_HTML_TEMPLATE = """
             const btn = document.getElementById('btn-mode-toggle');
             const container = document.getElementById('cards-container');
             if (btn) {
-                btn.innerText = (displayMode === 'strip') ? '📱 长条模式' : '🔳 正方形模式';
+                btn.innerText = (displayMode === 'strip') ? '模式切换' : '模式切换';
             }
             if (container) {
                 container.className = (displayMode === 'square') ? 'square-mode' : 'strip-mode';
@@ -1337,6 +1337,20 @@ MOBILE_HTML_TEMPLATE = """
             return { text: '', cls: 'diff-zero' };
         }
 
+
+        function openLogWindow(title, content) {
+            const win = window.open('', 'logWindow', 'width=520,height=500');
+            if (!win) return;
+            win.document.write(`
+                <html><head><title>${title}</title>
+                <style>
+                body{background:#1a1a26;color:#eee;font-family:Arial;padding:20px;}
+                .log{padding:8px;border-bottom:1px solid #444;}
+                </style></head>
+                <body><h3>📜 ${title}</h3>
+                <div>${content}</div></body></html>`);
+            win.document.close();
+        }
         function toggleMainPanelFold() {
             isMainPanelCollapsed = !isMainPanelCollapsed;
             updateMainPanelFoldUI();
@@ -1665,7 +1679,7 @@ MOBILE_HTML_TEMPLATE = """
                     return;
                 } else {
                     let logsHtml = (b.logs && b.logs.length > 0)
-                        ? b.logs.map(l => `<div class="log-item">${l}</div>`).join('')
+                        ? b.logs.map(l => `<div class="log-item" onclick="openLogWindow('历史日志', ${JSON.stringify('<div class="log">'+l+'</div>')})">${l}</div>`).join('')
                         : '<div class="log-item">无历史记录</div>';
 
                     cardEl.innerHTML = `
@@ -1678,8 +1692,7 @@ MOBILE_HTML_TEMPLATE = """
                             </div>
                         </div>
                         <div class="value-box">
-                            <!-- 【修改项 2】数值前面增加自定义时间对比 -->
-                            <span id="diff-tag-${b.id}" class="diff-text ${diff.cls}">${diff.text}</span>
+                            <!-- 已删除中控数据面板下方时间显示 -->
                             <div class="val-text" id="val-text-${b.id}">${b.value}</div>
                         </div>
                         <div class="fold-body">
@@ -1750,7 +1763,7 @@ MOBILE_HTML_TEMPLATE = """
                 const logListEl = document.getElementById(`log-list-${b.id}`);
                 if (logListEl) {
                     let logsHtml = (b.logs && b.logs.length > 0)
-                        ? b.logs.map(l => `<div class="log-item">${l}</div>`).join('')
+                        ? b.logs.map(l => `<div class="log-item" onclick="openLogWindow('历史日志', ${JSON.stringify('<div class="log">'+l+'</div>')})">${l}</div>`).join('')
                         : '<div class="log-item">无历史记录</div>';
                     logListEl.innerHTML = logsHtml;
                 }
