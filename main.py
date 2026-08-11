@@ -1087,8 +1087,8 @@ MOBILE_HTML_TEMPLATE = """
         .toggle-icon { cursor: pointer; font-size: 13px; color: #888888; font-weight: bold; user-select: none; padding: 2px 6px; border-radius: 4px; background: rgba(255, 255, 255, 0.08); margin-left: 6px; }
         .toggle-icon:hover { color: #aaaaaa; background: rgba(255, 255, 255, 0.15); }
 
-        .header-row2 { display: flex; align-items: center; gap: 8px; width: 100%; font-size: 12px; }
-        .header-row3 { display: flex; gap: 10px; width: 100%; margin-top: 2px; }
+        .header-row2 { display: flex; align-items: center; justify-content: flex-end; gap: 8px; width: 100%; font-size: 12px; }
+        .header-row3 { display: flex; gap: 10px; width: 100%; margin-top: 2px; align-items: center; }
         
         .btn-top { flex: 1; background: #2e9a58; color: #fff; border: none; border-radius: 6px; padding: 8px 12px; font-size: 13px; font-weight: bold; cursor: pointer; transition: background 0.2s; text-align: center; }
         .btn-top:active { opacity: 0.8; }
@@ -1162,7 +1162,7 @@ MOBILE_HTML_TEMPLATE = """
 
         .setting-row { display: flex; align-items: center; gap: 4px; margin-bottom: 8px; font-size: 11px; flex-wrap: wrap; }
         .setting-row label { color: #ffaa00; font-weight: bold; }
-        .setting-input { background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; color: #00ff8c; font-weight: bold; padding: 4px 2px; width: 48px; text-align: center; font-size: 11px; }
+        .setting-input { background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; color: #00ff8c; font-weight: bold; padding: 4px 2px; width: 42px; text-align: center; font-size: 11px; }
 
         .log-title { margin-top: 6px; font-size: 11px; color: #888; font-weight: bold; }
         .log-list { margin-top: 4px; background: rgba(0,0,0,0.4); border-radius: 6px; padding: 6px 8px; font-size: 11px; font-family: monospace; height: 110px; overflow-y: auto; color: #00ff8c; }
@@ -1179,32 +1179,40 @@ MOBILE_HTML_TEMPLATE = """
 <body>
     <div class="container">
         <div class="header">
-            <div class="header-row1">
-                <div class="header-title-box">
-                    <span class="title">📱 中控数据面板</span>
+            <!-- 顶部可折叠控制内容 -->
+            <div id="header-top-panel">
+                <div class="header-row1">
+                    <div class="header-title-box">
+                        <span class="title">📱 中控数据面板</span>
+                    </div>
+                    <div class="header-tools-box">
+                        <button id="btn-sound" class="btn-sound" onclick="toggleWebSound()">🔊 声音</button>
+                        <div id="login-box" style="display: inline-flex; align-items: center; gap: 4px;">
+                            <button class="btn-fold-tool" style="background:#0088cc; color:white; border:none;" onclick="openLoginModal()">🔐 登录</button>
+                        </div>
+                        <div id="user-box" style="display: none; align-items: center; gap: 4px;">
+                            <span id="current-username" style="color:#00ff8c; font-size:11px; font-weight:bold;">👤</span>
+                            <button class="btn-action" style="background:#e65100; color:white;" onclick="openUserMgmtModal()">⚙️ 用户</button>
+                            <button class="btn-action" style="background:#555; color:white;" onclick="handleLogout()">🚪 退出</button>
+                        </div>
+                    </div>
                 </div>
-                <div class="header-tools-box">
-                    <button id="btn-sound" class="btn-sound" onclick="toggleWebSound()">🔊 声音</button>
-                    <div id="login-box" style="display: inline-flex; align-items: center; gap: 4px;">
-                        <button class="btn-fold-tool" style="background:#0088cc; color:white; border:none;" onclick="openLoginModal()">🔐 登录</button>
-                    </div>
-                    <div id="user-box" style="display: none; align-items: center; gap: 4px;">
-                        <span id="current-username" style="color:#00ff8c; font-size:11px; font-weight:bold;">👤</span>
-                        <button class="btn-action" style="background:#e65100; color:white;" onclick="openUserMgmtModal()">⚙️ 用户</button>
-                        <button class="btn-action" style="background:#555; color:white;" onclick="handleLogout()">🚪 退出</button>
-                    </div>
+
+                <div id="header-row2" class="header-row2" style="display: none;">
+                    <label style="color:#ffaa00; font-weight:bold;">对比(分):</label>
+                    <input id="compare-min-input" type="number" min="0" step="1" class="setting-input" style="width:60px;" value="5">
+                    <button class="btn-action" style="background:#0088cc; padding:4px 8px;" onclick="saveCompareMin()">保存</button>
                 </div>
             </div>
 
-            <div id="header-row2" class="header-row2" style="display: none;">
-                <label style="color:#ffaa00; font-weight:bold;">对比(分钟):</label>
-                <input id="compare-min-input" type="number" min="0" step="1" class="setting-input" style="width:60px;" value="5">
-                <button class="btn-action" style="background:#0088cc; padding:4px 8px;" onclick="saveCompareMin()">保存</button>
-            </div>
-
+            <!-- 三、收起时只显示的控制按钮行，右侧带有展开/收起图标和退出图标 -->
             <div id="header-row3" class="header-row3" style="display: none;">
                 <button id="btn-monitor" class="btn-top" onclick="postAction('toggle_monitor', -1)">▶ 开始监控</button>
                 <button id="btn-grille" class="btn-top btn-grille" onclick="postAction('toggle_grille', -1)">▶ 开始操作</button>
+                <div style="display: flex; gap: 6px; margin-left: 4px;">
+                    <button id="btn-header-fold" class="btn-sound" onclick="toggleHeaderFold()" title="收起/展开">▲</button>
+                    <button id="btn-app-exit" class="btn-sound" style="background:#ff3333; color:white; border:none;" onclick="exitApp()" title="退出所有进程">❌</button>
+                </div>
             </div>
         </div>
 
@@ -1246,6 +1254,7 @@ MOBILE_HTML_TEMPLATE = """
         let webSoundEnabled = false;
         let currentUser = localStorage.getItem('currentUser') || null;
         let cardExpandedState = {};
+        let isHeaderFolded = false;
 
         function updateAuthUI() {
             if (currentUser) {
@@ -1263,12 +1272,32 @@ MOBILE_HTML_TEMPLATE = """
                 document.getElementById('header-row2').style.display = 'none';
                 document.getElementById('header-row3').style.display = 'none';
 
-                /* 三、未登录时隐藏展开/收起按钮 */
                 cardExpandedState = {};
                 document.querySelectorAll('.fold-body').forEach(el => {
                     el.style.display = 'none';
                 });
                 document.querySelectorAll('.toggle-icon').forEach(el => el.style.display = 'none');
+            }
+        }
+
+        /* 三、顶栏收起与展开功能 */
+        function toggleHeaderFold() {
+            isHeaderFolded = !isHeaderFolded;
+            const topPanel = document.getElementById('header-top-panel');
+            const foldBtn = document.getElementById('btn-header-fold');
+            if (isHeaderFolded) {
+                topPanel.style.display = 'none';
+                if(foldBtn) foldBtn.innerText = '▼';
+            } else {
+                topPanel.style.display = 'block';
+                if(foldBtn) foldBtn.innerText = '▲';
+            }
+        }
+
+        /* 三、退出所有进程功能 */
+        function exitApp() {
+            if (confirm('确定要退出所有进程吗？')) {
+                postAction('exit_app', -1);
             }
         }
 
@@ -1383,12 +1412,14 @@ MOBILE_HTML_TEMPLATE = """
             } catch(e) {}
         }
 
+        /* 二、点击下限 预警 上限 小数点 只有一个保存按钮 */
         function updateLimits(boxId) {
             const lower = document.getElementById('lower-' + boxId).value;
             const mid_op = document.getElementById('mid_op-' + boxId).value;
             const mid_val = document.getElementById('mid-' + boxId).value;
             const upper = document.getElementById('upper-' + boxId).value;
-            postAction('set_limits', boxId, {lower, mid_op, mid_val, upper});
+            const decimal_places = document.getElementById('dec-' + boxId).value;
+            postAction('set_limits', boxId, {lower, mid_op, mid_val, upper, decimal_places});
         }
 
         function saveCompareMin() {
@@ -1432,11 +1463,11 @@ MOBILE_HTML_TEMPLATE = """
                     diffHtml = `<span class="diff-text" style="font-size: 12px; color: #a0a0a0; margin-right: 3px;">${box.diff_text}</span>`;
                 }
 
-                /* 四、美化箭头输出 */
+                /* 四、美化箭头输出：使用 ⬆ ⬇ 表示 */
                 if (box.trend === 'up') {
-                    trendHtml = '<span class="trend-up">▲</span>';
+                    trendHtml = '<span class="trend-up">⬆</span>';
                 } else if (box.trend === 'down') {
-                    trendHtml = '<span class="trend-down">▼</span>';
+                    trendHtml = '<span class="trend-down">⬇</span>';
                 }
 
                 let header = card.querySelector('.card-header');
@@ -1448,7 +1479,6 @@ MOBILE_HTML_TEMPLATE = """
                         <div class="card-header">
                             <div class="card-title-box">
                                 <span class="card-title">${box.name}</span>
-                                <!-- 三、收起/展开按钮根据登录状态显隐 -->
                                 <span id="toggle-icon-${box.id}" class="toggle-icon" style="display: ${currentUser ? 'inline-block' : 'none'};" onclick="toggleSingleCard(${box.id})">${isExpanded ? '▲' : '▼'}</span>
                             </div>
                             <div class="card-header-right">
@@ -1463,6 +1493,7 @@ MOBILE_HTML_TEMPLATE = """
                                 <button id="mute-btn-${box.id}" class="btn-action ${box.is_muted ? 'btn-alarm-off' : 'btn-alarm-on'}" onclick="postAction('toggle_mute', ${box.id})">${box.is_muted ? '🔇 静音' : '🔊 声音'}</button>
                             </div>
                         </div>
+                        <!-- 二、增加小数点输入框，放在上限后面，统一单个保存按钮 -->
                         <div id="fold-body-${box.id}" class="fold-body" style="display: ${(currentUser && isExpanded) ? 'block' : 'none'};">
                             <div class="setting-row">
                                 <label>下限:</label>
@@ -1476,6 +1507,8 @@ MOBILE_HTML_TEMPLATE = """
                                 <input id="mid-${box.id}" type="number" step="0.1" class="setting-input" value="${box.mid_val}">
                                 <label>上限:</label>
                                 <input id="upper-${box.id}" type="number" step="0.1" class="setting-input" value="${box.upper}">
+                                <label>小数点:</label>
+                                <input id="dec-${box.id}" type="number" min="0" max="4" step="1" class="setting-input" value="${box.decimal_places || 0}">
                                 <button class="btn-action" style="background:#0088cc; padding:2px 8px; margin-left:4px;" onclick="updateLimits(${box.id})">保存</button>
                             </div>
                             <div class="log-title">📊 记录</div>
@@ -1523,6 +1556,9 @@ MOBILE_HTML_TEMPLATE = """
 
                     const upperInput = document.getElementById('upper-' + box.id);
                     if (upperInput && document.activeElement !== upperInput) upperInput.value = box.upper;
+
+                    const decInput = document.getElementById('dec-' + box.id);
+                    if (decInput && document.activeElement !== decInput) decInput.value = box.decimal_places || 0;
 
                     const logsBox = document.getElementById('logs-' + box.id);
                     if (logsBox) {
@@ -1641,6 +1677,7 @@ class WebServerThread(QThread):
                     'mid_op': getattr(b, 'mid_op', '>'),
                     'mid_val': b.mid_val,
                     'upper': b.upper,
+                    'decimal_places': getattr(b, 'decimal_places', 0),
                     'val': val,
                     'val_text': val_text,
                     'trend': trend,
@@ -1786,7 +1823,7 @@ class GlobalControlPanel(QWidget):
             QCheckBox { color: #00ff8c; font-weight: bold; font-size: 11px; }
         """)
 
-        # 五、合并一二三排在一个大的框体 (main_card) 中
+        # 合并一二三排在一个大的框体 (main_card) 中
         self.main_card = QFrame()
         self.main_card.setStyleSheet("QFrame { background-color: rgba(0, 0, 0, 0.85); border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 8px; }")
         card_layout = QVBoxLayout(self.main_card)
@@ -1798,7 +1835,6 @@ class GlobalControlPanel(QWidget):
         self.row1_layout.setContentsMargins(0, 0, 0, 0)
         self.row1_layout.setSpacing(6)
 
-        # 一、修改为 识别（秒）
         self.row1_layout.addWidget(QLabel("⏱ 识别（秒）:"))
         self.spin_interval = CleanDoubleSpinBox()
         self.spin_interval.setButtonSymbols(QAbstractSpinBox.NoButtons)
@@ -1820,7 +1856,6 @@ class GlobalControlPanel(QWidget):
         self.spin_count.valueChanged.connect(self._on_count_changed)
         self.row1_layout.addWidget(self.spin_count)
 
-        # 一、修改为 记录（分）
         self.row1_layout.addWidget(QLabel("📝 记录（分）:"))
         self.spin_log_interval = CleanDoubleSpinBox()
         self.spin_log_interval.setButtonSymbols(QAbstractSpinBox.NoButtons)
@@ -1832,7 +1867,6 @@ class GlobalControlPanel(QWidget):
         self.spin_log_interval.valueChanged.connect(self._on_log_interval_changed)
         self.row1_layout.addWidget(self.spin_log_interval)
 
-        # 一、修改为 识别
         self.btn_ocr_adjust = QPushButton("⚙️ 识别")
         self.btn_ocr_adjust.setFixedHeight(26)
         self.btn_ocr_adjust.clicked.connect(self._open_ocr_adjust_dialog)
@@ -1867,7 +1901,6 @@ class GlobalControlPanel(QWidget):
         self.btn_load_config = QPushButton("📁 加载")
         self.btn_load_config.clicked.connect(self.load_config)
 
-        # 二、网页端选项放在第二排加载后面
         self.chk_web = QCheckBox("网页端")
         self.chk_web.setChecked(True)
         self.chk_web.toggled.connect(self._on_web_chk_toggled)
@@ -2100,6 +2133,10 @@ class GlobalControlPanel(QWidget):
             self._toggle_monitor()
         elif action == 'toggle_grille':
             self._toggle_grille()
+        elif action == 'exit_app':
+            # 三、退出网页及系统所有进程
+            QApplication.quit()
+            os._exit(0)
         elif action == 'clear_alarm':
             for b in self.boxes:
                 if box_id == -1 or b.box_id == box_id:
@@ -2115,6 +2152,7 @@ class GlobalControlPanel(QWidget):
                     if 'mid_op' in payload: b.combo_mid_op.setCurrentText(str(payload['mid_op']))
                     if 'mid_val' in payload: b.spin_mid.setValue(float(payload['mid_val']))
                     if 'upper' in payload: b.spin_upper.setValue(float(payload['upper']))
+                    if 'decimal_places' in payload: b.spin_dec.setValue(int(payload['decimal_places']))
         elif action == 'set_compare_min':
             if 'compare_min' in payload:
                 self.compare_interval_min = float(payload['compare_min'])
