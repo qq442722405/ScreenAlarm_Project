@@ -370,7 +370,6 @@ class LogDialog(QDialog):
     def __init__(self, box, parent=None):
         super().__init__(parent)
         self.box = box
-        # 修改二：修改名字为 记录
         self.setWindowTitle(f"📋 记录 - {box.name}")
         self.resize(380, 260)
         self.setWindowFlags(Qt.WindowStaysOnTopHint | Qt.Tool)
@@ -580,7 +579,6 @@ class OverlayRegionWidget(QWidget):
         self.spin_dec.setStyleSheet("background-color: rgba(26, 26, 38, 0.5); color: #00ff8c; border: 1px solid #00ff8c; font-size: 10px; border-radius: 2px;")
         self.spin_dec.valueChanged.connect(self._on_dec_changed)
 
-        # 修改二：修改名字为 记录
         self.btn_show_log = QPushButton("📋 记录")
         self.btn_show_log.setFixedSize(65, 20)
         self.btn_show_log.setStyleSheet("QPushButton { background-color: rgba(0, 136, 204, 0.8); color: white; border: none; border-radius: 3px; font-size: 10px; font-weight: bold; } QPushButton:hover { background-color: #0088cc; }")
@@ -686,7 +684,6 @@ class OverlayRegionWidget(QWidget):
                 self.combo_mid_op.setVisible(False)
                 self.spin_mid.setVisible(False)
                 self.btn_clear_alarm.setVisible(True)
-                # 修改一：隐藏所有框时消除报警居中分布在识别框正下方
                 self.row3_layout.setStretch(3, 1)
                 self.row3_layout.setStretch(5, 1)
             else:
@@ -718,7 +715,6 @@ class OverlayRegionWidget(QWidget):
             self.edit_title.setVisible(self.is_editing)
 
     def _update_geometry(self):
-        # 修改一：隐藏状态下控件显示在识别框正下方
         if self.panel_hidden:
             total_w = max(self.capture_w, 60)
             panel_h = 28 if self.is_alarm else 0
@@ -1127,8 +1123,35 @@ MOBILE_HTML_TEMPLATE = """
         .btn-alarm-on { background: #2e9a58; color: #ffffff; border: 1px solid #3fb950; }
         .btn-alarm-off { background: #4a4d52; color: #cccccc; border: 1px solid #666666; }
 
-        .trend-up { color: #ff4d4d; font-weight: bold; font-size: 16px; margin-right: 2px; }
-        .trend-down { color: #00ff8c; font-weight: bold; font-size: 16px; margin-right: 2px; }
+        /* 四、美化上涨与下降箭头样式 */
+        .trend-up {
+            color: #ff4d4d;
+            background: rgba(255, 77, 77, 0.15);
+            border: 1px solid rgba(255, 77, 77, 0.35);
+            border-radius: 4px;
+            padding: 1px 5px;
+            font-size: 12px;
+            font-weight: bold;
+            margin-right: 4px;
+            display: inline-flex;
+            align-items: center;
+            line-height: 1;
+            box-shadow: 0 0 5px rgba(255, 77, 77, 0.25);
+        }
+        .trend-down {
+            color: #00ff8c;
+            background: rgba(0, 255, 140, 0.15);
+            border: 1px solid rgba(0, 255, 140, 0.35);
+            border-radius: 4px;
+            padding: 1px 5px;
+            font-size: 12px;
+            font-weight: bold;
+            margin-right: 4px;
+            display: inline-flex;
+            align-items: center;
+            line-height: 1;
+            box-shadow: 0 0 5px rgba(0, 255, 140, 0.25);
+        }
 
         .val-container { display: flex; align-items: center; font-size: 18px; font-weight: bold; font-family: monospace; }
         .val-text { color: #00ff8c; }
@@ -1232,6 +1255,7 @@ MOBILE_HTML_TEMPLATE = """
                 
                 document.getElementById('header-row2').style.display = 'flex';
                 document.getElementById('header-row3').style.display = 'flex';
+                document.querySelectorAll('.toggle-icon').forEach(el => el.style.display = 'inline-block');
             } else {
                 document.getElementById('login-box').style.display = 'inline-flex';
                 document.getElementById('user-box').style.display = 'none';
@@ -1239,10 +1263,12 @@ MOBILE_HTML_TEMPLATE = """
                 document.getElementById('header-row2').style.display = 'none';
                 document.getElementById('header-row3').style.display = 'none';
 
+                /* 三、未登录时隐藏展开/收起按钮 */
                 cardExpandedState = {};
                 document.querySelectorAll('.fold-body').forEach(el => {
                     el.style.display = 'none';
                 });
+                document.querySelectorAll('.toggle-icon').forEach(el => el.style.display = 'none');
             }
         }
 
@@ -1406,6 +1432,7 @@ MOBILE_HTML_TEMPLATE = """
                     diffHtml = `<span class="diff-text" style="font-size: 12px; color: #a0a0a0; margin-right: 3px;">${box.diff_text}</span>`;
                 }
 
+                /* 四、美化箭头输出 */
                 if (box.trend === 'up') {
                     trendHtml = '<span class="trend-up">▲</span>';
                 } else if (box.trend === 'down') {
@@ -1421,7 +1448,8 @@ MOBILE_HTML_TEMPLATE = """
                         <div class="card-header">
                             <div class="card-title-box">
                                 <span class="card-title">${box.name}</span>
-                                ${currentUser ? `<span id="toggle-icon-${box.id}" class="toggle-icon" onclick="toggleSingleCard(${box.id})">${isExpanded ? '▲' : '▼'}</span>` : ''}
+                                <!-- 三、收起/展开按钮根据登录状态显隐 -->
+                                <span id="toggle-icon-${box.id}" class="toggle-icon" style="display: ${currentUser ? 'inline-block' : 'none'};" onclick="toggleSingleCard(${box.id})">${isExpanded ? '▲' : '▼'}</span>
                             </div>
                             <div class="card-header-right">
                                 <div class="val-container">
@@ -1450,12 +1478,17 @@ MOBILE_HTML_TEMPLATE = """
                                 <input id="upper-${box.id}" type="number" step="0.1" class="setting-input" value="${box.upper}">
                                 <button class="btn-action" style="background:#0088cc; padding:2px 8px; margin-left:4px;" onclick="updateLimits(${box.id})">保存</button>
                             </div>
-                            <!-- 修改二：修改名字为 记录 -->
                             <div class="log-title">📊 记录</div>
                             <div id="logs-${box.id}" class="log-list">${logsHtml}</div>
                         </div>
                     `;
                 } else {
+                    const toggleIcon = document.getElementById('toggle-icon-' + box.id);
+                    if (toggleIcon) {
+                        toggleIcon.style.display = currentUser ? 'inline-block' : 'none';
+                        toggleIcon.innerText = isExpanded ? '▲' : '▼';
+                    }
+
                     const diffEl = document.getElementById('diff-' + box.id);
                     if (diffEl) diffEl.innerHTML = diffHtml;
 
@@ -1753,14 +1786,20 @@ class GlobalControlPanel(QWidget):
             QCheckBox { color: #00ff8c; font-weight: bold; font-size: 11px; }
         """)
 
+        # 五、合并一二三排在一个大的框体 (main_card) 中
+        self.main_card = QFrame()
+        self.main_card.setStyleSheet("QFrame { background-color: rgba(0, 0, 0, 0.85); border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 8px; }")
+        card_layout = QVBoxLayout(self.main_card)
+        card_layout.setContentsMargins(8, 8, 8, 8)
+        card_layout.setSpacing(8)
+
         # ---------- 第 1 排：识别监控配置栏 ----------
-        self.row1_card = QFrame()
-        self.row1_card.setStyleSheet("QFrame { background-color: rgba(0, 0, 0, 0.8); border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 6px; }")
-        self.row1_layout = QHBoxLayout(self.row1_card)
-        self.row1_layout.setContentsMargins(8, 5, 8, 5)
+        self.row1_layout = QHBoxLayout()
+        self.row1_layout.setContentsMargins(0, 0, 0, 0)
         self.row1_layout.setSpacing(6)
 
-        self.row1_layout.addWidget(QLabel("⏱ 识别间隔(秒):"))
+        # 一、修改为 识别（秒）
+        self.row1_layout.addWidget(QLabel("⏱ 识别（秒）:"))
         self.spin_interval = CleanDoubleSpinBox()
         self.spin_interval.setButtonSymbols(QAbstractSpinBox.NoButtons)
         self.spin_interval.setAlignment(Qt.AlignCenter)
@@ -1781,7 +1820,8 @@ class GlobalControlPanel(QWidget):
         self.spin_count.valueChanged.connect(self._on_count_changed)
         self.row1_layout.addWidget(self.spin_count)
 
-        self.row1_layout.addWidget(QLabel("📝 记录间隔(分):"))
+        # 一、修改为 记录（分）
+        self.row1_layout.addWidget(QLabel("📝 记录（分）:"))
         self.spin_log_interval = CleanDoubleSpinBox()
         self.spin_log_interval.setButtonSymbols(QAbstractSpinBox.NoButtons)
         self.spin_log_interval.setAlignment(Qt.AlignCenter)
@@ -1792,21 +1832,25 @@ class GlobalControlPanel(QWidget):
         self.spin_log_interval.valueChanged.connect(self._on_log_interval_changed)
         self.row1_layout.addWidget(self.spin_log_interval)
 
-        self.btn_ocr_adjust = QPushButton("⚙️ 识别调整")
+        # 一、修改为 识别
+        self.btn_ocr_adjust = QPushButton("⚙️ 识别")
         self.btn_ocr_adjust.setFixedHeight(26)
         self.btn_ocr_adjust.clicked.connect(self._open_ocr_adjust_dialog)
         self.row1_layout.addWidget(self.btn_ocr_adjust)
 
-        main_layout.addWidget(self.row1_card)
+        card_layout.addLayout(self.row1_layout)
+
+        # 分隔线 1
+        line1 = QFrame()
+        line1.setFrameShape(QFrame.HLine)
+        line1.setStyleSheet("border-top: 1px solid rgba(255, 255, 255, 0.1); border-bottom: none;")
+        card_layout.addWidget(line1)
 
         # ---------- 第 2 排：框体与配置管理 ----------
-        self.row2_card = QFrame()
-        self.row2_card.setStyleSheet("QFrame { background-color: rgba(0, 0, 0, 0.8); border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 6px; }")
-        self.row2_layout = QHBoxLayout(self.row2_card)
-        self.row2_layout.setContentsMargins(8, 5, 8, 5)
+        self.row2_layout = QHBoxLayout()
+        self.row2_layout.setContentsMargins(0, 0, 0, 0)
         self.row2_layout.setSpacing(6)
 
-        # 修改四：改名为 新增、编辑、隐藏、保存、加载
         self.btn_add_box = QPushButton("➕ 新增")
         self.btn_add_box.clicked.connect(self._on_add_box_clicked)
 
@@ -1823,22 +1867,31 @@ class GlobalControlPanel(QWidget):
         self.btn_load_config = QPushButton("📁 加载")
         self.btn_load_config.clicked.connect(self.load_config)
 
+        # 二、网页端选项放在第二排加载后面
+        self.chk_web = QCheckBox("网页端")
+        self.chk_web.setChecked(True)
+        self.chk_web.toggled.connect(self._on_web_chk_toggled)
+
         self.row2_layout.addWidget(self.btn_add_box)
         self.row2_layout.addWidget(self.btn_edit_pos)
         self.row2_layout.addWidget(self.btn_hide_boxes)
         self.row2_layout.addWidget(self.btn_save_config)
         self.row2_layout.addWidget(self.btn_load_config)
+        self.row2_layout.addWidget(self.chk_web)
 
-        main_layout.addWidget(self.row2_card)
+        card_layout.addLayout(self.row2_layout)
+
+        # 分隔线 2
+        line2 = QFrame()
+        line2.setFrameShape(QFrame.HLine)
+        line2.setStyleSheet("border-top: 1px solid rgba(255, 255, 255, 0.1); border-bottom: none;")
+        card_layout.addWidget(line2)
 
         # ---------- 第 3 排：核心控制 ----------
-        self.row3_card = QFrame()
-        self.row3_card.setStyleSheet("QFrame { background-color: rgba(0, 0, 0, 0.8); border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 6px; }")
-        self.row3_layout = QHBoxLayout(self.row3_card)
-        self.row3_layout.setContentsMargins(8, 5, 8, 5)
+        self.row3_layout = QHBoxLayout()
+        self.row3_layout.setContentsMargins(0, 0, 0, 0)
         self.row3_layout.setSpacing(6)
 
-        # 修改三：限制开始监控和开始操作大小为原来的一半
         self.btn_start_monitor = QPushButton("▶ 开始监控")
         self.btn_start_monitor.setFixedWidth(85)
         self.btn_start_monitor.setStyleSheet("background-color: #2e9a58; color: white; font-weight: bold;")
@@ -1849,16 +1902,13 @@ class GlobalControlPanel(QWidget):
         self.btn_start_grille.setStyleSheet("background-color: #0088cc; color: white; font-weight: bold;")
         self.btn_start_grille.clicked.connect(self._toggle_grille)
 
-        self.chk_web = QCheckBox("网页端")
-        self.chk_web.setChecked(True)
-        self.chk_web.toggled.connect(self._on_web_chk_toggled)
-
         self.row3_layout.addWidget(self.btn_start_monitor)
         self.row3_layout.addWidget(self.btn_start_grille)
-        self.row3_layout.addWidget(self.chk_web)
         self.row3_layout.addStretch()
 
-        main_layout.addWidget(self.row3_card)
+        card_layout.addLayout(self.row3_layout)
+
+        main_layout.addWidget(self.main_card)
 
         # 异步加载 OCR 识别引擎
         self.ocr_init_thread = OCRInitThread()
@@ -1966,7 +2016,6 @@ class GlobalControlPanel(QWidget):
 
     def _toggle_hide_boxes(self):
         self.boxes_panel_hidden = not self.boxes_panel_hidden
-        # 修改四：名字改为 显示 / 隐藏
         btn_text = "👁️ 显示" if self.boxes_panel_hidden else "🙈 隐藏"
         self.btn_hide_boxes.setText(btn_text)
         for b in self.boxes:
