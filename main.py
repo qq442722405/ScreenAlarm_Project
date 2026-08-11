@@ -429,7 +429,7 @@ class OverlayRegionWidget(QWidget):
         self.is_alarm = False     # 真正异常报警 (超越上下限)
         self.is_warning = False   # 预警状态 (达到预警，框子变黄，不报警)
         self.user_cleared_alarm = False
-        self.cleared_val = None   # 修改四: 记录点击消除时的数值，用于对比后续是否变动
+        self.cleared_val = None   # 记录点击消除时的数值，用于对比后续是否变动
 
         self.is_editing = False
         self.is_muted = False
@@ -578,7 +578,6 @@ class OverlayRegionWidget(QWidget):
         self.spin_dec.setStyleSheet("background-color: rgba(26, 26, 38, 0.5); color: #00ff8c; border: 1px solid #00ff8c; font-size: 10px; border-radius: 2px;")
         self.spin_dec.valueChanged.connect(self._on_dec_changed)
 
-        # 修改二：第四排日志按钮调长 (从 40 调宽到 65)
         self.btn_show_log = QPushButton("📋 历史日志")
         self.btn_show_log.setFixedSize(65, 20)
         self.btn_show_log.setStyleSheet("QPushButton { background-color: rgba(0, 136, 204, 0.8); color: white; border: none; border-radius: 3px; font-size: 10px; font-weight: bold; } QPushButton:hover { background-color: #0088cc; }")
@@ -684,11 +683,14 @@ class OverlayRegionWidget(QWidget):
                 self.combo_mid_op.setVisible(False)
                 self.spin_mid.setVisible(False)
                 self.btn_clear_alarm.setVisible(True)
+                # 修改二：隐藏窗口时，消除报警按钮居中排列在识别窗正下方
+                self.row3_container.layout().setAlignment(Qt.AlignCenter)
             else:
                 self.control_panel.setVisible(False)
         else:
             self.control_panel.setVisible(True)
             self.control_panel.setStyleSheet("background-color: rgba(0, 0, 0, 0.85); border-bottom-left-radius: 6px; border-bottom-right-radius: 6px;")
+            self.row3_container.layout().setAlignment(Qt.AlignLeft)
             self.row1_container.setVisible(True)
             self.row2_container.setVisible(self.is_editing)
             self.row3_container.setVisible(True)
@@ -739,7 +741,6 @@ class OverlayRegionWidget(QWidget):
             self.is_warning = is_warning
             self.update()
 
-    # 修改四: 点击消除报警时，记录当前的数值 cleared_val
     def _on_clear_alarm(self):
         self.user_cleared_alarm = True
         try:
@@ -1080,8 +1081,9 @@ MOBILE_HTML_TEMPLATE = """
         .header-title-box { display: flex; align-items: center; gap: 6px; }
         .header-tools-box { display: flex; align-items: center; gap: 6px; }
         .title { font-size: 15px; font-weight: bold; color: #00ff8c; }
-        .toggle-icon { cursor: pointer; font-size: 13px; color: #00ff8c; font-weight: bold; user-select: none; padding: 2px 6px; border-radius: 4px; background: rgba(0,255,140,0.1); margin-left: 6px; }
-        .toggle-icon:hover { background: rgba(0,255,140,0.2); }
+        /* 修改四：黑灰色收起/展开按钮图标 */
+        .toggle-icon { cursor: pointer; font-size: 13px; color: #888888; font-weight: bold; user-select: none; padding: 2px 6px; border-radius: 4px; background: rgba(255, 255, 255, 0.08); margin-left: 6px; }
+        .toggle-icon:hover { color: #aaaaaa; background: rgba(255, 255, 255, 0.15); }
 
         .header-row2 { display: flex; align-items: center; gap: 8px; width: 100%; font-size: 12px; }
         .header-row3 { display: flex; gap: 10px; width: 100%; margin-top: 2px; }
@@ -1148,7 +1150,6 @@ MOBILE_HTML_TEMPLATE = """
 <body>
     <div class="container">
         <div class="header">
-            <!-- 修改一：已删除顶部的统一展开收起图标 -->
             <div class="header-row1">
                 <div class="header-title-box">
                     <span class="title">📱 中控数据面板</span>
@@ -1215,7 +1216,7 @@ MOBILE_HTML_TEMPLATE = """
     <script>
         let webSoundEnabled = false;
         let currentUser = localStorage.getItem('currentUser') || null;
-        let cardExpandedState = {}; // 修改一：单独记录每个卡片的展开收起状态
+        let cardExpandedState = {};
 
         function updateAuthUI() {
             if (currentUser) {
@@ -1232,7 +1233,6 @@ MOBILE_HTML_TEMPLATE = """
                 document.getElementById('header-row2').style.display = 'none';
                 document.getElementById('header-row3').style.display = 'none';
 
-                // 未登录时收起所有面板
                 cardExpandedState = {};
                 document.querySelectorAll('.fold-body').forEach(el => {
                     el.style.display = 'none';
@@ -1322,7 +1322,6 @@ MOBILE_HTML_TEMPLATE = """
             } catch(e){}
         }
 
-        // 修改一：单独控制单个卡片的折叠与展开
         function toggleSingleCard(boxId) {
             if (!currentUser) return;
             cardExpandedState[boxId] = !cardExpandedState[boxId];
@@ -1395,7 +1394,13 @@ MOBILE_HTML_TEMPLATE = """
                 }
                 card.className = cardClass;
 
+                // 修改三：在对比值上下图标左边显示误差值
                 let trendHtml = '';
+                let diffHtml = '';
+                if (box.diff_text) {
+                    diffHtml = `<span class="diff-text" style="font-size: 12px; color: #a0a0a0; margin-right: 3px;">${box.diff_text}</span>`;
+                }
+
                 if (box.trend === 'up') {
                     trendHtml = '<span class="trend-up">▲</span>';
                 } else if (box.trend === 'down') {
@@ -1411,11 +1416,11 @@ MOBILE_HTML_TEMPLATE = """
                         <div class="card-header">
                             <div class="card-title-box">
                                 <span class="card-title">${box.name}</span>
-                                <!-- 修改一：放在名称右边的收起展开图标 -->
                                 ${currentUser ? `<span id="toggle-icon-${box.id}" class="toggle-icon" onclick="toggleSingleCard(${box.id})">${isExpanded ? '▲' : '▼'}</span>` : ''}
                             </div>
                             <div class="card-header-right">
                                 <div class="val-container">
+                                    <span id="diff-${box.id}">${diffHtml}</span>
                                     <span id="trend-${box.id}">${trendHtml}</span>
                                     <span id="val-${box.id}" class="${valClass}">${box.val_text}</span>
                                 </div>
@@ -1445,6 +1450,9 @@ MOBILE_HTML_TEMPLATE = """
                         </div>
                     `;
                 } else {
+                    const diffEl = document.getElementById('diff-' + box.id);
+                    if (diffEl) diffEl.innerHTML = diffHtml;
+
                     const trendEl = document.getElementById('trend-' + box.id);
                     if (trendEl) trendEl.innerHTML = trendHtml;
 
@@ -1573,11 +1581,16 @@ class WebServerThread(QThread):
 
                 past_val = b.get_past_value(compare_min)
                 trend = 'none'
+                diff_text = ''
+                # 修改三: 计算与对比值的误差值并返回给网页端
                 if val is not None and past_val is not None:
                     if val > past_val:
                         trend = 'up'
                     elif val < past_val:
                         trend = 'down'
+                    diff_val = abs(val - past_val)
+                    dp = getattr(b, 'decimal_places', 0)
+                    diff_text = f"{diff_val:.{dp}f}"
 
                 logs = []
                 for i in range(b.list_widget.count()):
@@ -1593,6 +1606,7 @@ class WebServerThread(QThread):
                     'val': val,
                     'val_text': val_text,
                     'trend': trend,
+                    'diff_text': diff_text,
                     'is_alarm': b.is_alarm,
                     'is_muted': b.is_muted,
                     'logs': logs
@@ -1681,7 +1695,6 @@ class GlobalControlPanel(QWidget):
         self.monitoring = False
         self.operating = False
         self.is_editing = False
-        self.is_collapsed = False
         self.boxes_panel_hidden = False
         self.reader = None
         self.compare_interval_min = 5.0
@@ -1812,7 +1825,7 @@ class GlobalControlPanel(QWidget):
 
         main_layout.addWidget(self.row2_card)
 
-        # ---------- 第 3 排：核心控制（修改三：加上网页端选框，去掉显示的访问网址） ----------
+        # ---------- 第 3 排：核心控制 ----------
         self.row3_card = QFrame()
         self.row3_card.setStyleSheet("QFrame { background-color: rgba(0, 0, 0, 0.8); border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 6px; }")
         self.row3_layout = QHBoxLayout(self.row3_card)
@@ -1827,7 +1840,6 @@ class GlobalControlPanel(QWidget):
         self.btn_start_grille.setStyleSheet("background-color: #0088cc; color: white; font-weight: bold;")
         self.btn_start_grille.clicked.connect(self._toggle_grille)
 
-        # 修改三：加上网页端选框
         self.chk_web = QCheckBox("网页端")
         self.chk_web.setChecked(True)
         self.chk_web.toggled.connect(self._on_web_chk_toggled)
@@ -1838,25 +1850,7 @@ class GlobalControlPanel(QWidget):
 
         main_layout.addWidget(self.row3_card)
 
-        # ---------- 第 4 排：状态与折叠面板 ----------
-        self.row4_card = QFrame()
-        self.row4_card.setStyleSheet("QFrame { background-color: rgba(0, 0, 0, 0.8); border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 6px; }")
-        self.row4_layout = QHBoxLayout(self.row4_card)
-        self.row4_layout.setContentsMargins(8, 5, 8, 5)
-        self.row4_layout.setSpacing(6)
-
-        self.lbl_status = QLabel("状态: 就绪 (按F12可隐藏/显示本主控面板)")
-        self.lbl_status.setStyleSheet("color: #a0a0a0; font-size: 11px;")
-
-        self.btn_collapse = QPushButton("▲")
-        self.btn_collapse.setFixedSize(24, 24)
-        self.btn_collapse.clicked.connect(self._toggle_collapse)
-
-        self.row4_layout.addWidget(self.lbl_status)
-        self.row4_layout.addStretch()
-        self.row4_layout.addWidget(self.btn_collapse)
-
-        main_layout.addWidget(self.row4_card)
+        # 修改一：已删除第四排（状态及收起/展开按钮）
 
         # 异步加载 OCR 识别引擎
         self.ocr_init_thread = OCRInitThread()
@@ -1888,10 +1882,6 @@ class GlobalControlPanel(QWidget):
 
     def _on_ocr_ready(self, reader):
         self.reader = reader
-        if self.reader:
-            self.lbl_status.setText("状态: OCR 引擎已就绪")
-        else:
-            self.lbl_status.setText("状态: OCR 引擎加载失败")
 
     def _on_web_chk_toggled(self, checked):
         if checked:
@@ -1899,13 +1889,11 @@ class GlobalControlPanel(QWidget):
                 self.web_thread = WebServerThread(self)
                 self.web_thread.action_requested.connect(self._handle_web_action)
                 self.web_thread.start()
-                self.lbl_status.setText("状态: 网页端已开启")
         else:
             if self.web_thread and self.web_thread.isRunning():
                 self.web_thread.stop()
                 self.web_thread.wait()
                 self.web_thread = None
-                self.lbl_status.setText("状态: 网页端已关闭")
 
     def _on_interval_changed(self, val):
         if self.monitor_thread:
@@ -2005,33 +1993,25 @@ class GlobalControlPanel(QWidget):
             self.btn_start_grille.setText("▶ 开始操作")
             self.btn_start_grille.setStyleSheet("background-color: #0088cc; color: white; font-weight: bold;")
 
-    # 修改四: 数值判断逻辑 - 消除报警点击后，数值不变不报警，变动后重新报警
     def _on_value_updated(self, box, time_str, val, raw_text):
         box.update_result_display(val, raw_text)
         box.add_log_val(time_str, val, raw_text)
 
         if val is not None:
-            # 1. 预警状态判定 (仅亮黄框，不触发蜂鸣报警)
             box.set_warning_state(box.check_mid_condition(val))
-
-            # 2. 上下限真正报警判定
             is_out_of_bounds = (val > box.upper or val < box.lower)
 
             if is_out_of_bounds:
                 if box.user_cleared_alarm:
-                    # 如果用户消除了报警，判断数值是否与消除时的数值发生变动
                     if box.cleared_val is None or abs(val - box.cleared_val) > 1e-5:
-                        # 数值发生改变，恢复报警状态
                         box.user_cleared_alarm = False
                         box.cleared_val = None
                         box.set_alarm_state(True)
                     else:
-                        # 数值保持不变，继续保持消除/不报警状态
                         box.set_alarm_state(False)
                 else:
                     box.set_alarm_state(True)
             else:
-                # 恢复到正常范围内，重置消除状态
                 box.user_cleared_alarm = False
                 box.cleared_val = None
                 box.set_alarm_state(False)
@@ -2050,13 +2030,6 @@ class GlobalControlPanel(QWidget):
             self.alarm_player.play()
         else:
             self.alarm_player.stop()
-
-    def _toggle_collapse(self):
-        self.is_collapsed = not self.is_collapsed
-        self.row1_card.setVisible(not self.is_collapsed)
-        self.row2_card.setVisible(not self.is_collapsed)
-        self.row3_card.setVisible(not self.is_collapsed)
-        self.btn_collapse.setText("▼" if self.is_collapsed else "▲")
 
     def _on_f12_pressed(self):
         if self.isVisible():
@@ -2114,9 +2087,8 @@ class GlobalControlPanel(QWidget):
         try:
             with open(self.config_file, "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
-            self.lbl_status.setText("状态: 配置已成功保存")
         except Exception as e:
-            self.lbl_status.setText(f"状态: 保存配置失败 ({e})")
+            pass
 
     def load_config(self):
         if not os.path.exists(self.config_file): return
@@ -2146,9 +2118,8 @@ class GlobalControlPanel(QWidget):
                     decimal_places=b_data.get('decimal_places', 0),
                     mid_op=b_data.get('mid_op', '>')
                 )
-            self.lbl_status.setText("状态: 配置已成功加载")
         except Exception as e:
-            self.lbl_status.setText(f"状态: 加载配置失败 ({e})")
+            pass
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
