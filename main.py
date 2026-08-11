@@ -370,7 +370,8 @@ class LogDialog(QDialog):
     def __init__(self, box, parent=None):
         super().__init__(parent)
         self.box = box
-        self.setWindowTitle(f"📋 历史日志 - {box.name}")
+        # 修改二：修改名字为 记录
+        self.setWindowTitle(f"📋 记录 - {box.name}")
         self.resize(380, 260)
         self.setWindowFlags(Qt.WindowStaysOnTopHint | Qt.Tool)
         self.setStyleSheet("""
@@ -522,9 +523,9 @@ class OverlayRegionWidget(QWidget):
 
         # 排列三: 预警值与 🚨 消除报警
         self.row3_container = QWidget()
-        row3_layout = QHBoxLayout(self.row3_container)
-        row3_layout.setContentsMargins(0, 0, 0, 0)
-        row3_layout.setSpacing(3)
+        self.row3_layout = QHBoxLayout(self.row3_container)
+        self.row3_layout.setContentsMargins(0, 0, 0, 0)
+        self.row3_layout.setSpacing(3)
 
         self.lbl_mid = QLabel("预警:")
         self.lbl_mid.setStyleSheet("color: #ffaa00; font-size: 10px; font-weight: bold;")
@@ -549,14 +550,15 @@ class OverlayRegionWidget(QWidget):
         self.btn_clear_alarm.setStyleSheet("QPushButton { background-color: #ff4d4d; color: white; border: none; border-radius: 3px; padding: 2px 6px; font-size: 10px; font-weight: bold; } QPushButton:hover { background-color: #ff6666; }")
         self.btn_clear_alarm.clicked.connect(self._on_clear_alarm)
 
-        row3_layout.addWidget(self.lbl_mid)
-        row3_layout.addWidget(self.combo_mid_op)
-        row3_layout.addWidget(self.spin_mid)
-        row3_layout.addStretch()
-        row3_layout.addWidget(self.btn_clear_alarm)
+        self.row3_layout.addWidget(self.lbl_mid)
+        self.row3_layout.addWidget(self.combo_mid_op)
+        self.row3_layout.addWidget(self.spin_mid)
+        self.row3_layout.addStretch(1)
+        self.row3_layout.addWidget(self.btn_clear_alarm)
+        self.row3_layout.addStretch(0)
         panel_layout.addWidget(self.row3_container)
 
-        # 排列四: 静音 | 小数点 | 📋 日志按钮
+        # 排列四: 静音 | 小数点 | 📋 记录按钮
         self.row4_container = QWidget()
         row4_layout = QHBoxLayout(self.row4_container)
         row4_layout.setContentsMargins(0, 0, 0, 0)
@@ -578,7 +580,8 @@ class OverlayRegionWidget(QWidget):
         self.spin_dec.setStyleSheet("background-color: rgba(26, 26, 38, 0.5); color: #00ff8c; border: 1px solid #00ff8c; font-size: 10px; border-radius: 2px;")
         self.spin_dec.valueChanged.connect(self._on_dec_changed)
 
-        self.btn_show_log = QPushButton("📋 历史日志")
+        # 修改二：修改名字为 记录
+        self.btn_show_log = QPushButton("📋 记录")
         self.btn_show_log.setFixedSize(65, 20)
         self.btn_show_log.setStyleSheet("QPushButton { background-color: rgba(0, 136, 204, 0.8); color: white; border: none; border-radius: 3px; font-size: 10px; font-weight: bold; } QPushButton:hover { background-color: #0088cc; }")
         self.btn_show_log.clicked.connect(self._open_log_dialog)
@@ -683,14 +686,16 @@ class OverlayRegionWidget(QWidget):
                 self.combo_mid_op.setVisible(False)
                 self.spin_mid.setVisible(False)
                 self.btn_clear_alarm.setVisible(True)
-                # 修改二：隐藏窗口时，消除报警按钮居中排列在识别窗正下方
-                self.row3_container.layout().setAlignment(Qt.AlignCenter)
+                # 修改一：隐藏所有框时消除报警居中分布在识别框正下方
+                self.row3_layout.setStretch(3, 1)
+                self.row3_layout.setStretch(5, 1)
             else:
                 self.control_panel.setVisible(False)
         else:
             self.control_panel.setVisible(True)
             self.control_panel.setStyleSheet("background-color: rgba(0, 0, 0, 0.85); border-bottom-left-radius: 6px; border-bottom-right-radius: 6px;")
-            self.row3_container.layout().setAlignment(Qt.AlignLeft)
+            self.row3_layout.setStretch(3, 1)
+            self.row3_layout.setStretch(5, 0)
             self.row1_container.setVisible(True)
             self.row2_container.setVisible(self.is_editing)
             self.row3_container.setVisible(True)
@@ -713,10 +718,12 @@ class OverlayRegionWidget(QWidget):
             self.edit_title.setVisible(self.is_editing)
 
     def _update_geometry(self):
-        total_w = max(self.capture_w, 140)
+        # 修改一：隐藏状态下控件显示在识别框正下方
         if self.panel_hidden:
+            total_w = max(self.capture_w, 60)
             panel_h = 28 if self.is_alarm else 0
         else:
+            total_w = max(self.capture_w, 140)
             panel_h = 95 if self.is_editing else 52
 
         self.capture_spacer.setFixedHeight(self.capture_h)
@@ -1081,7 +1088,6 @@ MOBILE_HTML_TEMPLATE = """
         .header-title-box { display: flex; align-items: center; gap: 6px; }
         .header-tools-box { display: flex; align-items: center; gap: 6px; }
         .title { font-size: 15px; font-weight: bold; color: #00ff8c; }
-        /* 修改四：黑灰色收起/展开按钮图标 */
         .toggle-icon { cursor: pointer; font-size: 13px; color: #888888; font-weight: bold; user-select: none; padding: 2px 6px; border-radius: 4px; background: rgba(255, 255, 255, 0.08); margin-left: 6px; }
         .toggle-icon:hover { color: #aaaaaa; background: rgba(255, 255, 255, 0.15); }
 
@@ -1394,7 +1400,6 @@ MOBILE_HTML_TEMPLATE = """
                 }
                 card.className = cardClass;
 
-                // 修改三：在对比值上下图标左边显示误差值
                 let trendHtml = '';
                 let diffHtml = '';
                 if (box.diff_text) {
@@ -1445,7 +1450,8 @@ MOBILE_HTML_TEMPLATE = """
                                 <input id="upper-${box.id}" type="number" step="0.1" class="setting-input" value="${box.upper}">
                                 <button class="btn-action" style="background:#0088cc; padding:2px 8px; margin-left:4px;" onclick="updateLimits(${box.id})">保存</button>
                             </div>
-                            <div class="log-title">📊 历史日志</div>
+                            <!-- 修改二：修改名字为 记录 -->
+                            <div class="log-title">📊 记录</div>
                             <div id="logs-${box.id}" class="log-list">${logsHtml}</div>
                         </div>
                     `;
@@ -1582,7 +1588,6 @@ class WebServerThread(QThread):
                 past_val = b.get_past_value(compare_min)
                 trend = 'none'
                 diff_text = ''
-                # 修改三: 计算与对比值的误差值并返回给网页端
                 if val is not None and past_val is not None:
                     if val > past_val:
                         trend = 'up'
@@ -1801,20 +1806,21 @@ class GlobalControlPanel(QWidget):
         self.row2_layout.setContentsMargins(8, 5, 8, 5)
         self.row2_layout.setSpacing(6)
 
-        self.btn_add_box = QPushButton("➕ 新增识别框")
+        # 修改四：改名为 新增、编辑、隐藏、保存、加载
+        self.btn_add_box = QPushButton("➕ 新增")
         self.btn_add_box.clicked.connect(self._on_add_box_clicked)
 
-        self.btn_edit_pos = QPushButton("✏️ 调整框位置")
+        self.btn_edit_pos = QPushButton("✏️ 编辑")
         self.btn_edit_pos.setCheckable(True)
         self.btn_edit_pos.clicked.connect(self._toggle_edit_pos)
 
-        self.btn_hide_boxes = QPushButton("🙈 隐藏所有框")
+        self.btn_hide_boxes = QPushButton("🙈 隐藏")
         self.btn_hide_boxes.clicked.connect(self._toggle_hide_boxes)
 
-        self.btn_save_config = QPushButton("💾 保存配置")
+        self.btn_save_config = QPushButton("💾 保存")
         self.btn_save_config.clicked.connect(self.save_config)
 
-        self.btn_load_config = QPushButton("📁 加载配置")
+        self.btn_load_config = QPushButton("📁 加载")
         self.btn_load_config.clicked.connect(self.load_config)
 
         self.row2_layout.addWidget(self.btn_add_box)
@@ -1832,11 +1838,14 @@ class GlobalControlPanel(QWidget):
         self.row3_layout.setContentsMargins(8, 5, 8, 5)
         self.row3_layout.setSpacing(6)
 
+        # 修改三：限制开始监控和开始操作大小为原来的一半
         self.btn_start_monitor = QPushButton("▶ 开始监控")
+        self.btn_start_monitor.setFixedWidth(85)
         self.btn_start_monitor.setStyleSheet("background-color: #2e9a58; color: white; font-weight: bold;")
         self.btn_start_monitor.clicked.connect(self._toggle_monitor)
 
         self.btn_start_grille = QPushButton("▶ 开始操作")
+        self.btn_start_grille.setFixedWidth(85)
         self.btn_start_grille.setStyleSheet("background-color: #0088cc; color: white; font-weight: bold;")
         self.btn_start_grille.clicked.connect(self._toggle_grille)
 
@@ -1847,10 +1856,9 @@ class GlobalControlPanel(QWidget):
         self.row3_layout.addWidget(self.btn_start_monitor)
         self.row3_layout.addWidget(self.btn_start_grille)
         self.row3_layout.addWidget(self.chk_web)
+        self.row3_layout.addStretch()
 
         main_layout.addWidget(self.row3_card)
-
-        # 修改一：已删除第四排（状态及收起/展开按钮）
 
         # 异步加载 OCR 识别引擎
         self.ocr_init_thread = OCRInitThread()
@@ -1958,7 +1966,8 @@ class GlobalControlPanel(QWidget):
 
     def _toggle_hide_boxes(self):
         self.boxes_panel_hidden = not self.boxes_panel_hidden
-        btn_text = "👁️ 显示所有框" if self.boxes_panel_hidden else "🙈 隐藏所有框"
+        # 修改四：名字改为 显示 / 隐藏
+        btn_text = "👁️ 显示" if self.boxes_panel_hidden else "🙈 隐藏"
         self.btn_hide_boxes.setText(btn_text)
         for b in self.boxes:
             b.set_panel_hidden(self.boxes_panel_hidden)
