@@ -1088,15 +1088,39 @@ MOBILE_HTML_TEMPLATE = """
         .toggle-icon:hover { color: #aaaaaa; background: rgba(255, 255, 255, 0.15); }
 
         .header-row2 { display: flex; align-items: center; justify-content: flex-end; gap: 8px; width: 100%; font-size: 12px; }
-        .header-row3 { display: flex; gap: 10px; width: 100%; margin-top: 2px; align-items: center; }
+        .header-row3 { display: flex; gap: 8px; width: 100%; margin-top: 2px; align-items: center; }
         
-        .btn-top { flex: 1; background: #2e9a58; color: #fff; border: none; border-radius: 6px; padding: 8px 12px; font-size: 13px; font-weight: bold; cursor: pointer; transition: background 0.2s; text-align: center; }
+        .btn-top {
+            flex: 1;
+            background: #2e9a58;
+            color: #fff;
+            border: none;
+            border-radius: 6px;
+            padding: 0 12px;
+            height: 36px;
+            font-size: 13px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: background 0.2s;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            box-sizing: border-box;
+        }
         .btn-top:active { opacity: 0.8; }
         .btn-top.active { background: #b03a3a; }
         .btn-top.btn-grille { background: #0088cc; }
         .btn-top.btn-grille.active { background: #cc3333; }
-        .btn-sound { background: rgba(255,255,255,0.15); color: #00ff8c; border: 1px solid rgba(255,255,255,0.2); border-radius: 6px; padding: 4px 8px; font-size: 11px; font-weight: bold; cursor: pointer; }
+        .btn-top.btn-exit {
+            flex: 0 0 36px;
+            width: 36px;
+            padding: 0;
+            background: #ff3333;
+            font-size: 13px;
+        }
+        .btn-top.btn-exit:hover { background: #ff6666; }
 
+        .btn-sound { background: rgba(255,255,255,0.15); color: #00ff8c; border: 1px solid rgba(255,255,255,0.2); border-radius: 6px; padding: 4px 8px; font-size: 11px; font-weight: bold; cursor: pointer; }
         .btn-fold-tool { background: rgba(255,255,255,0.1); color: #00ff8c; border: 1px solid rgba(0,255,140,0.3); border-radius: 6px; padding: 4px 8px; font-size: 11px; font-weight: bold; cursor: pointer; }
 
         .login-input { background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; color: #00ff8c; font-weight: bold; padding: 4px 6px; width: 100%; font-size: 12px; }
@@ -1205,14 +1229,11 @@ MOBILE_HTML_TEMPLATE = """
                 </div>
             </div>
 
-            <!-- 三、收起时只显示的控制按钮行，右侧带有展开/收起图标和退出图标 -->
+            <!-- 控制按钮行，右侧带有退出图标 -->
             <div id="header-row3" class="header-row3" style="display: none;">
                 <button id="btn-monitor" class="btn-top" onclick="postAction('toggle_monitor', -1)">▶ 开始监控</button>
                 <button id="btn-grille" class="btn-top btn-grille" onclick="postAction('toggle_grille', -1)">▶ 开始操作</button>
-                <div style="display: flex; gap: 6px; margin-left: 4px;">
-                    <button id="btn-header-fold" class="btn-sound" onclick="toggleHeaderFold()" title="收起/展开">▲</button>
-                    <button id="btn-app-exit" class="btn-sound" style="background:#ff3333; color:white; border:none;" onclick="exitApp()" title="退出所有进程">❌</button>
-                </div>
+                <button id="btn-app-exit" class="btn-top btn-exit" onclick="exitApp()" title="退出所有进程">❌</button>
             </div>
         </div>
 
@@ -1229,7 +1250,7 @@ MOBILE_HTML_TEMPLATE = """
             <div style="display: flex; flex-direction: column; gap: 10px; margin-top: 10px;">
                 <input type="text" id="login-username" class="login-input" placeholder="用户名" />
                 <input type="password" id="login-password" class="login-input" placeholder="密码" />
-                <button class="btn-top" style="background:#0088cc; width:100%;" onclick="handleLogin()">登录</button>
+                <button class="btn-top" style="background:#0088cc; width:100%; height:32px;" onclick="handleLogin()">登录</button>
             </div>
         </div>
     </div>
@@ -1244,7 +1265,7 @@ MOBILE_HTML_TEMPLATE = """
             <div style="display: flex; flex-direction: column; gap: 10px; margin-top: 10px;">
                 <input type="text" id="new-username" class="login-input" placeholder="新用户名" />
                 <input type="password" id="new-password" class="login-input" placeholder="新密码" />
-                <button class="btn-top" style="background:#2e9a58; width:100%;" onclick="handleAddUser()">添加/更新用户</button>
+                <button class="btn-top" style="background:#2e9a58; width:100%; height:32px;" onclick="handleAddUser()">添加/更新用户</button>
                 <div id="users-list" style="margin-top: 10px; max-height: 150px; overflow-y: auto;"></div>
             </div>
         </div>
@@ -1254,7 +1275,6 @@ MOBILE_HTML_TEMPLATE = """
         let webSoundEnabled = false;
         let currentUser = localStorage.getItem('currentUser') || null;
         let cardExpandedState = {};
-        let isHeaderFolded = false;
 
         function updateAuthUI() {
             if (currentUser) {
@@ -1280,21 +1300,7 @@ MOBILE_HTML_TEMPLATE = """
             }
         }
 
-        /* 三、顶栏收起与展开功能 */
-        function toggleHeaderFold() {
-            isHeaderFolded = !isHeaderFolded;
-            const topPanel = document.getElementById('header-top-panel');
-            const foldBtn = document.getElementById('btn-header-fold');
-            if (isHeaderFolded) {
-                topPanel.style.display = 'none';
-                if(foldBtn) foldBtn.innerText = '▼';
-            } else {
-                topPanel.style.display = 'block';
-                if(foldBtn) foldBtn.innerText = '▲';
-            }
-        }
-
-        /* 三、退出所有进程功能 */
+        /* 退出所有进程功能 */
         function exitApp() {
             if (confirm('确定要退出所有进程吗？')) {
                 postAction('exit_app', -1);
@@ -1412,7 +1418,7 @@ MOBILE_HTML_TEMPLATE = """
             } catch(e) {}
         }
 
-        /* 二、点击下限 预警 上限 小数点 只有一个保存按钮 */
+        /* 点击下限 预警 上限 小数点 只有一个保存按钮 */
         function updateLimits(boxId) {
             const lower = document.getElementById('lower-' + boxId).value;
             const mid_op = document.getElementById('mid_op-' + boxId).value;
@@ -1463,7 +1469,7 @@ MOBILE_HTML_TEMPLATE = """
                     diffHtml = `<span class="diff-text" style="font-size: 12px; color: #a0a0a0; margin-right: 3px;">${box.diff_text}</span>`;
                 }
 
-                /* 四、美化箭头输出：使用 ⬆ ⬇ 表示 */
+                /* 美化箭头输出：使用 ⬆ ⬇ 表示 */
                 if (box.trend === 'up') {
                     trendHtml = '<span class="trend-up">⬆</span>';
                 } else if (box.trend === 'down') {
@@ -1493,7 +1499,6 @@ MOBILE_HTML_TEMPLATE = """
                                 <button id="mute-btn-${box.id}" class="btn-action ${box.is_muted ? 'btn-alarm-off' : 'btn-alarm-on'}" onclick="postAction('toggle_mute', ${box.id})">${box.is_muted ? '🔇 静音' : '🔊 声音'}</button>
                             </div>
                         </div>
-                        <!-- 二、增加小数点输入框，放在上限后面，统一单个保存按钮 -->
                         <div id="fold-body-${box.id}" class="fold-body" style="display: ${(currentUser && isExpanded) ? 'block' : 'none'};">
                             <div class="setting-row">
                                 <label>下限:</label>
@@ -1935,9 +1940,17 @@ class GlobalControlPanel(QWidget):
         self.btn_start_grille.setStyleSheet("background-color: #0088cc; color: white; font-weight: bold;")
         self.btn_start_grille.clicked.connect(self._toggle_grille)
 
+        # 一、悬浮框：在开始操作的最右边加一个 X 按钮 用于退出关闭程序所有进程
+        self.btn_exit_app = QPushButton("❌")
+        self.btn_exit_app.setFixedSize(26, 26)
+        self.btn_exit_app.setStyleSheet("QPushButton { background-color: #ff3333; color: white; border: none; border-radius: 4px; font-weight: bold; font-size: 11px; } QPushButton:hover { background-color: #ff6666; }")
+        self.btn_exit_app.setToolTip("退出关闭程序")
+        self.btn_exit_app.clicked.connect(self._exit_app)
+
         self.row3_layout.addWidget(self.btn_start_monitor)
         self.row3_layout.addWidget(self.btn_start_grille)
         self.row3_layout.addStretch()
+        self.row3_layout.addWidget(self.btn_exit_app)
 
         card_layout.addLayout(self.row3_layout)
 
@@ -1956,6 +1969,11 @@ class GlobalControlPanel(QWidget):
 
         # 自动加载上次配置
         QTimer.singleShot(100, self.load_config)
+
+    def _exit_app(self):
+        """退出程序并关闭所有进程"""
+        QApplication.quit()
+        os._exit(0)
 
     def load_users(self):
         if os.path.exists(self.users_file):
@@ -2134,9 +2152,7 @@ class GlobalControlPanel(QWidget):
         elif action == 'toggle_grille':
             self._toggle_grille()
         elif action == 'exit_app':
-            # 三、退出网页及系统所有进程
-            QApplication.quit()
-            os._exit(0)
+            self._exit_app()
         elif action == 'clear_alarm':
             for b in self.boxes:
                 if box_id == -1 or b.box_id == box_id:
