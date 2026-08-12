@@ -360,12 +360,12 @@ class OCRAdjustDialog(QDialog):
         main_layout.addWidget(buttons)
 
     def _pick_preview_area(self):
-        self.hide()
+        self.setWindowOpacity(0.0)
         time.sleep(0.2)
         self.picker = CoordinatePicker()
 
         def on_picked(x, y, w, h):
-            self.show()
+            self.setWindowOpacity(1.0)
             if w <= 0 or h <= 0:
                 return
             screen = QApplication.primaryScreen()
@@ -665,12 +665,13 @@ class ScriptEditorDialog(QDialog):
         self._update_row_indices()
 
     def _pick_coord_for_label(self, label_widget):
-        self.hide()
+        # 使用透明度隐藏代替 hide()，防止中断 exec() 模态对话框的事件循环导致无法保存
+        self.setWindowOpacity(0.0)
         time.sleep(0.2)
         self.picker = SingleCoordPicker()
 
         def on_selected(x, y):
-            self.show()
+            self.setWindowOpacity(1.0)
             if x >= 0 and y >= 0:
                 label_widget.setText(f"({x}, {y})")
 
@@ -1382,7 +1383,6 @@ class MonitorThread(QThread):
                             enhanced = gray
 
                         sharpened = cv2.filter2D(enhanced, -1, np.array([[-1,-1,-1],[-1,9,-1],[-1,-1,-1]]))
-                        
                         block = int(self.ocr_params.get('thresh_block', 11))
                         c_val = int(self.ocr_params.get('thresh_c', 2))
                         binary = cv2.adaptiveThreshold(sharpened, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, block, c_val)
@@ -2257,31 +2257,36 @@ class GlobalControlPanel(QWidget):
         line1.setStyleSheet("border-top: 1px solid rgba(255, 255, 255, 0.1); border-bottom: none;")
         card_layout.addWidget(line1)
 
-        # ---------- 第 2 排：框体与配置管理 ----------
+        # ---------- 第 2 排：框体与配置管理（要求二修改按钮名字） ----------
         self.row2_layout = QHBoxLayout()
         self.row2_layout.setContentsMargins(0, 0, 0, 0)
         self.row2_layout.setSpacing(6)
 
-        self.btn_add_box = QPushButton("➕ 新增框体")
+        self.btn_add_box = QPushButton("➕ 新增")
+        self.btn_add_box.setFixedHeight(26)
         self.btn_add_box.clicked.connect(self._on_add_box_clicked)
-
-        self.btn_edit_pos = QPushButton("✏️ 编辑位置")
-        self.btn_edit_pos.setCheckable(True)
-        self.btn_edit_pos.clicked.connect(self._toggle_edit_pos)
-
-        self.btn_hide_boxes = QPushButton("🙈 隐藏框体")
-        self.btn_hide_boxes.clicked.connect(self._toggle_hide_boxes)
-
-        self.btn_save_config = QPushButton("💾 保存配置")
-        self.btn_save_config.clicked.connect(self.save_config)
-
-        self.btn_load_config = QPushButton("📂 加载配置")
-        self.btn_load_config.clicked.connect(self.load_config)
-
         self.row2_layout.addWidget(self.btn_add_box)
+
+        self.btn_edit_pos = QPushButton("✏️ 编辑")
+        self.btn_edit_pos.setCheckable(True)
+        self.btn_edit_pos.setFixedHeight(26)
+        self.btn_edit_pos.clicked.connect(self._on_edit_pos_toggled)
         self.row2_layout.addWidget(self.btn_edit_pos)
+
+        self.btn_hide_boxes = QPushButton("🙈 隐藏")
+        self.btn_hide_boxes.setCheckable(True)
+        self.btn_hide_boxes.setFixedHeight(26)
+        self.btn_hide_boxes.clicked.connect(self._on_hide_boxes_toggled)
         self.row2_layout.addWidget(self.btn_hide_boxes)
+
+        self.btn_save_config = QPushButton("💾 保存")
+        self.btn_save_config.setFixedHeight(26)
+        self.btn_save_config.clicked.connect(self._on_save_config_clicked)
         self.row2_layout.addWidget(self.btn_save_config)
+
+        self.btn_load_config = QPushButton("📂 加载")
+        self.btn_load_config.setFixedHeight(26)
+        self.btn_load_config.clicked.connect(self._on_load_config_clicked)
         self.row2_layout.addWidget(self.btn_load_config)
 
         card_layout.addLayout(self.row2_layout)
@@ -2291,285 +2296,78 @@ class GlobalControlPanel(QWidget):
         line2.setStyleSheet("border-top: 1px solid rgba(255, 255, 255, 0.1); border-bottom: none;")
         card_layout.addWidget(line2)
 
-        # ---------- 第 3 排：脚本管理区域 ----------
+        # ---------- 第 3 排：自动化脚本与控制（要求一固定大小/删除状态；要求三删除“脚本：”） ----------
         self.row3_layout = QHBoxLayout()
         self.row3_layout.setContentsMargins(0, 0, 0, 0)
         self.row3_layout.setSpacing(6)
 
-        lbl_script = QLabel("📜 脚本:")
-        self.row3_layout.addWidget(lbl_script)
+        self.combo_scripts = QComboBox()
+        self.combo_scripts.setFixedHeight(26)
+        self.combo_scripts.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.row3_layout.addWidget(self.combo_scripts)
 
-        self.btn_add_script = QPushButton("➕ 新建脚本")
-        self.btn_add_script.setStyleSheet("background-color: #0088cc; color: white; font-weight: bold;")
-        self.btn_add_script.clicked.connect(self._on_add_script_clicked)
-        self.row3_layout.addWidget(self.btn_add_script)
+        self.btn_new_script = QPushButton("➕ 新建")
+        self.btn_new_script.setFixedHeight(26)
+        self.btn_new_script.clicked.connect(self._on_new_script_clicked)
+        self.row3_layout.addWidget(self.btn_new_script)
 
-        self.scripts_scroll = QScrollArea()
-        self.scripts_scroll.setFixedHeight(34)
-        self.scripts_scroll.setWidgetResizable(True)
-        self.scripts_scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }")
+        self.btn_edit_script = QPushButton("✏️ 编辑")
+        self.btn_edit_script.setFixedHeight(26)
+        self.btn_edit_script.clicked.connect(self._on_edit_script_clicked)
+        self.row3_layout.addWidget(self.btn_edit_script)
 
-        self.scripts_container = QWidget()
-        self.scripts_container.setStyleSheet("background: transparent;")
-        self.scripts_layout = QHBoxLayout(self.scripts_container)
-        self.scripts_layout.setContentsMargins(0, 0, 0, 0)
-        self.scripts_layout.setSpacing(6)
-        self.scripts_layout.addStretch()
+        self.btn_del_script = QPushButton("❌ 删除")
+        self.btn_del_script.setFixedHeight(26)
+        self.btn_del_script.clicked.connect(self._on_del_script_clicked)
+        self.row3_layout.addWidget(self.btn_del_script)
 
-        self.scripts_scroll.setWidget(self.scripts_container)
-        self.row3_layout.addWidget(self.scripts_scroll)
+        # 开始监控 / 开始操作 大小固定且一致 (85x26)
+        self.btn_monitor = QPushButton("▶ 开始监控")
+        self.btn_monitor.setFixedSize(85, 26)
+        self.btn_monitor.setStyleSheet("background-color: #2e9a58; color: white; font-weight: bold;")
+        self.btn_monitor.clicked.connect(self._toggle_monitor)
+        self.row3_layout.addWidget(self.btn_monitor)
+
+        self.btn_grille = QPushButton("▶ 开始操作")
+        self.btn_grille.setFixedSize(85, 26)
+        self.btn_grille.setStyleSheet("background-color: #0088cc; color: white; font-weight: bold;")
+        self.btn_grille.clicked.connect(self._toggle_grille)
+        self.row3_layout.addWidget(self.btn_grille)
 
         card_layout.addLayout(self.row3_layout)
 
-        line3 = QFrame()
-        line3.setFrameShape(QFrame.HLine)
-        line3.setStyleSheet("border-top: 1px solid rgba(255, 255, 255, 0.1); border-bottom: none;")
-        card_layout.addWidget(line3)
-
-        # ---------- 第 4 排：监控与操作控制栏 ----------
-        self.row4_layout = QHBoxLayout()
-        self.row4_layout.setContentsMargins(0, 0, 0, 0)
-        self.row4_layout.setSpacing(6)
-
-        self.btn_toggle_monitor = QPushButton("▶ 开始监控")
-        self.btn_toggle_monitor.setStyleSheet("background-color: #2e9a58; color: white;")
-        self.btn_toggle_monitor.clicked.connect(self._toggle_monitoring)
-        self.row4_layout.addWidget(self.btn_toggle_monitor)
-
-        self.btn_toggle_grille = QPushButton("▶ 开始操作")
-        self.btn_toggle_grille.setStyleSheet("background-color: #0088cc; color: white;")
-        self.btn_toggle_grille.clicked.connect(self._toggle_operating)
-        self.row4_layout.addWidget(self.btn_toggle_grille)
-
-        self.lbl_status = QLabel("状态: 待命")
-        self.lbl_status.setStyleSheet("color: #a0a0a0; font-weight: bold;")
-        self.row4_layout.addWidget(self.lbl_status)
-
-        self.row4_layout.addStretch()
-
-        self.btn_close = QPushButton("❌")
-        self.btn_close.setFixedSize(26, 26)
-        self.btn_close.setStyleSheet("QPushButton { background-color: #ff3333; color: white; border: none; border-radius: 4px; font-weight: bold; } QPushButton:hover { background-color: #ff6666; }")
-        self.btn_close.clicked.connect(self.close)
-        self.row4_layout.addWidget(self.btn_close)
-
-        card_layout.addLayout(self.row4_layout)
         main_layout.addWidget(self.main_card)
 
-        # 启动后台服务线程
-        if FLASK_AVAILABLE:
-            self.web_thread = WebServerThread(self)
-            self.web_thread.action_requested.connect(self._on_web_action)
-            self.web_thread.start()
-
+        # 初始化后台线程与配置数据
         self.ocr_init_thread = OCRInitThread()
         self.ocr_init_thread.ocr_ready.connect(self._on_ocr_ready)
         self.ocr_init_thread.start()
 
+        if FLASK_AVAILABLE:
+            self.web_thread = WebServerThread(self)
+            self.web_thread.action_requested.connect(self._handle_web_action)
+            self.web_thread.start()
+
         self.load_config()
-        self._refresh_script_ui()
 
-        screen = QApplication.primaryScreen().geometry()
-        self.move((screen.width() - self.width()) // 2, 20)
+    def _on_ocr_ready(self, reader):
+        self.reader = reader
+        if self.monitor_thread:
+            self.monitor_thread.set_reader(reader)
 
-    # ==================== 脚本管理与右键菜单实现 ====================
-    def _refresh_script_ui(self):
-        """刷新脚本布局，仅显示脚本名称按钮（不再显示齿轮和删除X图标）"""
-        while self.scripts_layout.count() > 0:
-            item = self.scripts_layout.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self._drag_pos = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+            event.accept()
 
-        for idx, script in enumerate(self.scripts):
-            btn = QPushButton(script.get("name", f"脚本{idx+1}"))
-            
-            is_running = (idx < len(self.script_threads) and 
-                          self.script_threads[idx] is not None and 
-                          self.script_threads[idx].isRunning())
-            
-            if is_running:
-                btn.setStyleSheet("QPushButton { background-color: #ffaa00; color: black; font-weight: bold; border-radius: 4px; padding: 2px 8px; }")
-            else:
-                btn.setStyleSheet("QPushButton { background-color: rgba(0, 136, 204, 0.7); color: white; font-weight: bold; border-radius: 4px; padding: 2px 8px; } QPushButton:hover { background-color: #0088cc; }")
+    def mouseMoveEvent(self, event):
+        if event.buttons() & Qt.LeftButton and self._drag_pos:
+            self.move(event.globalPosition().toPoint() - self._drag_pos)
+            event.accept()
 
-            # 设置右键快捷菜单政策（取代旁边的图标）
-            btn.setContextMenuPolicy(Qt.CustomContextMenu)
-            btn.customContextMenuRequested.connect(lambda pos, s_idx=idx, b=btn: self._show_script_context_menu(pos, s_idx, b))
-            
-            # 左键点击直接触发或停止脚本运行
-            btn.clicked.connect(lambda _, s_idx=idx: self._toggle_script_run(s_idx))
+    def mouseReleaseEvent(self, event):
+        self._drag_pos = None
 
-            self.scripts_layout.addWidget(btn)
-
-        self.scripts_layout.addStretch()
-
-    def _show_script_context_menu(self, pos, script_idx, btn):
-        """在脚本名称按钮上右键调出的快捷菜单"""
-        menu = QMenu(self)
-        menu.setStyleSheet("""
-            QMenu {
-                background-color: #1a1a26;
-                color: white;
-                border: 1px solid rgba(255, 255, 255, 0.2);
-                border-radius: 4px;
-                padding: 4px;
-            }
-            QMenu::item {
-                padding: 6px 16px;
-                font-size: 11px;
-                font-weight: bold;
-                border-radius: 2px;
-            }
-            QMenu::item:selected {
-                background-color: #0088cc;
-                color: white;
-            }
-        """)
-
-        act_edit = QAction("✏️ 修改", self)
-        act_delete = QAction("❌ 删除", self)
-
-        act_edit.triggered.connect(lambda: self._edit_script(script_idx))
-        act_delete.triggered.connect(lambda: self._delete_script(script_idx))
-
-        menu.addAction(act_edit)
-        menu.addAction(act_delete)
-
-        menu.exec(btn.mapToGlobal(pos))
-
-    def _on_add_script_clicked(self):
-        dlg = ScriptEditorDialog(parent=self)
-        if dlg.exec() == QDialog.Accepted:
-            data = dlg.get_script_data()
-            self.scripts.append(data)
-            self.script_threads.append(None)
-            self._refresh_script_ui()
-            self.save_config()
-
-    def _edit_script(self, idx):
-        if 0 <= idx < len(self.scripts):
-            dlg = ScriptEditorDialog(script_data=self.scripts[idx], parent=self)
-            if dlg.exec() == QDialog.Accepted:
-                self.scripts[idx] = dlg.get_script_data()
-                self._refresh_script_ui()
-                self.save_config()
-
-    def _delete_script(self, idx):
-        if 0 <= idx < len(self.scripts):
-            if idx < len(self.script_threads) and self.script_threads[idx]:
-                self.script_threads[idx].stop()
-                self.script_threads[idx].wait()
-                self.script_threads.pop(idx)
-            else:
-                if idx < len(self.script_threads):
-                    self.script_threads.pop(idx)
-            self.scripts.pop(idx)
-            self._refresh_script_ui()
-            self.save_config()
-
-    def _toggle_script_run(self, idx):
-        if idx >= len(self.scripts): return
-        while len(self.script_threads) < len(self.scripts):
-            self.script_threads.append(None)
-
-        thread = self.script_threads[idx]
-        if thread and thread.isRunning():
-            thread.stop()
-            thread.wait()
-            self.script_threads[idx] = None
-        else:
-            runner = ScriptRunnerThread(self.scripts[idx], self)
-            runner.finished.connect(lambda: self._on_script_finished(idx))
-            self.script_threads[idx] = runner
-            runner.start()
-        self._refresh_script_ui()
-
-    def _on_script_finished(self, idx):
-        if idx < len(self.script_threads):
-            self.script_threads[idx] = None
-        self._refresh_script_ui()
-
-    # ==================== 配置与数据持久化 ====================
-    def save_config(self):
-        boxes_cfg = []
-        for b in self.boxes:
-            boxes_cfg.append({
-                "id": b.box_id,
-                "x": b.capture_x,
-                "y": b.capture_y,
-                "w": b.capture_w,
-                "h": b.capture_h,
-                "name": b.name,
-                "lower": b.lower,
-                "mid_val": b.mid_val,
-                "mid_op": getattr(b, "mid_op", ">"),
-                "upper": b.upper,
-                "decimal_places": getattr(b, "decimal_places", 0)
-            })
-        data = {
-            "interval": self.spin_interval.value(),
-            "log_count": self.spin_count.value(),
-            "log_interval": self.spin_log_interval.value(),
-            "ocr_params": self.ocr_params,
-            "boxes": boxes_cfg,
-            "scripts": self.scripts
-        }
-        try:
-            with open(self.config_file, "w", encoding="utf-8") as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
-        except Exception as e:
-            print(f"保存配置失败: {e}")
-
-    def load_config(self):
-        if not os.path.exists(self.config_file): return
-        try:
-            with open(self.config_file, "r", encoding="utf-8") as f:
-                data = json.load(f)
-
-            self.spin_interval.setValue(data.get("interval", 1.0))
-            self.spin_count.setValue(data.get("log_count", 30))
-            self.spin_log_interval.setValue(data.get("log_interval", 1.0))
-            self.ocr_params = data.get("ocr_params", self.ocr_params)
-            self.scripts = data.get("scripts", [])
-
-            for b_cfg in data.get("boxes", []):
-                box = OverlayRegionWidget(
-                    box_id=b_cfg.get("id", len(self.boxes)+1),
-                    x=b_cfg.get("x", 100),
-                    y=b_cfg.get("y", 100),
-                    w=b_cfg.get("w", 100),
-                    h=b_cfg.get("h", 50),
-                    name=b_cfg.get("name", "区域"),
-                    lower=b_cfg.get("lower", 0.0),
-                    mid_val=b_cfg.get("mid_val", 50.0),
-                    upper=b_cfg.get("upper", 100.0),
-                    decimal_places=b_cfg.get("decimal_places", 0),
-                    mid_op=b_cfg.get("mid_op", ">")
-                )
-                box.delete_requested.connect(self._remove_box)
-                box.show()
-                self.boxes.append(box)
-
-            self._refresh_script_ui()
-        except Exception as e:
-            print(f"加载配置失败: {e}")
-
-    def load_users(self):
-        if os.path.exists(self.users_file):
-            try:
-                with open(self.users_file, "r", encoding="utf-8") as f:
-                    return json.load(f)
-            except: pass
-        return {"admin": "admin"}
-
-    def save_users(self):
-        try:
-            with open(self.users_file, "w", encoding="utf-8") as f:
-                json.dump(self.users, f, ensure_ascii=False, indent=2)
-        except Exception as e:
-            print(f"保存用户数据失败: {e}")
-
-    # ==================== 交互动作与状态控制 ====================
     def _on_interval_changed(self, val):
         if self.monitor_thread:
             self.monitor_thread.update_params(interval=val)
@@ -2590,179 +2388,303 @@ class GlobalControlPanel(QWidget):
                 self.monitor_thread.update_params(ocr_params=self.ocr_params)
 
     def _on_add_box_clicked(self):
-        self.hide()
-        time.sleep(0.2)
         self.picker = CoordinatePicker()
-        def on_selected(x, y, w, h):
-            self.show()
+        def on_picked(x, y, w, h):
             if w > 0 and h > 0:
-                box_id = max([b.box_id for b in self.boxes], default=0) + 1
+                box_id = len(self.boxes) + 1
                 box = OverlayRegionWidget(
                     box_id=box_id, x=x, y=y, w=w, h=h,
-                    name=f"区域{box_id}", lower=0.0, mid_val=50.0, upper=100.0, decimal_places=0, mid_op=">"
+                    name=f"区域{box_id}", lower=0.0, mid_val=50.0, upper=100.0,
+                    decimal_places=0, mid_op='>'
                 )
-                box.delete_requested.connect(self._remove_box)
+                box.log_interval_min = self.spin_log_interval.value()
+                box.set_max_log_count(self.spin_count.value())
+                box.delete_requested.connect(self._on_box_delete)
+                box.alarm_cleared.connect(self._check_all_alarms)
+                box.mute_toggled.connect(self._check_all_alarms)
                 box.set_edit_mode(self.is_editing)
+                box.set_panel_hidden(self.boxes_panel_hidden)
                 box.show()
                 self.boxes.append(box)
-        self.picker.coord_selected.connect(on_selected)
+                self.save_config()
+
+        self.picker.coord_selected.connect(on_picked)
         self.picker.showFullScreen()
 
-    def _remove_box(self, box_widget):
-        if box_widget in self.boxes:
-            self.boxes.remove(box_widget)
-            box_widget.close()
+    def _on_box_delete(self, box):
+        if box in self.boxes:
+            self.boxes.remove(box)
+            box.close()
+            self._check_all_alarms()
+            self.save_config()
 
-    def _toggle_edit_pos(self, checked):
+    def _on_edit_pos_toggled(self, checked):
         self.is_editing = checked
         for b in self.boxes:
-            b.set_edit_mode(self.is_editing)
+            b.set_edit_mode(checked)
 
-    def _toggle_hide_boxes(self):
-        self.boxes_panel_hidden = not self.boxes_panel_hidden
+    def _on_hide_boxes_toggled(self, checked):
+        self.boxes_panel_hidden = checked
         for b in self.boxes:
-            b.set_panel_hidden(self.boxes_panel_hidden)
-        self.btn_hide_boxes.setText("👁 显示" if self.boxes_panel_hidden else "🙈 隐藏")
+            b.set_panel_hidden(checked)
 
-    def _toggle_monitoring(self):
-        self.monitoring = not self.monitoring
-        if self.monitoring:
-            self.btn_toggle_monitor.setText("⏹ 停止监控")
-            self.btn_toggle_monitor.setStyleSheet("background-color: #ff3333; color: white;")
-            self.lbl_status.setText("状态: 监控中")
-
+    def _toggle_monitor(self):
+        if not self.monitoring:
+            self.monitoring = True
+            self.btn_monitor.setText("⏹ 停止监控")
+            self.btn_monitor.setStyleSheet("background-color: #b03a3a; color: white; font-weight: bold;")
+            
             screen = QApplication.primaryScreen()
             scale = screen.devicePixelRatio() if screen else 1.0
 
-            self.monitor_thread = MonitorThread(
-                boxes=self.boxes,
-                interval=self.spin_interval.value(),
-                ocr_params=self.ocr_params,
-                scale=scale
-            )
-            self.monitor_thread.set_reader(self.reader)
+            self.monitor_thread = MonitorThread(self.boxes, interval=self.spin_interval.value(), ocr_params=self.ocr_params, scale=scale)
+            if self.reader:
+                self.monitor_thread.set_reader(self.reader)
             self.monitor_thread.value_updated.connect(self._on_value_updated)
             self.monitor_thread.start()
         else:
-            self.btn_toggle_monitor.setText("▶ 开始监控")
-            self.btn_toggle_monitor.setStyleSheet("background-color: #2e9a58; color: white;")
-            self.lbl_status.setText("状态: 待命")
+            self.monitoring = False
+            self.btn_monitor.setText("▶ 开始监控")
+            self.btn_monitor.setStyleSheet("background-color: #2e9a58; color: white; font-weight: bold;")
             if self.monitor_thread:
                 self.monitor_thread.stop()
                 self.monitor_thread.wait()
                 self.monitor_thread = None
-            self.alarm_player.stop()
 
-    def _toggle_operating(self):
-        self.operating = not self.operating
-        if self.operating:
-            self.btn_toggle_grille.setText("⏹ 停止操作")
-            self.btn_toggle_grille.setStyleSheet("background-color: #ff3333; color: white;")
+    def _toggle_grille(self):
+        if not self.operating:
+            idx = self.combo_scripts.currentIndex()
+            if idx < 0 or idx >= len(self.scripts):
+                return
+            self.operating = True
+            self.btn_grille.setText("⏹ 停止操作")
+            self.btn_grille.setStyleSheet("background-color: #cc3333; color: white; font-weight: bold;")
+            
+            script = self.scripts[idx]
+            runner = ScriptRunnerThread(script, parent=self)
+            self.script_threads.append(runner)
+            runner.start()
         else:
-            self.btn_toggle_grille.setText("▶ 开始操作")
-            self.btn_toggle_grille.setStyleSheet("background-color: #0088cc; color: white;")
+            self.operating = False
+            self.btn_grille.setText("▶ 开始操作")
+            self.btn_grille.setStyleSheet("background-color: #0088cc; color: white; font-weight: bold;")
+            for st in self.script_threads:
+                if st.isRunning():
+                    st.stop()
+                    st.wait()
+            self.script_threads.clear()
 
     def _on_f12_pressed(self):
-        self._toggle_monitoring()
-
-    def _on_ocr_ready(self, reader):
-        self.reader = reader
-        if self.monitor_thread:
-            self.monitor_thread.set_reader(reader)
+        self._toggle_monitor()
 
     def _on_value_updated(self, box, time_str, val, raw_text):
         box.update_result_display(val, raw_text)
         box.add_log_val(time_str, val, raw_text)
 
-        is_alarm = False
-        is_warning = False
-
         if val is not None:
             if val > box.upper or val < box.lower:
-                is_alarm = True
-            elif box.check_mid_condition(val):
-                is_warning = True
-
-        box.set_warning_state(is_warning)
-
-        if is_alarm:
-            if not box.user_cleared_alarm:
-                box.set_alarm_state(True)
-                if not box.is_muted:
-                    self.alarm_player.play()
-            else:
-                if box.cleared_val is not None and abs(val - box.cleared_val) > 1e-4:
-                    box.user_cleared_alarm = False
+                if box.user_cleared_alarm and box.cleared_val is not None:
+                    if abs(val - box.cleared_val) > 1e-4:
+                        box.user_cleared_alarm = False
+                        box.set_alarm_state(True)
+                else:
                     box.set_alarm_state(True)
-                    if not box.is_muted:
-                        self.alarm_player.play()
-        else:
-            box.user_cleared_alarm = False
-            box.cleared_val = None
-            box.set_alarm_state(False)
+            else:
+                box.user_cleared_alarm = False
+                box.cleared_val = None
+                box.set_alarm_state(False)
 
+            is_warn = box.check_mid_condition(val)
+            box.set_warning_state(is_warn)
+        else:
+            box.set_alarm_state(False)
+            box.set_warning_state(False)
+
+        self._check_all_alarms()
+
+    def _check_all_alarms(self):
         any_alarm = any(b.is_alarm and not b.is_muted for b in self.boxes)
-        if not any_alarm:
+        if any_alarm:
+            self.alarm_player.play()
+        else:
             self.alarm_player.stop()
 
-    def _on_web_action(self, action, box_id, payload):
+    def _on_new_script_clicked(self):
+        dlg = ScriptEditorDialog(parent=self)
+        if dlg.exec() == QDialog.Accepted:
+            sdata = dlg.get_script_data()
+            self.scripts.append(sdata)
+            self.update_script_combo()
+            self.combo_scripts.setCurrentIndex(len(self.scripts) - 1)
+            self.save_config()
+
+    def _on_edit_script_clicked(self):
+        idx = self.combo_scripts.currentIndex()
+        if 0 <= idx < len(self.scripts):
+            dlg = ScriptEditorDialog(script_data=self.scripts[idx], parent=self)
+            if dlg.exec() == QDialog.Accepted:
+                self.scripts[idx] = dlg.get_script_data()
+                self.update_script_combo()
+                self.combo_scripts.setCurrentIndex(idx)
+                self.save_config()
+
+    def _on_del_script_clicked(self):
+        idx = self.combo_scripts.currentIndex()
+        if 0 <= idx < len(self.scripts):
+            del self.scripts[idx]
+            self.update_script_combo()
+            self.save_config()
+
+    def update_script_combo(self):
+        self.combo_scripts.clear()
+        for s in self.scripts:
+            self.combo_scripts.addItem(s.get("name", "未命名脚本"))
+
+    def _on_save_config_clicked(self):
+        self.save_config()
+
+    def _on_load_config_clicked(self):
+        self.load_config()
+
+    def save_config(self):
+        boxes_data = []
+        for b in self.boxes:
+            boxes_data.append({
+                "id": b.box_id,
+                "x": b.capture_x,
+                "y": b.capture_y,
+                "w": b.capture_w,
+                "h": b.capture_h,
+                "name": b.name,
+                "lower": b.lower,
+                "mid_val": b.mid_val,
+                "mid_op": getattr(b, 'mid_op', '>'),
+                "upper": b.upper,
+                "decimal_places": getattr(b, 'decimal_places', 0)
+            })
+        data = {
+            "interval": self.spin_interval.value(),
+            "max_logs": self.spin_count.value(),
+            "log_interval": self.spin_log_interval.value(),
+            "ocr_params": self.ocr_params,
+            "boxes": boxes_data,
+            "scripts": self.scripts
+        }
+        try:
+            with open(self.config_file, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            print(f"保存配置失败: {e}")
+
+    def load_config(self):
+        if not os.path.exists(self.config_file):
+            return
+        try:
+            with open(self.config_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            
+            self.spin_interval.setValue(data.get("interval", 1.0))
+            self.spin_count.setValue(data.get("max_logs", 30))
+            self.spin_log_interval.setValue(data.get("log_interval", 1.0))
+            self.ocr_params = data.get("ocr_params", self.ocr_params)
+
+            for b in list(self.boxes):
+                b.close()
+            self.boxes.clear()
+
+            for bdata in data.get("boxes", []):
+                box = OverlayRegionWidget(
+                    box_id=bdata.get("id", len(self.boxes) + 1),
+                    x=bdata.get("x", 100),
+                    y=bdata.get("y", 100),
+                    w=bdata.get("w", 120),
+                    h=bdata.get("h", 40),
+                    name=bdata.get("name", "区域"),
+                    lower=bdata.get("lower", 0.0),
+                    mid_val=bdata.get("mid_val", 50.0),
+                    upper=bdata.get("upper", 100.0),
+                    decimal_places=bdata.get("decimal_places", 0),
+                    mid_op=bdata.get("mid_op", '>')
+                )
+                box.log_interval_min = self.spin_log_interval.value()
+                box.set_max_log_count(self.spin_count.value())
+                box.delete_requested.connect(self._on_box_delete)
+                box.alarm_cleared.connect(self._check_all_alarms)
+                box.mute_toggled.connect(self._check_all_alarms)
+                box.show()
+                self.boxes.append(box)
+
+            self.scripts = data.get("scripts", [])
+            self.update_script_combo()
+
+        except Exception as e:
+            print(f"加载配置失败: {e}")
+
+    def _handle_web_action(self, action, box_id, payload):
         if action == 'toggle_monitor':
-            self._toggle_monitoring()
+            self._toggle_monitor()
         elif action == 'toggle_grille':
-            self._toggle_operating()
+            self._toggle_grille()
         elif action == 'exit_app':
-            QApplication.quit()
+            self.close_app()
+        elif action == 'clear_alarm':
+            for b in self.boxes:
+                if b.box_id == box_id:
+                    b._on_clear_alarm()
+                    break
+        elif action == 'toggle_mute':
+            for b in self.boxes:
+                if b.box_id == box_id:
+                    b._toggle_mute()
+                    break
+        elif action == 'set_limits':
+            for b in self.boxes:
+                if b.box_id == box_id:
+                    b.spin_lower.setValue(float(payload.get('lower', b.lower)))
+                    b.combo_mid_op.setCurrentText(payload.get('mid_op', b.mid_op))
+                    b.spin_mid.setValue(float(payload.get('mid_val', b.mid_val)))
+                    b.spin_upper.setValue(float(payload.get('upper', b.upper)))
+                    b.spin_dec.setValue(int(payload.get('decimal_places', b.decimal_places)))
+                    break
         elif action == 'set_compare_min':
-            self.compare_interval_min = payload.get('compare_min', 5.0)
-        elif box_id != -1:
-            target_box = next((b for b in self.boxes if b.box_id == box_id), None)
-            if target_box:
-                if action == 'clear_alarm':
-                    target_box._on_clear_alarm()
-                elif action == 'toggle_mute':
-                    target_box._toggle_mute()
-                elif action == 'set_limits':
-                    try:
-                        target_box.spin_lower.setValue(float(payload.get('lower', target_box.lower)))
-                        target_box.combo_mid_op.setCurrentText(str(payload.get('mid_op', target_box.mid_op)))
-                        target_box.spin_mid.setValue(float(payload.get('mid_val', target_box.mid_val)))
-                        target_box.spin_upper.setValue(float(payload.get('upper', target_box.upper)))
-                        target_box.spin_dec.setValue(int(payload.get('decimal_places', target_box.decimal_places)))
-                    except Exception as e:
-                        print(f"设置阈值出错: {e}")
+            self.compare_interval_min = float(payload.get('compare_min', 5.0))
 
-    def mousePressEvent(self, event):
-        if event.button() == Qt.LeftButton:
-            self._drag_pos = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
-            event.accept()
+    def load_users(self):
+        if os.path.exists(self.users_file):
+            try:
+                with open(self.users_file, "r", encoding="utf-8") as f:
+                    return json.load(f)
+            except Exception: pass
+        return {"admin": "123456"}
 
-    def mouseMoveEvent(self, event):
-        if event.buttons() & Qt.LeftButton and self._drag_pos is not None:
-            self.move(event.globalPosition().toPoint() - self._drag_pos)
-            event.accept()
+    def save_users(self):
+        try:
+            with open(self.users_file, "w", encoding="utf-8") as f:
+                json.dump(self.users, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            print(f"保存用户失败: {e}")
 
-    def closeEvent(self, event):
-        if self.f12_listener:
-            self.f12_listener.stop()
-            self.f12_listener.wait()
-        if self.monitor_thread:
+    def close_app(self):
+        if self.monitor_thread and self.monitor_thread.isRunning():
             self.monitor_thread.stop()
             self.monitor_thread.wait()
+        for st in self.script_threads:
+            if st.isRunning():
+                st.stop()
+                st.wait()
         if self.web_thread:
             self.web_thread.stop()
-        for t in self.script_threads:
-            if t and t.isRunning():
-                t.stop()
-                t.wait()
+        self.alarm_player.stop()
+        self.f12_listener.stop()
         for b in self.boxes:
             b.close()
-        event.accept()
+        self.close()
+        QApplication.quit()
 
 
-# ==================== 程序主入口 ====================
 if __name__ == "__main__":
     app = QApplication(sys.argv)
-    app.setQuitOnLastWindowClosed(True)
     panel = GlobalControlPanel()
     panel.show()
+    panel.move(100, 100)
     sys.exit(app.exec())
