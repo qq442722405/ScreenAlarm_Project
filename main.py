@@ -16,11 +16,12 @@ from PySide6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel, QLineEdit, QDoubleSpinBox, QSpinBox,
     QListWidget, QCheckBox, QAbstractSpinBox, QFrame, QSizePolicy,
-    QDialog, QFormLayout, QDialogButtonBox, QComboBox
+    QDialog, QFormLayout, QDialogButtonBox, QComboBox, QTableWidget,
+    QHeaderView, QMenu, QScrollArea
 )
 from PySide6.QtCore import Qt, QTimer, QThread, Signal, QPoint, QRect
 from PySide6.QtGui import (
-    QColor, QBrush, QFont, QPainter, QPen, QPixmap, QIcon, QImage
+    QColor, QBrush, QFont, QPainter, QPen, QPixmap, QIcon, QImage, QAction
 )
 
 import mss
@@ -50,6 +51,19 @@ def get_local_ip():
         return ip
     except Exception:
         return "127.0.0.1"
+
+
+# ==================== Windows 模拟鼠标点击 ====================
+def perform_click(x, y):
+    try:
+        user32 = ctypes.windll.user32
+        user32.SetCursorPos(int(x), int(y))
+        time.sleep(0.02)
+        user32.mouse_event(0x0002, 0, 0, 0, 0)  # MOUSEEVENTF_LEFTDOWN
+        time.sleep(0.05)
+        user32.mouse_event(0x0004, 0, 0, 0, 0)  # MOUSEEVENTF_LEFTUP
+    except Exception as e:
+        print(f"点击指令执行失败: {e}")
 
 
 # ==================== 自定义无冗余 .00 的 SpinBox ====================
@@ -86,6 +100,51 @@ class GlobalF12Listener(QThread):
                 self.f12_triggered.emit()
             was_pressed = is_pressed
             self.msleep(50)
+
+
+# ==================== 自动化脚本后台执行线程 ====================
+class ScriptRunnerThread(QThread):
+    def __init__(self, script, parent=None):
+        super().__init__(parent)
+        self.script = script
+        self.running = True
+
+    def stop(self):
+        self.running = False
+
+    def run(self):
+        steps = self.script.get("steps", [])
+        if not steps:
+            return
+
+        idx = 0
+        while self.running:
+            if idx < 0 or idx >= len(steps):
+                break
+
+            step = steps[idx]
+            x = step.get("x", -1)
+            y = step.get("y", -1)
+            delay = step.get("delay", 1.0)
+            jump = step.get("jump", 0)
+
+            # 如果设置了有效点击位置，则执行点击
+            if x >= 0 and y >= 0 and self.running:
+                perform_click(x, y)
+
+            # 执行步骤延迟
+            end_time = time.time() + max(0.01, delay)
+            while self.running and time.time() < end_time:
+                self.msleep(50)
+
+            if not self.running:
+                break
+
+            # 处理步骤跳转逻辑 (0 表示顺序执行下一步，大于0表示跳转到指定步骤)
+            if jump > 0 and jump <= len(steps):
+                idx = jump - 1
+            else:
+                idx += 1
 
 
 # ==================== 报警声音播放器 ====================
@@ -363,6 +422,233 @@ class OCRAdjustDialog(QDialog):
             'thresh_block': block,
             'thresh_c': self.spin_c.value()
         }
+
+
+# ==================== 单点点击位置拾取器 ====================
+class SingleCoordPicker(QWidget):
+    coord_selected = Signal(int, int)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowFlags(Qt.WindowStaysOnTopHint | Qt.FramelessWindowHint | Qt.Tool)
+        self.setCursor(Qt.CrossCursor)
+        screens = QApplication.screens()
+        total_rect = screens[0].geometry()
+        for s in screens[1:]:
+            total_rect = total_rect.united(s.geometry())
+        self.setGeometry(total_rect)
+
+        self.screen_pixmap = QPixmap(total_rect.size())
+        painter = QPainter(self.screen_pixmap)
+        for screen in screens:
+            painter.drawPixmap(screen.geometry().topLeft(), screen.grabWindow(0))
+        painter.end()
+
+        self.label = QLabel("🎯 单击鼠标左键拾取点击坐标 (ESC 取消)", self)
+        self.label.setStyleSheet("color: white; background: rgba(0,0,0,220); padding: 8px 16px; border-radius: 6px; font-size: 13px; font-weight: bold;")
+        self.label.adjustSize()
+        self.label.move((self.width() - self.label.width()) // 2, self.height() - 80)
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.drawPixmap(self.rect(), self.screen_pixmap)
+        painter.fillRect(self.rect(), QColor(0, 0, 0, 80))
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            pos = event.position().toPoint()
+            self.coord_selected.emit(pos.x(), pos.y())
+            self.close()
+
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key_Escape:
+            self.coord_selected.emit(-1, -1)
+            self.close()
+
+
+# ==================== 详细脚本配置弹窗 ====================
+class ScriptEditorDialog(QDialog):
+    def __init__(self, script_data=None, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("⚙️ 详细脚本配置")
+        self.resize(520, 360)
+        self.setWindowFlags(Qt.WindowStaysOnTopHint | Qt.Tool)
+        self.setStyleSheet("""
+            QDialog { background-color: #1a1a26; color: white; }
+            QLabel { color: #e0e0e0; font-size: 11px; font-weight: bold; }
+            QLineEdit {
+                background-color: rgba(26, 26, 38, 0.8);
+                color: #00ff8c;
+                border: 1px solid rgba(255, 255, 255, 0.2);
+                border-radius: 4px;
+                padding: 4px;
+                font-weight: bold;
+            }
+            QTableWidget {
+                background-color: rgba(10, 10, 15, 0.9);
+                color: white;
+                gridline-color: rgba(255, 255, 255, 0.1);
+                border: 1px solid rgba(255, 255, 255, 0.2);
+                border-radius: 4px;
+            }
+            QHeaderView::section {
+                background-color: rgba(43, 45, 66, 0.8);
+                color: #00ff8c;
+                font-size: 10px;
+                font-weight: bold;
+                border: 1px solid rgba(255, 255, 255, 0.1);
+            }
+            QPushButton {
+                background-color: rgba(43, 45, 66, 0.8);
+                color: white;
+                border: 1px solid rgba(255, 255, 255, 0.2);
+                border-radius: 4px;
+                padding: 4px 8px;
+                font-size: 11px;
+                font-weight: bold;
+            }
+            QPushButton:hover { background-color: rgba(61, 64, 91, 0.9); }
+        """)
+
+        self.script_data = script_data or {"name": "新脚本", "steps": []}
+
+        layout = QVBoxLayout(self)
+
+        name_layout = QHBoxLayout()
+        name_layout.addWidget(QLabel("📝 脚本名字:"))
+        self.edit_name = QLineEdit(self.script_data.get("name", "新脚本"))
+        name_layout.addWidget(self.edit_name)
+        layout.addLayout(name_layout)
+
+        self.table = QTableWidget()
+        self.table.setColumnCount(5)
+        self.table.setHorizontalHeaderLabels(["步骤", "点击位置 (X, Y)", "拾取", "延迟(秒)", "跳转步骤"])
+        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        layout.addWidget(self.table)
+
+        btn_layout = QHBoxLayout()
+        btn_add = QPushButton("➕ 添加步骤")
+        btn_add.clicked.connect(self._add_step_row)
+        btn_del = QPushButton("❌ 删除步骤")
+        btn_del.clicked.connect(self._del_step_row)
+        btn_layout.addWidget(btn_add)
+        btn_layout.addWidget(btn_del)
+        btn_layout.addStretch()
+        layout.addLayout(btn_layout)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(self._on_accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+        steps = self.script_data.get("steps", [])
+        if steps:
+            for s in steps:
+                self._add_step_row(s)
+        else:
+            self._add_step_row()
+
+    def _add_step_row(self, step=None):
+        if step is None or not isinstance(step, dict):
+            step = {"x": -1, "y": -1, "delay": 1.0, "jump": 0}
+
+        row = self.table.rowCount()
+        self.table.insertRow(row)
+
+        lbl_step = QLabel(f"第 {row + 1} 步")
+        lbl_step.setAlignment(Qt.AlignCenter)
+        self.table.setCellWidget(row, 0, lbl_step)
+
+        x_val = step.get("x", -1)
+        y_val = step.get("y", -1)
+        coord_str = f"({x_val}, {y_val})" if x_val >= 0 and y_val >= 0 else "未位置"
+        lbl_coord = QLabel(coord_str)
+        lbl_coord.setAlignment(Qt.AlignCenter)
+        lbl_coord.setStyleSheet("color: #00ff8c; font-weight: bold;")
+        self.table.setCellWidget(row, 1, lbl_coord)
+
+        btn_pick = QPushButton("🎯 拾取")
+        btn_pick.clicked.connect(lambda _, r=row: self._pick_coord_for_row(r))
+        self.table.setCellWidget(row, 2, btn_pick)
+
+        spin_delay = CleanDoubleSpinBox()
+        spin_delay.setRange(0.0, 9999.0)
+        spin_delay.setValue(step.get("delay", 1.0))
+        spin_delay.setAlignment(Qt.AlignCenter)
+        self.table.setCellWidget(row, 3, spin_delay)
+
+        spin_jump = QSpinBox()
+        spin_jump.setRange(0, 999)
+        spin_jump.setValue(step.get("jump", 0))
+        spin_jump.setAlignment(Qt.AlignCenter)
+        self.table.setCellWidget(row, 4, spin_jump)
+
+    def _pick_coord_for_row(self, row):
+        self.hide()
+        time.sleep(0.2)
+        picker = SingleCoordPicker()
+
+        def on_selected(x, y):
+            self.show()
+            if x >= 0 and y >= 0:
+                lbl = self.table.cellWidget(row, 1)
+                if lbl:
+                    lbl.setText(f"({x}, {y})")
+
+        picker.coord_selected.connect(on_selected)
+        picker.showFullScreen()
+
+    def _del_step_row(self):
+        curr_row = self.table.currentRow()
+        if curr_row >= 0:
+            self.table.removeRow(curr_row)
+            self._update_row_indices()
+
+    def _update_row_indices(self):
+        for r in range(self.table.rowCount()):
+            lbl = self.table.cellWidget(r, 0)
+            if lbl:
+                lbl.setText(f"第 {r + 1} 步")
+
+    def _on_accept(self):
+        name = self.edit_name.text().strip()
+        if not name:
+            name = "未命名脚本"
+
+        steps = []
+        for r in range(self.table.rowCount()):
+            lbl_coord = self.table.cellWidget(r, 1)
+            spin_delay = self.table.cellWidget(r, 3)
+            spin_jump = self.table.cellWidget(r, 4)
+
+            coord_text = lbl_coord.text() if lbl_coord else ""
+            x_val = -1
+            y_val = -1
+            if coord_text and "(" in coord_text and ")" in coord_text:
+                try:
+                    pts = coord_text.replace("(", "").replace(")", "").split(",")
+                    x_val = int(pts[0].strip())
+                    y_val = int(pts[1].strip())
+                except: pass
+
+            delay_val = spin_delay.value() if spin_delay else 1.0
+            jump_val = spin_jump.value() if spin_jump else 0
+
+            steps.append({
+                "x": x_val,
+                "y": y_val,
+                "delay": delay_val,
+                "jump": jump_val
+            })
+
+        self.script_data = {
+            "name": name,
+            "steps": steps
+        }
+        self.accept()
+
+    def get_script_data(self):
+        return self.script_data
 
 
 # ==================== 独立日志查看弹窗 ====================
@@ -1147,7 +1433,7 @@ MOBILE_HTML_TEMPLATE = """
         .btn-alarm-on { background: #2e9a58; color: #ffffff; border: 1px solid #3fb950; }
         .btn-alarm-off { background: #4a4d52; color: #cccccc; border: 1px solid #666666; }
 
-        /* 四、美化上涨与下降箭头样式 */
+        /* 上涨与下降箭头样式 */
         .trend-up {
             color: #ff4d4d;
             background: rgba(255, 77, 77, 0.15);
@@ -1203,7 +1489,6 @@ MOBILE_HTML_TEMPLATE = """
 <body>
     <div class="container">
         <div class="header">
-            <!-- 顶部可折叠控制内容 -->
             <div id="header-top-panel">
                 <div class="header-row1">
                     <div class="header-title-box">
@@ -1229,7 +1514,6 @@ MOBILE_HTML_TEMPLATE = """
                 </div>
             </div>
 
-            <!-- 控制按钮行，右侧带有退出图标 -->
             <div id="header-row3" class="header-row3" style="display: none;">
                 <button id="btn-monitor" class="btn-top" onclick="postAction('toggle_monitor', -1)">▶ 开始监控</button>
                 <button id="btn-grille" class="btn-top btn-grille" onclick="postAction('toggle_grille', -1)">▶ 开始操作</button>
@@ -1300,7 +1584,6 @@ MOBILE_HTML_TEMPLATE = """
             }
         }
 
-        /* 退出所有进程功能 */
         function exitApp() {
             if (confirm('确定要退出所有进程吗？')) {
                 postAction('exit_app', -1);
@@ -1418,7 +1701,6 @@ MOBILE_HTML_TEMPLATE = """
             } catch(e) {}
         }
 
-        /* 点击下限 预警 上限 小数点 只有一个保存按钮 */
         function updateLimits(boxId) {
             const lower = document.getElementById('lower-' + boxId).value;
             const mid_op = document.getElementById('mid_op-' + boxId).value;
@@ -1469,7 +1751,6 @@ MOBILE_HTML_TEMPLATE = """
                     diffHtml = `<span class="diff-text" style="font-size: 12px; color: #a0a0a0; margin-right: 3px;">${box.diff_text}</span>`;
                 }
 
-                /* 美化箭头输出：使用 ⬆ ⬇ 表示 */
                 if (box.trend === 'up') {
                     trendHtml = '<span class="trend-up">⬆</span>';
                 } else if (box.trend === 'down') {
@@ -1772,6 +2053,10 @@ class GlobalControlPanel(QWidget):
         self.setAttribute(Qt.WA_TranslucentBackground, True)
 
         self.boxes = []
+        self.scripts = []  # 存脚本数据: [{"name": "...", "steps": [...], "enabled": True}]
+        self.script_checkboxes = {}  # name -> QCheckBox
+        self.script_threads = []     # 运行中的脚本线程列表
+
         self.monitoring = False
         self.operating = False
         self.is_editing = False
@@ -1798,7 +2083,7 @@ class GlobalControlPanel(QWidget):
         main_layout.setContentsMargins(6, 6, 6, 6)
         main_layout.setSpacing(6)
 
-        self.setMaximumWidth(520)
+        self.setMaximumWidth(600)
 
         self.setStyleSheet("""
             QWidget { border-radius: 6px; }
@@ -1828,7 +2113,6 @@ class GlobalControlPanel(QWidget):
             QCheckBox { color: #00ff8c; font-weight: bold; font-size: 11px; }
         """)
 
-        # 合并一二三排在一个大的框体 (main_card) 中
         self.main_card = QFrame()
         self.main_card.setStyleSheet("QFrame { background-color: rgba(0, 0, 0, 0.85); border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 8px; }")
         card_layout = QVBoxLayout(self.main_card)
@@ -1925,22 +2209,43 @@ class GlobalControlPanel(QWidget):
         line2.setStyleSheet("border-top: 1px solid rgba(255, 255, 255, 0.1); border-bottom: none;")
         card_layout.addWidget(line2)
 
-        # ---------- 第 3 排：核心控制 ----------
+        # ---------- 第 3 排：核心控制 + 脚本展示与添加 ----------
         self.row3_layout = QHBoxLayout()
         self.row3_layout.setContentsMargins(0, 0, 0, 0)
         self.row3_layout.setSpacing(6)
 
         self.btn_start_monitor = QPushButton("▶ 开始监控")
-        self.btn_start_monitor.setFixedWidth(85)
+        self.btn_start_monitor.setFixedWidth(80)
         self.btn_start_monitor.setStyleSheet("background-color: #2e9a58; color: white; font-weight: bold;")
         self.btn_start_monitor.clicked.connect(self._toggle_monitor)
 
         self.btn_start_grille = QPushButton("▶ 开始操作")
-        self.btn_start_grille.setFixedWidth(85)
+        self.btn_start_grille.setFixedWidth(80)
         self.btn_start_grille.setStyleSheet("background-color: #0088cc; color: white; font-weight: bold;")
         self.btn_start_grille.clicked.connect(self._toggle_grille)
 
-        # 一、悬浮框：在开始操作的最右边加一个 X 按钮 用于退出关闭程序所有进程
+        # 开始操作右边的 + 号按钮，用于添加脚本
+        self.btn_add_script = QPushButton("➕")
+        self.btn_add_script.setFixedSize(26, 26)
+        self.btn_add_script.setStyleSheet("QPushButton { background-color: rgba(0, 255, 140, 0.2); color: #00ff8c; border: 1px solid #00ff8c; font-weight: bold; border-radius: 4px; } QPushButton:hover { background-color: rgba(0, 255, 140, 0.4); }")
+        self.btn_add_script.setToolTip("添加详细脚本")
+        self.btn_add_script.clicked.connect(self._open_add_script_dialog)
+
+        # 脚本勾选选项展示区 (支持水平滚动)
+        self.scroll_scripts = QScrollArea()
+        self.scroll_scripts.setFixedHeight(30)
+        self.scroll_scripts.setWidgetResizable(True)
+        self.scroll_scripts.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.scroll_scripts.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.scroll_scripts.setStyleSheet("QScrollArea { background: transparent; border: none; }")
+
+        self.scripts_container = QWidget()
+        self.scripts_container.setStyleSheet("background: transparent;")
+        self.scripts_layout = QHBoxLayout(self.scripts_container)
+        self.scripts_layout.setContentsMargins(2, 0, 2, 0)
+        self.scripts_layout.setSpacing(8)
+        self.scroll_scripts.setWidget(self.scripts_container)
+
         self.btn_exit_app = QPushButton("❌")
         self.btn_exit_app.setFixedSize(26, 26)
         self.btn_exit_app.setStyleSheet("QPushButton { background-color: #ff3333; color: white; border: none; border-radius: 4px; font-weight: bold; font-size: 11px; } QPushButton:hover { background-color: #ff6666; }")
@@ -1949,7 +2254,8 @@ class GlobalControlPanel(QWidget):
 
         self.row3_layout.addWidget(self.btn_start_monitor)
         self.row3_layout.addWidget(self.btn_start_grille)
-        self.row3_layout.addStretch()
+        self.row3_layout.addWidget(self.btn_add_script)
+        self.row3_layout.addWidget(self.scroll_scripts, 1)
         self.row3_layout.addWidget(self.btn_exit_app)
 
         card_layout.addLayout(self.row3_layout)
@@ -2022,6 +2328,59 @@ class GlobalControlPanel(QWidget):
             self.ocr_params = dlg.get_params()
             if self.monitor_thread:
                 self.monitor_thread.update_params(ocr_params=self.ocr_params)
+
+    # ---------- 脚本创建与管理 ----------
+    def _open_add_script_dialog(self, script_data=None):
+        dlg = ScriptEditorDialog(script_data, self)
+        if dlg.exec() == QDialog.Accepted:
+            new_data = dlg.get_script_data()
+            self._save_or_update_script(new_data)
+
+    def _save_or_update_script(self, script_data):
+        name = script_data.get("name")
+        existing = next((s for s in self.scripts if s["name"] == name), None)
+        if existing:
+            existing["steps"] = script_data["steps"]
+        else:
+            script_data["enabled"] = True
+            self.scripts.append(script_data)
+        
+        self._refresh_script_checkboxes()
+        self.save_config()
+
+    def _refresh_script_checkboxes(self):
+        # 清除旧的复选框
+        for cb in self.script_checkboxes.values():
+            cb.setParent(None)
+            cb.deleteLater()
+        self.script_checkboxes.clear()
+
+        # 根据 self.scripts 创建复选框
+        for s in self.scripts:
+            cb = QCheckBox(s["name"])
+            cb.setChecked(s.get("enabled", True))
+            cb.setContextMenuPolicy(Qt.CustomContextMenu)
+            cb.customContextMenuRequested.connect(lambda pos, sc=s: self._show_script_context_menu(sc, pos))
+            self.scripts_layout.addWidget(cb)
+            self.script_checkboxes[s["name"]] = cb
+
+    def _show_script_context_menu(self, script, pos):
+        menu = QMenu(self)
+        action_edit = QAction("✏️ 编辑脚本", self)
+        action_del = QAction("❌ 删除脚本", self)
+        
+        action_edit.triggered.connect(lambda: self._open_add_script_dialog(script))
+        action_del.triggered.connect(lambda: self._delete_script(script))
+        
+        menu.addAction(action_edit)
+        menu.addAction(action_del)
+        menu.exec(QCursor.pos())
+
+    def _delete_script(self, script):
+        if script in self.scripts:
+            self.scripts.remove(script)
+            self._refresh_script_checkboxes()
+            self.save_config()
 
     def _on_add_box_clicked(self):
         self.hide()
@@ -2098,9 +2457,25 @@ class GlobalControlPanel(QWidget):
         if self.operating:
             self.btn_start_grille.setText("⏹ 停止操作")
             self.btn_start_grille.setStyleSheet("background-color: #cc3333; color: white; font-weight: bold;")
+            
+            # 清理并发起选中的自动化脚本线程
+            self.script_threads.clear()
+            for s in self.scripts:
+                cb = self.script_checkboxes.get(s["name"])
+                if cb and cb.isChecked():
+                    t = ScriptRunnerThread(s)
+                    t.start()
+                    self.script_threads.append(t)
         else:
             self.btn_start_grille.setText("▶ 开始操作")
             self.btn_start_grille.setStyleSheet("background-color: #0088cc; color: white; font-weight: bold;")
+            
+            # 停止所有自动化脚本
+            for t in self.script_threads:
+                t.stop()
+            for t in self.script_threads:
+                t.wait()
+            self.script_threads.clear()
 
     def _on_value_updated(self, box, time_str, val, raw_text):
         box.update_result_display(val, raw_text)
@@ -2174,12 +2549,19 @@ class GlobalControlPanel(QWidget):
                 self.compare_interval_min = float(payload['compare_min'])
 
     def save_config(self):
+        # 保存复选框勾选状态到数据字典
+        for s in self.scripts:
+            cb = self.script_checkboxes.get(s["name"])
+            if cb:
+                s["enabled"] = cb.isChecked()
+
         data = {
             'interval': self.spin_interval.value(),
             'log_count': self.spin_count.value(),
             'log_interval': self.spin_log_interval.value(),
             'ocr_params': self.ocr_params,
             'compare_interval_min': self.compare_interval_min,
+            'scripts': self.scripts,
             'boxes': []
         }
         for b in self.boxes:
@@ -2217,6 +2599,9 @@ class GlobalControlPanel(QWidget):
             if 'ocr_params' in data: self.ocr_params = data['ocr_params']
             if 'compare_interval_min' in data: self.compare_interval_min = data['compare_interval_min']
 
+            self.scripts = data.get('scripts', [])
+            self._refresh_script_checkboxes()
+
             for b_data in data.get('boxes', []):
                 self._add_box(
                     x=b_data.get('x', 100),
@@ -2236,25 +2621,17 @@ class GlobalControlPanel(QWidget):
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
             self._drag_pos = event.globalPosition().toPoint() - self.pos()
-            event.accept()
 
     def mouseMoveEvent(self, event):
         if event.buttons() & Qt.LeftButton and self._drag_pos:
             self.move(event.globalPosition().toPoint() - self._drag_pos)
-            event.accept()
 
     def mouseReleaseEvent(self, event):
         self._drag_pos = None
 
 
-# ==================== 主入口程序 ====================
-def main():
+if __name__ == "__main__":
     app = QApplication(sys.argv)
     panel = GlobalControlPanel()
-    panel.move(100, 100)
     panel.show()
     sys.exit(app.exec())
-
-
-if __name__ == "__main__":
-    main()
