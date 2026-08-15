@@ -12,6 +12,14 @@ from datetime import datetime
 os.environ["QT_ENABLE_HIGHDPI_SCALING"] = "1"
 os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "1"
 
+try:
+    ctypes.windll.shcore.SetProcessDpiAwareness(2) # PROCESS_PER_MONITOR_DPI_AWARE
+except Exception:
+    try:
+        ctypes.windll.user32.SetProcessDPIAware()
+    except Exception:
+        pass
+
 from PySide6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel, QLineEdit, QDoubleSpinBox, QSpinBox,
@@ -493,7 +501,7 @@ class SingleCoordPicker(QWidget):
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
-            pos = event.position().toPoint()
+            pos = event.globalPosition().toPoint()
             self.coord_selected.emit(pos.x(), pos.y())
             self.close()
 
@@ -581,7 +589,8 @@ class ScriptEditorDialog(QDialog):
         act_delay = self.add_menu.addAction("⏱️ 延迟")
         act_jump = self.add_menu.addAction("🔀 跳转")
 
-        act_click.triggered.connect(lambda: self._add_step_row({"type": "click"}))
+        # 逻辑修改：添加点击步骤时，直接进入全屏坐标拾取
+        act_click.triggered.connect(self._add_click_step_direct)
         act_delay.triggered.connect(lambda: self._add_step_row({"type": "delay"}))
         act_jump.triggered.connect(lambda: self._add_step_row({"type": "jump"}))
 
@@ -602,6 +611,17 @@ class ScriptEditorDialog(QDialog):
                 self._add_step_row(s)
         else:
             self._add_step_row({"type": "click"})
+
+    def _add_click_step_direct(self):
+        """点击菜单添加“点击拾取”时，生成行并直接激活坐标拾取界面"""
+        row = self._add_step_row({"type": "click", "x": -1, "y": -1})
+        param_widget = self.table.cellWidget(row, 2)
+        if param_widget:
+            param_layout = param_widget.layout()
+            if param_layout and param_layout.count() > 0:
+                lbl_coord = param_layout.itemAt(0).widget()
+                if lbl_coord and isinstance(lbl_coord, QLabel):
+                    self._pick_coord_for_label(lbl_coord)
 
     def _add_step_row(self, step=None):
         if step is None or not isinstance(step, dict):
@@ -636,10 +656,15 @@ class ScriptEditorDialog(QDialog):
             if selected_text == "点击拾取":
                 x_val = current_step.get("x", -1) if current_step else -1
                 y_val = current_step.get("y", -1) if current_step else -1
-                coord_str = f"({x_val}, {y_val})" if x_val >= 0 and y_val >= 0 else "未位置"
+                coord_str = f"({x_val}, {y_val})" if x_val >= 0 and y_val >= 0 else "(未选择坐标)"
+                
+                # 重新设计：显示坐标标签改为点击手势，支持点击文本直接调用坐标选择
                 lbl_coord = QLabel(coord_str)
                 lbl_coord.setAlignment(Qt.AlignCenter)
-                lbl_coord.setStyleSheet("color: #00ff8c; font-weight: bold;")
+                lbl_coord.setCursor(Qt.PointingHandCursor)
+                lbl_coord.setToolTip("点击直接选择/重新拾取坐标")
+                lbl_coord.setStyleSheet("color: #00ff8c; font-weight: bold; background: rgba(0,255,140,0.15); border-radius: 3px; padding: 2px 6px;")
+                lbl_coord.mousePressEvent = lambda ev, l=lbl_coord: self._pick_coord_for_label(l) if ev.button() == Qt.LeftButton else None
 
                 btn_pick = QPushButton("🎯 拾取")
                 btn_pick.setFixedHeight(22)
@@ -678,9 +703,10 @@ class ScriptEditorDialog(QDialog):
         self.table.setCellWidget(row, 3, btn_del)
 
         self._update_row_indices()
+        return row
 
     def _pick_coord_for_label(self, label_widget):
-        # 递归隐藏自身及所有父窗口（如 ScriptManagerDialog），防止窗口挡住拾取蒙版
+        # 隐藏自身及所有上层窗口，防止挡住抓屏
         targets = []
         curr = self
         while curr:
@@ -927,6 +953,8 @@ class OverlayRegionWidget(QWidget):
         self.last_log_time = 0.0
         self.max_log_count = 30
         self.history_records = []
+        self.last_val = None
+        self.last_raw_text = ""
 
         self.is_alarm = False
         self.is_warning = False
@@ -1118,6 +1146,8 @@ class OverlayRegionWidget(QWidget):
         return False
 
     def update_result_display(self, val, raw_text=""):
+        self.last_val = val
+        self.last_raw_text = raw_text
         if val is not None:
             dp = getattr(self, 'decimal_places', 2)
             self.lbl_result.setText(f"{val:.{dp}f}")
@@ -1831,21 +1861,21 @@ MOBILE_HTML_TEMPLATE = """
                     container.innerHTML = '';
                     users.forEach(u => {
                         const div = document.createElement('div');
-                        div.style.cssText = 'display:flex; justify-content:space-between; align-items:center; padding:4px 0; border-bottom:1px solid rgba(255,255,255,0.1); font-size:12px;';
-                        div.innerHTML = `<span>👤 ${u}</span> ${u !== 'admin' ? `<button class="btn-action" style="background:#ff3333; padding:2px 6px;" onclick="handleDeleteUser('${u}')">删除</button>` : '<span style="color:#888;">管理员</span>'}`;
+                        div.style.cssText = 'display:flex; justify-space-between; align-items:center; padding:4px 0; border-bottom:1px solid rgba(255,255,255,0.1); font-size:12px;';
+                        div.innerHTML = `<span>👤 ${u}</span> ${u !== 'admin' ? `<button class="btn-action" style="background:#ff3333;" onclick="handleDelUser('${u}')">删除</button>` : ''}`;
                         container.appendChild(div);
                     });
                 }
             } catch(e) {}
         }
 
-        async function handleDeleteUser(username) {
-            if (!confirm(`确定删除用户 ${username} 吗？`)) return;
+        async function handleDelUser(u) {
+            if (!confirm('确定删除用户 ' + u + ' 吗？')) return;
             try {
                 const res = await fetch('/api/users', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({action: 'delete', username: username})
+                    body: JSON.stringify({action: 'del', username: u})
                 });
                 if (res.ok) {
                     loadUsersList();
@@ -1855,34 +1885,39 @@ MOBILE_HTML_TEMPLATE = """
             } catch(e) { alert('请求异常: ' + e); }
         }
 
-        async function postAction(action, boxId = -1, extraData = {}) {
+        function toggleWebSound() {
+            webSoundEnabled = !webSoundEnabled;
+            const btn = document.getElementById('btn-sound');
+            if (webSoundEnabled) {
+                btn.innerText = '🔊 声音开';
+                btn.style.background = '#2e9a58';
+            } else {
+                btn.innerText = '🔇 声音关';
+                btn.style.background = 'rgba(255,255,255,0.15)';
+            }
+        }
+
+        async function postAction(act, boxId, extra={}) {
             try {
                 await fetch('/api/action', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({action: action, box_id: boxId, ...extraData})
+                    body: JSON.stringify({action: act, box_id: boxId, ...extra})
                 });
-                fetchData();
+                pollData();
             } catch(e) {}
         }
 
-        function toggleWebSound() {
-            webSoundEnabled = !webSoundEnabled;
-            const btn = document.getElementById('btn-sound');
-            btn.innerText = webSoundEnabled ? '🔊 开启' : '🔇 静音';
-            btn.style.color = webSoundEnabled ? '#00ff8c' : '#888';
-        }
-
         async function saveCompareMin() {
-            const val = parseInt(document.getElementById('compare-min-input').value) || 0;
-            postAction('set_compare_min', -1, {compare_min: val});
+            const val = parseFloat(document.getElementById('compare-min-input').value) || 5;
+            await postAction('set_compare_min', -1, {minutes: val});
         }
 
-        function toggleCardExpand(boxId) {
+        function toggleFold(boxId) {
             if (!currentUser) return;
             cardExpandedState[boxId] = !cardExpandedState[boxId];
-            const body = document.getElementById(`fold-body-${boxId}`);
-            const icon = document.getElementById(`toggle-icon-${boxId}`);
+            const body = document.getElementById('fold-body-' + boxId);
+            const icon = document.getElementById('toggle-icon-' + boxId);
             if (body) {
                 body.style.display = cardExpandedState[boxId] ? 'block' : 'none';
             }
@@ -1891,421 +1926,198 @@ MOBILE_HTML_TEMPLATE = """
             }
         }
 
-        async function saveBoxParams(boxId) {
-            const lower = parseFloat(document.getElementById(`input-lower-${boxId}`).value) || 0;
-            const upper = parseFloat(document.getElementById(`input-upper-${boxId}`).value) || 0;
-            const mid = parseFloat(document.getElementById(`input-mid-${boxId}`).value) || 0;
-            const midOp = document.getElementById(`select-mid-op-${boxId}`).value;
-            const dec = parseInt(document.getElementById(`input-dec-${boxId}`).value) || 0;
-            const name = document.getElementById(`input-title-${boxId}`).value;
-            postAction('update_box', boxId, {
-                lower: lower, upper: upper, mid: mid, mid_op: midOp, decimal_places: dec, name: name
-            });
+        async function updateBoxParam(boxId, field, val) {
+            await postAction('update_param', boxId, {field: field, value: val});
         }
 
-        async function fetchData() {
+        let audioCtx = null;
+        function playWebBeep() {
+            if (!webSoundEnabled) return;
+            try {
+                if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+                osc.type = 'sine';
+                osc.frequency.value = 800;
+                gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
+                osc.start();
+                osc.stop(audioCtx.currentTime + 0.2);
+            } catch(e) {}
+        }
+
+        async function pollData() {
             try {
                 const res = await fetch('/api/data');
                 if (!res.ok) return;
                 const data = await res.json();
 
                 const btnMon = document.getElementById('btn-monitor');
-                if (btnMon) {
-                    btnMon.innerText = data.monitoring ? '⏸ 停止监控' : '▶ 开始监控';
-                    if (data.monitoring) btnMon.classList.add('active'); else btnMon.classList.remove('active');
+                if (data.is_monitoring) {
+                    btnMon.innerText = '⏹ 停止监控';
+                    btnMon.classList.add('active');
+                } else {
+                    btnMon.innerText = '▶ 开始监控';
+                    btnMon.classList.remove('active');
                 }
-                const btnGri = document.getElementById('btn-grille');
-                if (btnGri) {
-                    btnGri.innerText = data.script_running ? '⏸ 停止操作' : '▶ 开始操作';
-                    if (data.script_running) btnGri.classList.add('active'); else btnGri.classList.remove('active');
+
+                const btnGrille = document.getElementById('btn-grille');
+                if (data.is_script_running) {
+                    btnGrille.innerText = '⏹ 停止操作';
+                    btnGrille.classList.add('active');
+                } else {
+                    btnGrille.innerText = '▶ 开始操作';
+                    btnGrille.classList.remove('active');
                 }
 
                 const container = document.getElementById('cards-container');
-                let html = '';
-                let hasAlarm = false;
+                let anyAlarm = false;
 
                 data.boxes.forEach(box => {
-                    if (box.is_alarm) hasAlarm = true;
+                    if (box.is_alarm) anyAlarm = true;
 
-                    let cardClass = 'card';
-                    if (box.is_alarm) cardClass += ' alarm';
-                    else if (box.is_warning) cardClass += ' warning';
-
-                    let valClass = 'val-text';
-                    if (box.is_alarm) valClass += ' alarm-text';
-                    else if (box.is_warning) valClass += ' warning-text';
-
-                    let trendHtml = '';
-                    if (box.diff_text) {
-                        if (box.diff_text.startsWith('+')) {
-                            trendHtml = `<span style="color:#ff4d4d; font-size:12px; font-weight:bold; margin-right:4px;">▲ ${box.diff_text}</span>`;
-                        } else if (box.diff_text.startsWith('-')) {
-                            trendHtml = `<span style="color:#00ff8c; font-size:12px; font-weight:bold; margin-right:4px;">▼ ${box.diff_text}</span>`;
-                        } else {
-                            trendHtml = `<span style="color:#888; font-size:12px; margin-right:4px;">${box.diff_text}</span>`;
-                        }
+                    let card = document.getElementById('card-' + box.id);
+                    if (!card) {
+                        card = document.createElement('div');
+                        card.id = 'card-' + box.id;
+                        container.appendChild(card);
                     }
 
-                    const isExpanded = !!cardExpandedState[box.id];
-                    const toggleDisplay = currentUser ? 'inline-block' : 'none';
-                    const bodyDisplay = (currentUser && isExpanded) ? 'block' : 'none';
-                    const iconChar = isExpanded ? '▲' : '▼';
+                    let cls = 'card';
+                    if (box.is_alarm) cls += ' alarm';
+                    else if (box.is_warning) cls += ' warning';
+                    card.className = cls;
 
-                    html += `
-                    <div class="${cardClass}">
+                    const isExpanded = !!cardExpandedState[box.id];
+                    const foldDisplay = (currentUser && isExpanded) ? 'block' : 'none';
+                    const toggleIconText = isExpanded ? '▲' : '▼';
+                    const toggleDisplay = currentUser ? 'inline-block' : 'none';
+
+                    let valCls = 'val-text';
+                    if (box.is_alarm) valCls += ' alarm-text';
+                    else if (box.is_warning) valCls += ' warning-text';
+
+                    const valStr = box.val !== null ? box.val.toFixed(box.decimal_places) : (box.raw_text ? '(' + box.raw_text + ')' : '--');
+                    const compStr = box.past_val !== null ? box.past_val.toFixed(box.decimal_places) : '--';
+
+                    let logsHtml = '';
+                    (box.logs || []).forEach(l => {
+                        logsHtml += `<div class="log-item">${l}</div>`;
+                    });
+
+                    card.innerHTML = `
                         <div class="card-header">
                             <div class="card-title-box">
                                 <span class="card-title">${box.name}</span>
-                                <span id="toggle-icon-${box.id}" class="toggle-icon" style="display:${toggleDisplay};" onclick="toggleCardExpand(${box.id})">${iconChar}</span>
+                                <span id="toggle-icon-${box.id}" class="toggle-icon" style="display:${toggleDisplay};" onclick="toggleFold(${box.id})">${toggleIconText}</span>
                             </div>
                             <div class="card-header-right">
                                 ${box.is_alarm ? `<button class="btn-action btn-clear" onclick="postAction('clear_alarm', ${box.id})">🚨 消除</button>` : ''}
                             </div>
                         </div>
-
                         <div style="display:flex; justify-content:space-between; align-items:center; margin-top:6px;">
                             <div class="val-container">
-                                ${trendHtml}
-                                <span class="${valClass}">${box.val_str}</span>
+                                <span class="${valCls}">${valStr}</span>
                             </div>
-                            <span style="font-size:11px; color:#888;">${box.last_time || ''}</span>
+                            <div style="font-size:11px; color:#aaa; font-weight:bold;">
+                                对比: <span style="color:#00ff8c;">${compStr}</span>
+                            </div>
                         </div>
 
-                        <div id="fold-body-${box.id}" class="fold-body" style="display:${bodyDisplay};">
+                        <div id="fold-body-${box.id}" class="fold-body" style="display:${foldDisplay};">
                             <div class="setting-row">
-                                <label>名称:</label>
-                                <input type="text" id="input-title-${box.id}" value="${box.name}" class="setting-input" style="width:80px; text-align:left;">
                                 <label>下限:</label>
-                                <input type="number" step="any" id="input-lower-${box.id}" value="${box.lower}" class="setting-input">
+                                <input type="number" step="any" class="setting-input" value="${box.lower}" onchange="updateBoxParam(${box.id}, 'lower', parseFloat(this.value))">
                                 <label>上限:</label>
-                                <input type="number" step="any" id="input-upper-${box.id}" value="${box.upper}" class="setting-input">
+                                <input type="number" step="any" class="setting-input" value="${box.upper}" onchange="updateBoxParam(${box.id}, 'upper', parseFloat(this.value))">
                             </div>
                             <div class="setting-row">
                                 <label>预警:</label>
-                                <select id="select-mid-op-${box.id}" style="background:rgba(0,0,0,0.5); color:#ffaa00; border:1px solid rgba(255,255,255,0.2); border-radius:4px; font-size:11px;">
-                                    <option value=">" ${box.mid_op === '>' ? 'selected' : ''}>></option>
-                                    <option value="<" ${box.mid_op === '<' ? 'selected' : ''}><</option>
+                                <select style="background:rgba(0,0,0,0.5); color:#ffaa00; border:1px solid rgba(255,255,255,0.2); border-radius:3px; font-size:11px;" onchange="updateBoxParam(${box.id}, 'mid_op', this.value)">
+                                    <option value=">" ${box.mid_op === '>' ? 'selected' : ''}>&gt;</option>
+                                    <option value="<" ${box.mid_op === '<' ? 'selected' : ''}>&lt;</option>
                                     <option value="=" ${box.mid_op === '=' ? 'selected' : ''}>=</option>
                                 </select>
-                                <input type="number" step="any" id="input-mid-${box.id}" value="${box.mid_val}" class="setting-input">
-                                <label>小数位:</label>
-                                <input type="number" id="input-dec-${box.id}" value="${box.decimal_places}" class="setting-input" style="width:30px;">
-                                <button class="btn-action" style="background:#0088cc; padding:2px 8px; margin-left:auto;" onclick="saveBoxParams(${box.id})">保存</button>
+                                <input type="number" step="any" class="setting-input" value="${box.mid_val}" onchange="updateBoxParam(${box.id}, 'mid_val', parseFloat(this.value))">
                             </div>
-                            <div class="log-title">📋 历史记录</div>
-                            <div class="log-list">
-                                ${(box.logs || []).map(l => `<div class="log-item">${l}</div>`).join('')}
-                            </div>
+                            <div class="log-title">📋 近期记录:</div>
+                            <div class="log-list">${logsHtml}</div>
                         </div>
-                    </div>`;
+                    `;
                 });
 
-                container.innerHTML = html;
-
-                if (hasAlarm && webSoundEnabled) {
+                if (anyAlarm) {
                     playWebBeep();
                 }
-
-            } catch(e) {}
-        }
-
-        function playWebBeep() {
-            try {
-                const ctx = new (window.AudioContext || window.webkitAudioContext)();
-                const osc = ctx.createOscillator();
-                osc.type = 'sine';
-                osc.frequency.setValueAtTime(800, ctx.currentTime);
-                osc.connect(ctx.destination);
-                osc.start();
-                osc.stop(ctx.currentTime + 0.2);
             } catch(e) {}
         }
 
         updateAuthUI();
-        fetchData();
-        setInterval(fetchData, 1000);
+        setInterval(pollData, 1000);
+        pollData();
     </script>
 </body>
 </html>
 """
 
 
-# ==================== 主控窗口 ====================
-class MainWindow(QWidget):
-    def __init__(self):
+# ==================== Flask 线程 ====================
+class FlaskWorker(QThread):
+    def __init__(self, main_app, host="0.0.0.0", port=5000):
         super().__init__()
-        self.setWindowTitle("🖥️ OCR 悬浮监控与自动化中控")
-        self.resize(320, 180)
-        self.setWindowFlags(Qt.WindowStaysOnTopHint)
+        self.main_app = main_app
+        self.host = host
+        self.port = port
+        self.app = Flask(__name__)
+        self._setup_routes()
 
-        self.boxes = []
-        self.scripts = []
-        self.users = {"admin": "admin123"}
-        self.check_interval = 1.0
-        self.compare_minutes = 5
-        self.ocr_params = {'scale': 3.0, 'clahe': 2.0, 'thresh_block': 11, 'thresh_c': 2}
-        
-        self.monitoring = False
-        self.script_running = False
-        self.edit_mode = False
-        self.panel_hidden = False
-
-        self.sound_player = AlarmSoundPlayer()
-        self.f12_listener = GlobalF12Listener()
-        self.f12_listener.f12_triggered.connect(self.toggle_script_running)
-        self.f12_listener.start()
-
-        self.reader = None
-        self._init_ddddocr()
-
-        self.monitor_thread = None
-        self.script_thread = None
-
-        self.load_config()
-        self.init_ui()
-
-        if FLASK_AVAILABLE:
-            self.start_flask_server()
-
-    def _init_ddddocr(self):
-        def _load():
-            try:
-                import ddddocr
-                self.reader = ddddocr.DdddOcr(show_ad=False)
-                if self.monitor_thread:
-                    self.monitor_thread.set_reader(self.reader)
-            except Exception as e:
-                print(f"ddddocr 初始化失败: {e}")
-        threading.Thread(target=_load, daemon=True).start()
-
-    def init_ui(self):
-        self.setStyleSheet("""
-            QWidget { background-color: #1a1a26; color: white; font-family: "Segoe UI", sans-serif; }
-            QPushButton {
-                background-color: rgba(43, 45, 66, 0.8); color: white; border: 1px solid rgba(255, 255, 255, 0.2);
-                border-radius: 4px; padding: 5px 8px; font-size: 11px; font-weight: bold;
-            }
-            QPushButton:hover { background-color: rgba(61, 64, 91, 0.9); }
-            QPushButton.active { background-color: #ff3333; color: white; }
-            QLabel { font-size: 11px; font-weight: bold; }
-        """)
-
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(8, 8, 8, 8)
-        layout.setSpacing(6)
-
-        title = QLabel("🤖 自动化及数据监控中控台")
-        title.setAlignment(Qt.AlignCenter)
-        title.setStyleSheet("color: #00ff8c; font-size: 13px; font-weight: bold;")
-        layout.addWidget(title)
-
-        r1 = QHBoxLayout()
-        btn_add = QPushButton("➕ 新增区域")
-        btn_add.clicked.connect(self._add_new_box)
-        btn_pick = QPushButton("📐 选区拾取")
-        btn_pick.clicked.connect(self._pick_screen_region)
-        self.btn_edit = QPushButton("✏️ 批量编辑")
-        self.btn_edit.clicked.connect(self.toggle_edit_mode)
-        r1.addWidget(btn_add)
-        r1.addWidget(btn_pick)
-        r1.addWidget(self.btn_edit)
-        layout.addLayout(r1)
-
-        r2 = QHBoxLayout()
-        btn_script_mgr = QPushButton("📜 脚本管理")
-        btn_script_mgr.clicked.connect(self._open_script_manager)
-        self.btn_mon = QPushButton("▶ 开始监控")
-        self.btn_mon.setStyleSheet("background-color: #2e9a58; color: white;")
-        self.btn_mon.clicked.connect(self.toggle_monitor)
-        
-        self.btn_script_run = QPushButton("▶ 开始操作")
-        self.btn_script_run.setStyleSheet("background-color: #0088cc; color: white;")
-        self.btn_script_run.clicked.connect(self.toggle_script_running)
-
-        r2.addWidget(btn_script_mgr)
-        r2.addWidget(self.btn_mon)
-        r2.addWidget(self.btn_script_run)
-        layout.addLayout(r2)
-
-        r3 = QHBoxLayout()
-        btn_ocr_adjust = QPushButton("⚙️ OCR 调整")
-        btn_ocr_adjust.clicked.connect(self._open_ocr_adjust)
-        btn_web_ip = QPushButton("📱 手机中控")
-        btn_web_ip.clicked.connect(self._show_web_info)
-        self.btn_hide_panel = QPushButton("👁 隐藏面板")
-        self.btn_hide_panel.clicked.connect(self.toggle_panel_hidden)
-        
-        r3.addWidget(btn_ocr_adjust)
-        r3.addWidget(btn_web_ip)
-        r3.addWidget(self.btn_hide_panel)
-        layout.addLayout(r3)
-
-    def _open_script_manager(self):
-        dlg = ScriptManagerDialog(self.scripts, parent=self)
-        dlg.exec()
-
-    def _open_ocr_adjust(self):
-        dlg = OCRAdjustDialog(self.ocr_params, reader=self.reader, parent=self)
-        if dlg.exec() == QDialog.Accepted:
-            self.ocr_params = dlg.get_params()
-            if self.monitor_thread:
-                self.monitor_thread.update_params(ocr_params=self.ocr_params)
-            self.save_config()
-
-    def _show_web_info(self):
-        ip = get_local_ip()
-        msg = f"📱 局域网 Web 中控访问地址:\n\nhttp://{ip}:5000\n\n请使用手机或同局域网设备浏览器访问。"
-        QMessageBox.information(self, "📱 手机中控地址", msg)
-
-    def _add_new_box(self):
-        self.create_box(100, 100, 150, 50, name=f"区域{len(self.boxes)+1}")
-
-    def _pick_screen_region(self):
-        self.setWindowOpacity(0.0)
-        QApplication.processEvents()
-        time.sleep(0.2)
-        picker = CoordinatePicker()
-
-        def on_picked(x, y, w, h):
-            self.setWindowOpacity(1.0)
-            self.activateWindow()
-            if w > 0 and h > 0:
-                self.create_box(x, y, w, h, name=f"区域{len(self.boxes)+1}")
-
-        picker.coord_selected.connect(on_picked)
-        picker.showFullScreen()
-
-    def create_box(self, x, y, w, h, name="区域", lower=0.0, mid_val=50.0, upper=100.0, decimal_places=0, mid_op=">", box_id=None):
-        if box_id is None:
-            existing_ids = [b.box_id for b in self.boxes]
-            box_id = max(existing_ids) + 1 if existing_ids else 0
-
-        box = OverlayRegionWidget(box_id, x, y, w, h, name=name, lower=lower, mid_val=mid_val, upper=upper, decimal_places=decimal_places, mid_op=mid_op)
-        box.delete_requested.connect(self.delete_box)
-        box.alarm_cleared.connect(self._check_all_alarms)
-        box.mute_toggled.connect(self._check_all_alarms)
-        box.set_edit_mode(self.edit_mode)
-        box.set_panel_hidden(self.panel_hidden)
-        box.show()
-        self.boxes.append(box)
-        self.save_config()
-
-    def delete_box(self, box):
-        if box in self.boxes:
-            self.boxes.remove(box)
-            box.close()
-            self._check_all_alarms()
-            self.save_config()
-
-    def toggle_edit_mode(self):
-        self.edit_mode = not self.edit_mode
-        self.btn_edit.setText("✔️ 完成编辑" if self.edit_mode else "✏️ 批量编辑")
-        for box in self.boxes:
-            box.set_edit_mode(self.edit_mode)
-
-    def toggle_panel_hidden(self):
-        self.panel_hidden = not self.panel_hidden
-        self.btn_hide_panel.setText("👁 显示面板" if self.panel_hidden else "👁 隐藏面板")
-        for box in self.boxes:
-            box.set_panel_hidden(self.panel_hidden)
-
-    def toggle_monitor(self):
-        if not self.monitoring:
-            self.monitoring = True
-            self.btn_mon.setText("⏸ 停止监控")
-            self.btn_mon.setStyleSheet("background-color: #ff3333; color: white;")
-            screen = QApplication.primaryScreen()
-            scale = screen.devicePixelRatio() if screen else 1.0
-
-            self.monitor_thread = MonitorThread(self.boxes, interval=self.check_interval, ocr_params=self.ocr_params, scale=scale)
-            if self.reader:
-                self.monitor_thread.set_reader(self.reader)
-            self.monitor_thread.value_updated.connect(self.update_monitor_data)
-            self.monitor_thread.start()
-        else:
-            self.monitoring = False
-            self.btn_mon.setText("▶ 开始监控")
-            self.btn_mon.setStyleSheet("background-color: #2e9a58; color: white;")
-            if self.monitor_thread:
-                self.monitor_thread.stop()
-                self.monitor_thread.wait()
-                self.monitor_thread = None
-
-    def update_monitor_data(self, box, time_str, val, raw_text):
-        if box not in self.boxes: return
-
-        box.update_result_display(val, raw_text)
-        box.add_log_val(time_str, val, raw_text)
-
-        if val is not None:
-            if val > box.upper or val < box.lower:
-                if box.user_cleared_alarm and box.cleared_val == val:
-                    box.set_alarm_state(False)
-                else:
-                    box.user_cleared_alarm = False
-                    box.set_alarm_state(True)
-            else:
-                box.user_cleared_alarm = False
-                box.cleared_val = None
-                box.set_alarm_state(False)
-
-            is_warn = box.check_mid_condition(val)
-            box.set_warning_state(is_warn)
-        else:
-            box.set_alarm_state(False)
-            box.set_warning_state(False)
-
-        self._check_all_alarms()
-
-    def _check_all_alarms(self):
-        has_active_alarm = any(b.is_alarm and not b.is_muted for b in self.boxes)
-        if has_active_alarm:
-            self.sound_player.play()
-        else:
-            self.sound_player.stop()
-
-    def toggle_script_running(self):
-        if not self.script_running:
-            if not self.scripts:
-                QMessageBox.warning(self, "提示", "请先在【脚本管理】中创建自动化脚本！")
-                return
-            self.script_running = True
-            self.btn_script_run.setText("⏸ 停止操作")
-            self.btn_script_run.setStyleSheet("background-color: #ff3333; color: white;")
-            self.script_thread = ScriptRunnerThread(self.scripts[0])
-            self.script_thread.start()
-        else:
-            self.script_running = False
-            self.btn_script_run.setText("▶ 开始操作")
-            self.btn_script_run.setStyleSheet("background-color: #0088cc; color: white;")
-            if self.script_thread:
-                self.script_thread.stop()
-                self.script_thread.wait()
-                self.script_thread = None
-
-    def start_flask_server(self):
-        app = Flask(__name__)
-
-        @app.route('/')
+    def _setup_routes(self):
+        @self.app.route('/')
         def index():
             return render_template_string(MOBILE_HTML_TEMPLATE)
 
-        @app.route('/api/data')
-        def get_data():
-            boxes_data = []
-            for box in self.boxes:
-                past_val = box.get_past_value(self.compare_minutes)
-                diff_text = ""
-                try:
-                    curr_val = float(box.lbl_result.text())
-                    if past_val is not None:
-                        diff = curr_val - past_val
-                        dp = box.decimal_places
-                        diff_text = f"{diff:+.{dp}f}"
-                except ValueError:
-                    diff_text = ""
+        @self.app.route('/api/login', methods=['POST'])
+        def api_login():
+            data = request.json or {}
+            u = data.get('username')
+            p = data.get('password')
+            users = getattr(self.main_app, 'users_data', {"admin": "123456"})
+            if u in users and users[u] == p:
+                return jsonify({'status': 'ok'})
+            return jsonify({'status': 'error', 'message': '密码不正确'}), 401
 
-                logs = [box.list_widget.item(i).text() for i in range(box.list_widget.count())]
+        @self.app.route('/api/users', methods=['GET', 'POST'])
+        def api_users():
+            users = getattr(self.main_app, 'users_data', {"admin": "123456"})
+            if request.method == 'GET':
+                return jsonify(list(users.keys()))
+            data = request.json or {}
+            act = data.get('action')
+            u = data.get('username')
+            p = data.get('password')
+            if act == 'add' and u and p:
+                users[u] = p
+                self.main_app.save_config()
+                return jsonify({'status': 'ok'})
+            elif act == 'del' and u:
+                if u == 'admin':
+                    return jsonify({'status': 'error', 'message': '不能删除admin'}), 400
+                if u in users:
+                    del users[u]
+                    self.main_app.save_config()
+                return jsonify({'status': 'ok'})
+            return jsonify({'status': 'error'}), 400
+
+        @self.app.route('/api/data')
+        def api_data():
+            boxes_data = []
+            comp_min = getattr(self.main_app, 'compare_minutes', 5.0)
+            for box in self.main_app.boxes:
+                cur_val = getattr(box, 'last_val', None)
+                raw_text = getattr(box, 'last_raw_text', '')
+                past_val = box.get_past_value(comp_min)
+                logs = [box.list_widget.item(i).text() for i in range(min(15, box.list_widget.count()))]
 
                 boxes_data.append({
                     'id': box.box_id,
@@ -2317,158 +2129,395 @@ class MainWindow(QWidget):
                     'decimal_places': box.decimal_places,
                     'is_alarm': box.is_alarm,
                     'is_warning': box.is_warning,
-                    'val_str': box.lbl_result.text(),
-                    'last_time': logs[0].split(']')[0].replace('[', '') if logs else '',
-                    'logs': logs,
-                    'diff_text': diff_text
+                    'val': cur_val,
+                    'raw_text': raw_text,
+                    'past_val': past_val,
+                    'logs': logs
                 })
 
             return jsonify({
-                'monitoring': self.monitoring,
-                'script_running': self.script_running,
+                'is_monitoring': self.main_app.is_monitoring,
+                'is_script_running': getattr(self.main_app, 'is_script_running', False),
+                'compare_minutes': comp_min,
                 'boxes': boxes_data
             })
 
-        @app.route('/api/login', methods=['POST'])
-        def login():
-            req = request.json or {}
-            u, p = req.get('username'), req.get('password')
-            if u in self.users and self.users[u] == p:
-                return jsonify({'status': 'ok'})
-            return jsonify({'status': 'error'}), 401
+        @self.app.route('/api/action', methods=['POST'])
+        def api_action():
+            data = request.json or {}
+            act = data.get('action')
+            box_id = data.get('box_id', -1)
 
-        @app.route('/api/users', methods=['GET', 'POST'])
-        def users_mgmt():
-            if request.method == 'GET':
-                return jsonify(list(self.users.keys()))
-            req = request.json or {}
-            action = req.get('action')
-            username = req.get('username')
-            password = req.get('password')
-            if action == 'add':
-                if not username or not password: return jsonify({'message': '无效参数'}), 400
-                self.users[username] = password
-                self.save_config()
-                return jsonify({'status': 'ok'})
-            elif action == 'delete':
-                if username in self.users and username != 'admin':
-                    del self.users[username]
-                    self.save_config()
-                    return jsonify({'status': 'ok'})
-                return jsonify({'message': '无法删除管理员账户'}), 400
-            return jsonify({'message': '无效操作'}), 400
-
-        @app.route('/api/action', methods=['POST'])
-        def handle_action():
-            req = request.json or {}
-            action = req.get('action')
-            box_id = req.get('box_id', -1)
-
-            if action == 'toggle_monitor':
-                QTimer.singleShot(0, self.toggle_monitor)
-            elif action == 'toggle_grille':
-                QTimer.singleShot(0, self.toggle_script_running)
-            elif action == 'exit_app':
-                QTimer.singleShot(100, QApplication.quit)
-            elif action == 'set_compare_min':
-                cmin = req.get('compare_min', 5)
-                self.compare_minutes = cmin
-                self.save_config()
-            elif action == 'clear_alarm' and box_id >= 0:
-                for b in self.boxes:
-                    if b.box_id == box_id:
-                        QTimer.singleShot(0, b._on_clear_alarm)
+            if act == 'toggle_monitor':
+                self.main_app.toggle_monitoring()
+            elif act == 'toggle_grille':
+                self.main_app.toggle_script_running()
+            elif act == 'exit_app':
+                QApplication.quit()
+            elif act == 'clear_alarm':
+                for box in self.main_app.boxes:
+                    if box.box_id == box_id:
+                        box._on_clear_alarm()
                         break
-            elif action == 'update_box' and box_id >= 0:
-                for b in self.boxes:
-                    if b.box_id == box_id:
-                        b._on_lower_changed(float(req.get('lower', b.lower)))
-                        b._on_upper_changed(float(req.get('upper', b.upper)))
-                        b._on_mid_changed(float(req.get('mid', b.mid_val)))
-                        b._on_mid_op_changed(req.get('mid_op', b.mid_op))
-                        b._on_dec_changed(int(req.get('decimal_places', b.decimal_places)))
-                        b._on_title_changed(req.get('name', b.name))
-                        self.save_config()
+            elif act == 'set_compare_min':
+                mins = float(data.get('minutes', 5.0))
+                self.main_app.compare_minutes = mins
+                self.main_app.save_config()
+            elif act == 'update_param':
+                field = data.get('field')
+                val = data.get('value')
+                for box in self.main_app.boxes:
+                    if box.box_id == box_id:
+                        if field == 'lower': box.spin_lower.setValue(float(val))
+                        elif field == 'upper': box.spin_upper.setValue(float(val))
+                        elif field == 'mid_val': box.spin_mid.setValue(float(val))
+                        elif field == 'mid_op': box.combo_mid_op.setCurrentText(str(val))
+                        self.main_app.save_config()
                         break
-
             return jsonify({'status': 'ok'})
 
-        def run_flask():
-            app.run(host='0.0.0.0', port=5000, debug=False, use_reloader=False)
+    def run(self):
+        if FLASK_AVAILABLE:
+            self.app.run(host=self.host, port=self.port, debug=False, use_reloader=False)
 
-        t = threading.Thread(target=run_flask, daemon=True)
-        t.start()
 
-    def load_config(self):
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        config_path = os.path.join(script_dir, "config.json")
-        if os.path.exists(config_path):
+# ==================== 主控窗口界面 ====================
+class MainWindow(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("🖥️ OCR 实时数据监控与中控系统")
+        self.setMinimumSize(420, 240)
+        self.setStyleSheet("""
+            QWidget { background-color: #1a1a26; color: white; font-family: "Segoe UI", Microsoft YaHei, sans-serif; }
+            QPushButton {
+                background-color: rgba(43, 45, 66, 0.8); color: white; border: 1px solid rgba(255, 255, 255, 0.2);
+                border-radius: 6px; padding: 6px 12px; font-weight: bold; font-size: 12px;
+            }
+            QPushButton:hover { background-color: rgba(61, 64, 91, 0.9); }
+            QLabel { font-size: 12px; font-weight: bold; color: #e0e0e0; }
+        """)
+
+        self.boxes = []
+        self.scripts = []
+        self.users_data = {"admin": "123456"}
+        self.compare_minutes = 5.0
+        self.ocr_params = {'scale': 3.0, 'clahe': 2.0, 'thresh_block': 11, 'thresh_c': 2}
+        self.monitor_interval = 1.0
+
+        self.is_monitoring = False
+        self.is_script_running = False
+        self.is_editing = True
+        self.sound_player = AlarmSoundPlayer()
+        self.reader = None
+
+        self._init_ocr_reader()
+        self._setup_ui()
+
+        self.f12_listener = GlobalF12Listener(self)
+        self.f12_listener.f12_triggered.connect(self.toggle_monitoring)
+        self.f12_listener.start()
+
+        self.script_runner_thread = None
+        self.load_config()
+
+        self.flask_worker = FlaskWorker(self, host="0.0.0.0", port=5000)
+        self.flask_worker.start()
+
+    def _init_ocr_reader(self):
+        def load_reader():
             try:
-                with open(config_path, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                    self.check_interval = data.get("check_interval", 1.0)
-                    self.compare_minutes = data.get("compare_minutes", 5)
-                    self.ocr_params = data.get("ocr_params", {'scale': 3.0, 'clahe': 2.0, 'thresh_block': 11, 'thresh_c': 2})
-                    self.scripts = data.get("scripts", [])
-                    self.users = data.get("users", {"admin": "admin123"})
-                    
-                    boxes_data = data.get("boxes", [])
-                    for b in boxes_data:
-                        self.create_box(
-                            b.get("x", 100), b.get("y", 100), b.get("w", 150), b.get("h", 50),
-                            name=b.get("name", "区域"),
-                            lower=b.get("lower", 0.0),
-                            mid_val=b.get("mid_val", 50.0),
-                            upper=b.get("upper", 100.0),
-                            decimal_places=b.get("decimal_places", 0),
-                            mid_op=b.get("mid_op", ">"),
-                            box_id=b.get("id", None)
-                        )
+                import ddddocr
+                self.reader = ddddocr.DdddOcr(show_ad=False)
+                print("DdddOcr 加载完成")
             except Exception as e:
-                print(f"读取配置失败: {e}")
+                print(f"DdddOcr 加载异常: {e}")
+
+        threading.Thread(target=load_reader, daemon=True).start()
+
+    def _setup_ui(self):
+        main_layout = QVBoxLayout(self)
+
+        top_info = QHBoxLayout()
+        self.lbl_ip = QLabel(f"🌐 WEB端连接: http://{get_local_ip()}:5000")
+        self.lbl_ip.setStyleSheet("color: #00ff8c; font-size: 13px; font-weight: bold;")
+        top_info.addWidget(self.lbl_ip)
+        top_info.addStretch()
+
+        self.lbl_countdown = QLabel("⏱️ 下一次刷新: --")
+        self.lbl_countdown.setStyleSheet("color: #ffaa00; font-weight: bold;")
+        top_info.addWidget(self.lbl_countdown)
+        main_layout.addLayout(top_info)
+
+        btn_grid = QHBoxLayout()
+
+        self.btn_add_box = QPushButton("➕ 添加识别区")
+        self.btn_add_box.setStyleSheet("background-color: #0088cc; color: white;")
+        self.btn_add_box.clicked.connect(self._pick_new_box_region)
+
+        self.btn_ocr_adjust = QPushButton("⚙️ OCR 预处理")
+        self.btn_ocr_adjust.clicked.connect(self._open_ocr_adjust)
+
+        self.btn_align_grid = QPushButton("📐 排列网格")
+        self.btn_align_grid.clicked.connect(self.align_boxes_in_grid)
+
+        self.btn_scripts = QPushButton("📜 脚本管理")
+        self.btn_scripts.clicked.connect(self._open_script_manager)
+
+        btn_grid.addWidget(self.btn_add_box)
+        btn_grid.addWidget(self.btn_ocr_adjust)
+        btn_grid.addWidget(self.btn_align_grid)
+        btn_grid.addWidget(self.btn_scripts)
+        main_layout.addLayout(btn_grid)
+
+        action_layout = QHBoxLayout()
+
+        self.btn_toggle_monitor = QPushButton("▶ 开始监控 (F12)")
+        self.btn_toggle_monitor.setFixedHeight(40)
+        self.btn_toggle_monitor.setStyleSheet("background-color: #2e9a58; color: white; font-size: 13px; font-weight: bold;")
+        self.btn_toggle_monitor.clicked.connect(self.toggle_monitoring)
+
+        self.btn_toggle_script = QPushButton("▶ 开始操作脚本")
+        self.btn_toggle_script.setFixedHeight(40)
+        self.btn_toggle_script.setStyleSheet("background-color: #0088cc; color: white; font-size: 13px; font-weight: bold;")
+        self.btn_toggle_script.clicked.connect(self.toggle_script_running)
+
+        action_layout.addWidget(self.btn_toggle_monitor)
+        action_layout.addWidget(self.btn_toggle_script)
+        main_layout.addLayout(action_layout)
+
+        bottom_layout = QHBoxLayout()
+        self.btn_edit_mode = QPushButton("🔒 锁定选框编辑")
+        self.btn_edit_mode.clicked.connect(self.toggle_edit_mode)
+
+        self.btn_hide_panels = QPushButton("👁️ 隐藏浮动面板")
+        self.btn_hide_panels.clicked.connect(self.toggle_hide_panels)
+
+        bottom_layout.addWidget(self.btn_edit_mode)
+        bottom_layout.addWidget(self.btn_hide_panels)
+        main_layout.addLayout(bottom_layout)
+
+    def _pick_new_box_region(self):
+        self.setWindowOpacity(0.0)
+        QApplication.processEvents()
+        time.sleep(0.2)
+
+        picker = CoordinatePicker()
+        def on_picked(x, y, w, h):
+            self.setWindowOpacity(1.0)
+            self.activateWindow()
+            if w > 0 and h > 0:
+                new_id = len(self.boxes) + 1
+                box = OverlayRegionWidget(new_id, x, y, w, h, name=f"区域 {new_id}")
+                box.delete_requested.connect(self._remove_box)
+                box.show()
+                box.set_edit_mode(self.is_editing)
+                self.boxes.append(box)
+                self.save_config()
+
+        picker.coord_selected.connect(on_picked)
+        picker.showFullScreen()
+        picker.raise_()
+        picker.activateWindow()
+
+    def _remove_box(self, box):
+        if box in self.boxes:
+            self.boxes.remove(box)
+            box.close()
+            self.save_config()
+
+    def _open_ocr_adjust(self):
+        dlg = OCRAdjustDialog(self.ocr_params, reader=self.reader, parent=self)
+        if dlg.exec() == QDialog.Accepted:
+            self.ocr_params = dlg.get_params()
+            if hasattr(self, 'monitor_thread') and self.monitor_thread:
+                self.monitor_thread.update_params(ocr_params=self.ocr_params)
+            self.save_config()
+
+    def _open_script_manager(self):
+        dlg = ScriptManagerDialog(self.scripts, parent=self)
+        dlg.exec()
+
+    def align_boxes_in_grid(self):
+        if not self.boxes: return
+        padding = 10
+        cur_x, cur_y = 50, 50
+        max_h = 0
+        screen_w = QApplication.primaryScreen().geometry().width()
+
+        for box in self.boxes:
+            if cur_x + box.width() > screen_w - 50:
+                cur_x = 50
+                cur_y += max_h + padding
+                max_h = 0
+
+            box.capture_x = cur_x
+            box.capture_y = cur_y
+            box._update_geometry()
+            cur_x += box.width() + padding
+            max_h = max(max_h, box.height())
+
+        self.save_config()
+
+    def toggle_edit_mode(self):
+        self.is_editing = not self.is_editing
+        self.btn_edit_mode.setText("🔒 锁定选框编辑" if self.is_editing else "✏️ 解锁选框编辑")
+        for box in self.boxes:
+            box.set_edit_mode(self.is_editing)
+
+    def toggle_hide_panels(self):
+        is_hidden = getattr(self, 'panels_hidden', False)
+        is_hidden = not is_hidden
+        self.panels_hidden = is_hidden
+        self.btn_hide_panels.setText("👁️ 显示浮动面板" if is_hidden else "👁️ 隐藏浮动面板")
+        for box in self.boxes:
+            box.set_panel_hidden(is_hidden)
+
+    def toggle_monitoring(self):
+        self.is_monitoring = not self.is_monitoring
+        if self.is_monitoring:
+            self.btn_toggle_monitor.setText("⏹ 停止监控 (F12)")
+            self.btn_toggle_monitor.setStyleSheet("background-color: #ff3333; color: white; font-size: 13px; font-weight: bold;")
+            
+            screen = QApplication.primaryScreen()
+            scale = screen.devicePixelRatio() if screen else 1.0
+
+            self.monitor_thread = MonitorThread(self.boxes, interval=self.monitor_interval, ocr_params=self.ocr_params, scale=scale)
+            self.monitor_thread.set_reader(self.reader)
+            self.monitor_thread.value_updated.connect(self._on_value_updated)
+            self.monitor_thread.countdown_tick.connect(self._on_countdown_tick)
+            self.monitor_thread.start()
+        else:
+            self.btn_toggle_monitor.setText("▶ 开始监控 (F12)")
+            self.btn_toggle_monitor.setStyleSheet("background-color: #2e9a58; color: white; font-size: 13px; font-weight: bold;")
+            if hasattr(self, 'monitor_thread') and self.monitor_thread:
+                self.monitor_thread.stop()
+                self.monitor_thread.wait()
+            self.lbl_countdown.setText("⏱️ 监控已停止")
+            self.sound_player.stop()
+
+    def toggle_script_running(self):
+        self.is_script_running = not self.is_script_running
+        if self.is_script_running:
+            if not self.scripts:
+                QMessageBox.warning(self, "提示", "请先在脚本管理中新建或配置脚本！")
+                self.is_script_running = False
+                return
+            self.btn_toggle_script.setText("⏹ 停止操作脚本")
+            self.btn_toggle_script.setStyleSheet("background-color: #ff3333; color: white; font-size: 13px; font-weight: bold;")
+            
+            first_script = self.scripts[0]
+            self.script_runner_thread = ScriptRunnerThread(first_script)
+            self.script_runner_thread.start()
+        else:
+            self.btn_toggle_script.setText("▶ 开始操作脚本")
+            self.btn_toggle_script.setStyleSheet("background-color: #0088cc; color: white; font-size: 13px; font-weight: bold;")
+            if self.script_runner_thread:
+                self.script_runner_thread.stop()
+                self.script_runner_thread.wait()
+
+    def _on_countdown_tick(self, rem_sec):
+        self.lbl_countdown.setText(f"⏱️ 下一次刷新: {rem_sec:.1f} 秒")
+
+    def _on_value_updated(self, box, time_str, val, raw_text):
+        box.update_result_display(val, raw_text)
+        box.add_log_val(time_str, val, raw_text)
+
+        is_alarm = False
+        is_warning = False
+
+        if val is not None:
+            if val > box.upper or val < box.lower:
+                is_alarm = True
+            elif box.check_mid_condition(val):
+                is_warning = True
+
+        if is_alarm:
+            if not box.user_cleared_alarm:
+                box.set_alarm_state(True)
+                if not box.is_muted:
+                    self.sound_player.play()
+        else:
+            box.user_cleared_alarm = False
+            box.set_alarm_state(False)
+
+        box.set_warning_state(is_warning)
+
+        any_alarm = any(b.is_alarm and not b.is_muted for b in self.boxes)
+        if not any_alarm:
+            self.sound_player.stop()
 
     def save_config(self):
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        config_path = os.path.join(script_dir, "config.json")
-        boxes_data = []
-        for box in self.boxes:
-            boxes_data.append({
-                "id": box.box_id,
-                "x": box.capture_x,
-                "y": box.capture_y,
-                "w": box.capture_w,
-                "h": box.capture_h,
-                "name": box.name,
-                "lower": box.lower,
-                "mid_val": box.mid_val,
-                "upper": box.upper,
-                "decimal_places": box.decimal_places,
-                "mid_op": box.mid_op
-            })
-        data = {
-            "check_interval": self.check_interval,
-            "compare_minutes": self.compare_minutes,
+        cfg = {
             "ocr_params": self.ocr_params,
+            "monitor_interval": self.monitor_interval,
+            "compare_minutes": self.compare_minutes,
+            "users_data": self.users_data,
             "scripts": self.scripts,
-            "users": self.users,
-            "boxes": boxes_data
+            "boxes": []
         }
+        for b in self.boxes:
+            cfg["boxes"].append({
+                "id": b.box_id,
+                "x": b.capture_x,
+                "y": b.capture_y,
+                "w": b.capture_w,
+                "h": b.capture_h,
+                "name": b.name,
+                "lower": b.lower,
+                "mid_val": b.mid_val,
+                "mid_op": b.mid_op,
+                "upper": b.upper,
+                "decimal_places": b.decimal_places,
+                "is_muted": b.is_muted
+            })
         try:
-            with open(config_path, "w", encoding="utf-8") as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
+            with open("config.json", "w", encoding="utf-8") as f:
+                json.dump(cfg, f, ensure_ascii=False, indent=2)
         except Exception as e:
             print(f"保存配置失败: {e}")
 
+    def load_config(self):
+        if not os.path.exists("config.json"): return
+        try:
+            with open("config.json", "r", encoding="utf-8") as f:
+                cfg = json.load(f)
+
+            self.ocr_params = cfg.get("ocr_params", self.ocr_params)
+            self.monitor_interval = cfg.get("monitor_interval", 1.0)
+            self.compare_minutes = cfg.get("compare_minutes", 5.0)
+            self.users_data = cfg.get("users_data", self.users_data)
+            self.scripts = cfg.get("scripts", [])
+
+            for b_cfg in cfg.get("boxes", []):
+                box = OverlayRegionWidget(
+                    b_cfg["id"], b_cfg["x"], b_cfg["y"], b_cfg["w"], b_cfg["h"],
+                    name=b_cfg.get("name", "区域"),
+                    lower=b_cfg.get("lower", 0.0),
+                    mid_val=b_cfg.get("mid_val", 50.0),
+                    upper=b_cfg.get("upper", 100.0),
+                    decimal_places=b_cfg.get("decimal_places", 0),
+                    mid_op=b_cfg.get("mid_op", ">")
+                )
+                box.is_muted = b_cfg.get("is_muted", False)
+                box.delete_requested.connect(self._remove_box)
+                box.show()
+                box.set_edit_mode(self.is_editing)
+                self.boxes.append(box)
+
+        except Exception as e:
+            print(f"加载配置失败: {e}")
+
     def closeEvent(self, event):
-        self.f12_listener.stop()
+        self.save_config()
         self.sound_player.stop()
-        if self.monitor_thread:
+        if hasattr(self, 'f12_listener'):
+            self.f12_listener.stop()
+        if hasattr(self, 'monitor_thread') and self.monitor_thread:
             self.monitor_thread.stop()
-        if self.script_thread:
-            self.script_thread.stop()
+        if self.script_runner_thread:
+            self.script_runner_thread.stop()
         for b in self.boxes:
             b.close()
-        self.save_config()
         event.accept()
 
 
