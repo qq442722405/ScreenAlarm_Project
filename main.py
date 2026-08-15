@@ -386,7 +386,11 @@ class OCRAdjustDialog(QDialog):
             for t in targets:
                 if hasattr(t, 'setWindowOpacity'):
                     t.setWindowOpacity(1.0)
-            self.activateWindow()
+                if hasattr(t, 'raise_'):
+                    t.raise_()
+                if hasattr(t, 'activateWindow'):
+                    t.activateWindow()
+
             if w <= 0 or h <= 0:
                 return
             screen = QApplication.primaryScreen()
@@ -609,8 +613,7 @@ class ScriptEditorDialog(QDialog):
         if steps:
             for s in steps:
                 self._add_step_row(s)
-        else:
-            self._add_step_row({"type": "click"})
+        # 内部如果为空则保持为空窗口，方便从空开始配置
 
     def _add_click_step_direct(self):
         """点击菜单添加“点击拾取”时，生成行并直接激活坐标拾取界面"""
@@ -658,7 +661,6 @@ class ScriptEditorDialog(QDialog):
                 y_val = current_step.get("y", -1) if current_step else -1
                 coord_str = f"({x_val}, {y_val})" if x_val >= 0 and y_val >= 0 else "(未选择坐标)"
                 
-                # 重新设计：显示坐标标签改为点击手势，支持点击文本直接调用坐标选择
                 lbl_coord = QLabel(coord_str)
                 lbl_coord.setAlignment(Qt.AlignCenter)
                 lbl_coord.setCursor(Qt.PointingHandCursor)
@@ -725,7 +727,12 @@ class ScriptEditorDialog(QDialog):
             for t in targets:
                 if hasattr(t, 'setWindowOpacity'):
                     t.setWindowOpacity(1.0)
-            self.activateWindow()
+                if hasattr(t, 'raise_'):
+                    t.raise_()
+                if hasattr(t, 'activateWindow'):
+                    t.activateWindow()
+            QApplication.processEvents()
+            
             if x >= 0 and y >= 0:
                 label_widget.setText(f"({x}, {y})")
 
@@ -863,7 +870,7 @@ class ScriptManagerDialog(QDialog):
             self.list_widget.addItem(f"📜 {name} ({steps_cnt} 个步骤)")
 
     def _add_script(self):
-        dlg = ScriptEditorDialog(parent=self)
+        dlg = ScriptEditorDialog(script_data={"name": "新脚本", "steps": []}, parent=self)
         if dlg.exec() == QDialog.Accepted:
             data = dlg.get_script_data()
             self.scripts.append(data)
@@ -1861,7 +1868,7 @@ MOBILE_HTML_TEMPLATE = """
                     container.innerHTML = '';
                     users.forEach(u => {
                         const div = document.createElement('div');
-                        div.style.cssText = 'display:flex; justify-space-between; align-items:center; padding:4px 0; border-bottom:1px solid rgba(255,255,255,0.1); font-size:12px;';
+                        div.style.cssText = 'display:flex; justify-content:space-between; align-items:center; padding:4px 0; border-bottom:1px solid rgba(255,255,255,0.1); font-size:12px;';
                         div.innerHTML = `<span>👤 ${u}</span> ${u !== 'admin' ? `<button class="btn-action" style="background:#ff3333;" onclick="handleDelUser('${u}')">删除</button>` : ''}`;
                         container.appendChild(div);
                     });
@@ -2207,6 +2214,7 @@ class MainWindow(QWidget):
         self.is_monitoring = False
         self.is_script_running = False
         self.is_editing = True
+        self.panels_hidden = False
         self.sound_player = AlarmSoundPlayer()
         self.reader = None
 
@@ -2296,33 +2304,44 @@ class MainWindow(QWidget):
         bottom_layout.addWidget(self.btn_hide_panels)
         main_layout.addLayout(bottom_layout)
 
-    def _pick_new_box_region(self):
-        self.setWindowOpacity(0.0)
-        QApplication.processEvents()
-        time.sleep(0.2)
+    def toggle_edit_mode(self):
+        self.is_editing = not self.is_editing
+        if self.is_editing:
+            self.btn_edit_mode.setText("🔒 锁定选框编辑")
+        else:
+            self.btn_edit_mode.setText("🔓 解锁选框编辑")
+        for box in self.boxes:
+            box.set_edit_mode(self.is_editing)
+        self.save_config()
 
-        picker = CoordinatePicker()
+    def toggle_hide_panels(self):
+        self.panels_hidden = not self.panels_hidden
+        self.btn_hide_panels.setText("👁️ 显示浮动面板" if self.panels_hidden else "👁️ 隐藏浮动面板")
+        for box in self.boxes:
+            box.set_panel_hidden(self.panels_hidden)
+
+    def _pick_new_box_region(self):
+        self.hide()
+        time.sleep(0.2)
+        self.picker = CoordinatePicker()
         def on_picked(x, y, w, h):
-            self.setWindowOpacity(1.0)
-            self.activateWindow()
+            self.show()
             if w > 0 and h > 0:
-                new_id = len(self.boxes) + 1
-                box = OverlayRegionWidget(new_id, x, y, w, h, name=f"区域 {new_id}")
-                box.delete_requested.connect(self._remove_box)
-                box.show()
+                box_id = max([b.box_id for b in self.boxes], default=0) + 1
+                box = OverlayRegionWidget(box_id, x, y, w, h, name=f"区域{box_id}")
+                box.delete_requested.connect(self._delete_box)
                 box.set_edit_mode(self.is_editing)
+                box.show()
                 self.boxes.append(box)
                 self.save_config()
+        self.picker.coord_selected.connect(on_picked)
+        self.picker.showFullScreen()
 
-        picker.coord_selected.connect(on_picked)
-        picker.showFullScreen()
-        picker.raise_()
-        picker.activateWindow()
-
-    def _remove_box(self, box):
+    def _delete_box(self, box):
         if box in self.boxes:
             self.boxes.remove(box)
             box.close()
+            box.deleteLater()
             self.save_config()
 
     def _open_ocr_adjust(self):
@@ -2333,44 +2352,21 @@ class MainWindow(QWidget):
                 self.monitor_thread.update_params(ocr_params=self.ocr_params)
             self.save_config()
 
+    def align_boxes_in_grid(self):
+        if not self.boxes: return
+        start_x, start_y = 100, 100
+        cols = 3
+        spacing_x, spacing_y = 160, 120
+        for i, box in enumerate(self.boxes):
+            r, c = divmod(i, cols)
+            box.capture_x = start_x + c * spacing_x
+            box.capture_y = start_y + r * spacing_y
+            box._update_geometry()
+        self.save_config()
+
     def _open_script_manager(self):
         dlg = ScriptManagerDialog(self.scripts, parent=self)
         dlg.exec()
-
-    def align_boxes_in_grid(self):
-        if not self.boxes: return
-        padding = 10
-        cur_x, cur_y = 50, 50
-        max_h = 0
-        screen_w = QApplication.primaryScreen().geometry().width()
-
-        for box in self.boxes:
-            if cur_x + box.width() > screen_w - 50:
-                cur_x = 50
-                cur_y += max_h + padding
-                max_h = 0
-
-            box.capture_x = cur_x
-            box.capture_y = cur_y
-            box._update_geometry()
-            cur_x += box.width() + padding
-            max_h = max(max_h, box.height())
-
-        self.save_config()
-
-    def toggle_edit_mode(self):
-        self.is_editing = not self.is_editing
-        self.btn_edit_mode.setText("🔒 锁定选框编辑" if self.is_editing else "✏️ 解锁选框编辑")
-        for box in self.boxes:
-            box.set_edit_mode(self.is_editing)
-
-    def toggle_hide_panels(self):
-        is_hidden = getattr(self, 'panels_hidden', False)
-        is_hidden = not is_hidden
-        self.panels_hidden = is_hidden
-        self.btn_hide_panels.setText("👁️ 显示浮动面板" if is_hidden else "👁️ 隐藏浮动面板")
-        for box in self.boxes:
-            box.set_panel_hidden(is_hidden)
 
     def toggle_monitoring(self):
         self.is_monitoring = not self.is_monitoring
@@ -2383,8 +2379,8 @@ class MainWindow(QWidget):
 
             self.monitor_thread = MonitorThread(self.boxes, interval=self.monitor_interval, ocr_params=self.ocr_params, scale=scale)
             self.monitor_thread.set_reader(self.reader)
-            self.monitor_thread.value_updated.connect(self._on_value_updated)
-            self.monitor_thread.countdown_tick.connect(self._on_countdown_tick)
+            self.monitor_thread.value_updated.connect(self.update_box_value)
+            self.monitor_thread.countdown_tick.connect(self.update_countdown)
             self.monitor_thread.start()
         else:
             self.btn_toggle_monitor.setText("▶ 开始监控 (F12)")
@@ -2392,21 +2388,20 @@ class MainWindow(QWidget):
             if hasattr(self, 'monitor_thread') and self.monitor_thread:
                 self.monitor_thread.stop()
                 self.monitor_thread.wait()
-            self.lbl_countdown.setText("⏱️ 监控已停止")
+                self.monitor_thread = None
             self.sound_player.stop()
+            self.lbl_countdown.setText("⏱️ 下一次刷新: --")
 
     def toggle_script_running(self):
         self.is_script_running = not self.is_script_running
         if self.is_script_running:
             if not self.scripts:
-                QMessageBox.warning(self, "提示", "请先在脚本管理中新建或配置脚本！")
+                QMessageBox.warning(self, "提示", "请先在脚本管理中新建并配置脚本！")
                 self.is_script_running = False
                 return
             self.btn_toggle_script.setText("⏹ 停止操作脚本")
             self.btn_toggle_script.setStyleSheet("background-color: #ff3333; color: white; font-size: 13px; font-weight: bold;")
-            
-            first_script = self.scripts[0]
-            self.script_runner_thread = ScriptRunnerThread(first_script)
+            self.script_runner_thread = ScriptRunnerThread(self.scripts[0])
             self.script_runner_thread.start()
         else:
             self.btn_toggle_script.setText("▶ 开始操作脚本")
@@ -2414,49 +2409,55 @@ class MainWindow(QWidget):
             if self.script_runner_thread:
                 self.script_runner_thread.stop()
                 self.script_runner_thread.wait()
+                self.script_runner_thread = None
 
-    def _on_countdown_tick(self, rem_sec):
-        self.lbl_countdown.setText(f"⏱️ 下一次刷新: {rem_sec:.1f} 秒")
-
-    def _on_value_updated(self, box, time_str, val, raw_text):
+    def update_box_value(self, box, time_str, val, raw_text):
         box.update_result_display(val, raw_text)
         box.add_log_val(time_str, val, raw_text)
 
-        is_alarm = False
-        is_warning = False
+        any_alarm = False
+        for b in self.boxes:
+            is_alarm = False
+            if b.last_val is not None:
+                if b.last_val > b.upper or b.last_val < b.lower:
+                    is_alarm = True
+            
+            if is_alarm:
+                if b.user_cleared_alarm and b.cleared_val == b.last_val:
+                    is_alarm = False
+                else:
+                    b.user_cleared_alarm = False
 
-        if val is not None:
-            if val > box.upper or val < box.lower:
-                is_alarm = True
-            elif box.check_mid_condition(val):
-                is_warning = True
+            b.set_alarm_state(is_alarm)
+            if is_alarm and not b.is_muted:
+                any_alarm = True
 
-        if is_alarm:
-            if not box.user_cleared_alarm:
-                box.set_alarm_state(True)
-                if not box.is_muted:
-                    self.sound_player.play()
+            is_warn = False
+            if b.last_val is not None and not is_alarm:
+                if b.check_mid_condition(b.last_val):
+                    is_warn = True
+            b.set_warning_state(is_warn)
+
+        if any_alarm:
+            self.sound_player.play()
         else:
-            box.user_cleared_alarm = False
-            box.set_alarm_state(False)
-
-        box.set_warning_state(is_warning)
-
-        any_alarm = any(b.is_alarm and not b.is_muted for b in self.boxes)
-        if not any_alarm:
             self.sound_player.stop()
 
+    def update_countdown(self, rem):
+        self.lbl_countdown.setText(f"⏱️ 下一次刷新: {rem:.1f}s")
+
     def save_config(self):
-        cfg = {
+        config = {
+            "users": self.users_data,
+            "compare_minutes": self.compare_minutes,
             "ocr_params": self.ocr_params,
             "monitor_interval": self.monitor_interval,
-            "compare_minutes": self.compare_minutes,
-            "users_data": self.users_data,
+            "is_editing": self.is_editing,
             "scripts": self.scripts,
             "boxes": []
         }
         for b in self.boxes:
-            cfg["boxes"].append({
+            config["boxes"].append({
                 "id": b.box_id,
                 "x": b.capture_x,
                 "y": b.capture_y,
@@ -2467,63 +2468,71 @@ class MainWindow(QWidget):
                 "mid_val": b.mid_val,
                 "mid_op": b.mid_op,
                 "upper": b.upper,
-                "decimal_places": b.decimal_places,
-                "is_muted": b.is_muted
+                "decimal_places": b.decimal_places
             })
         try:
             with open("config.json", "w", encoding="utf-8") as f:
-                json.dump(cfg, f, ensure_ascii=False, indent=2)
+                json.dump(config, f, ensure_ascii=False, indent=2)
         except Exception as e:
             print(f"保存配置失败: {e}")
 
     def load_config(self):
-        if not os.path.exists("config.json"): return
+        if not os.path.exists("config.json"):
+            return
         try:
             with open("config.json", "r", encoding="utf-8") as f:
-                cfg = json.load(f)
+                config = json.load(f)
+            self.users_data = config.get("users", {"admin": "123456"})
+            self.compare_minutes = config.get("compare_minutes", 5.0)
+            self.ocr_params = config.get("ocr_params", self.ocr_params)
+            self.monitor_interval = config.get("monitor_interval", 1.0)
+            self.is_editing = config.get("is_editing", True)
+            self.scripts = config.get("scripts", [])
 
-            self.ocr_params = cfg.get("ocr_params", self.ocr_params)
-            self.monitor_interval = cfg.get("monitor_interval", 1.0)
-            self.compare_minutes = cfg.get("compare_minutes", 5.0)
-            self.users_data = cfg.get("users_data", self.users_data)
-            self.scripts = cfg.get("scripts", [])
-
-            for b_cfg in cfg.get("boxes", []):
+            for bdata in config.get("boxes", []):
                 box = OverlayRegionWidget(
-                    b_cfg["id"], b_cfg["x"], b_cfg["y"], b_cfg["w"], b_cfg["h"],
-                    name=b_cfg.get("name", "区域"),
-                    lower=b_cfg.get("lower", 0.0),
-                    mid_val=b_cfg.get("mid_val", 50.0),
-                    upper=b_cfg.get("upper", 100.0),
-                    decimal_places=b_cfg.get("decimal_places", 0),
-                    mid_op=b_cfg.get("mid_op", ">")
+                    box_id=bdata.get("id", 1),
+                    x=bdata.get("x", 100),
+                    y=bdata.get("y", 100),
+                    w=bdata.get("w", 100),
+                    h=bdata.get("h", 50),
+                    name=bdata.get("name", "区域"),
+                    lower=bdata.get("lower", 0.0),
+                    mid_val=bdata.get("mid_val", 50.0),
+                    upper=bdata.get("upper", 100.0),
+                    decimal_places=bdata.get("decimal_places", 0),
+                    mid_op=bdata.get("mid_op", ">")
                 )
-                box.is_muted = b_cfg.get("is_muted", False)
-                box.delete_requested.connect(self._remove_box)
-                box.show()
+                box.delete_requested.connect(self._delete_box)
                 box.set_edit_mode(self.is_editing)
+                box.show()
                 self.boxes.append(box)
 
+            if not self.is_editing:
+                self.btn_edit_mode.setText("🔓 解锁选框编辑")
         except Exception as e:
-            print(f"加载配置失败: {e}")
+            print(f"读取配置失败: {e}")
 
     def closeEvent(self, event):
-        self.save_config()
         self.sound_player.stop()
-        if hasattr(self, 'f12_listener'):
-            self.f12_listener.stop()
         if hasattr(self, 'monitor_thread') and self.monitor_thread:
             self.monitor_thread.stop()
+            self.monitor_thread.wait()
         if self.script_runner_thread:
             self.script_runner_thread.stop()
-        for b in self.boxes:
-            b.close()
+            self.script_runner_thread.wait()
+        if hasattr(self, 'f12_listener') and self.f12_listener:
+            self.f12_listener.stop()
+            self.f12_listener.wait()
+        for box in self.boxes:
+            box.close()
+        self.save_config()
         event.accept()
 
 
-# ==================== 程序主入口 ====================
+# ==================== 主程序入口 ====================
 if __name__ == "__main__":
     app = QApplication(sys.argv)
-    window = MainWindow()
-    window.show()
+    main_win = MainWindow()
+    main_win.show()
     sys.exit(app.exec())
