@@ -50,20 +50,10 @@ jobs:
       run: |
         python -m PyInstaller --noconfirm --onedir --windowed --name="屏幕数值监控报警" --icon="favicon.ico" --collect-all ddddocr --add-data "警报声.mp3;." --add-data "favicon.ico;." main.py
 
-    - name: 📦 生成固定下载压缩包
-      shell: pwsh
-      working-directory: ${{ steps.project.outputs.project_dir }}
-      run: |
-        if (Test-Path "屏幕数值监控报警-Windows.zip") {
-          Remove-Item "屏幕数值监控报警-Windows.zip" -Force
-        }
-        # 压缩包打开后第一层就是“屏幕数值监控报警”目录
-        Compress-Archive -Path "dist\屏幕数值监控报警" -DestinationPath "屏幕数值监控报警-Windows.zip" -Force
-        Write-Host "生成：$(Join-Path (Get-Location) '屏幕数值监控报警-Windows.zip')"
-
-    - name: 📤 上传固定下载文件
+    - name: 📤 上传最终程序目录（不再套一层 ZIP）
       uses: actions/upload-artifact@v4
       with:
         name: 屏幕数值监控报警-Windows
-        path: ${{ steps.project.outputs.project_dir }}/屏幕数值监控报警-Windows.zip
+        path: ${{ steps.project.outputs.project_dir }}/dist/屏幕数值监控报警
         if-no-files-found: error
+        compression-level: 0
