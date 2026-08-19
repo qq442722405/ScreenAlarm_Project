@@ -708,7 +708,9 @@ class ScriptEditorDialog(QDialog):
                     if not widgets:
                         return
                     self._pick_row = target_row
-                    self.hide()
+                    # 不隐藏脚本编辑窗口，只暂时禁用，避免 QDialog.exec() 在
+                    # 拾取返回后出现焦点/模态状态异常，导致“保存脚本”按钮无响应。
+                    self.setEnabled(False)
                     self.picker = SingleCoordPicker()
 
                     def on_selected(px, py):
@@ -717,9 +719,8 @@ class ScriptEditorDialog(QDialog):
                         if px >= 0 and py >= 0 and w:
                             w["x"].setText(str(px))
                             w["y"].setText(str(py))
-                        # 先让拾取层完成关闭，再恢复编辑窗口，避免 Windows/Qt
-                        # 在鼠标松开事件期间抢焦点，造成“保存按钮点了没反应”。
-                        QTimer.singleShot(30, self._restore_after_pick)
+                        # 等待拾取窗口彻底关闭后恢复编辑窗口。
+                        QTimer.singleShot(120, self._restore_after_pick)
 
                     self.picker.coord_selected.connect(on_selected)
                     self.picker.showFullScreen()
@@ -781,9 +782,12 @@ class ScriptEditorDialog(QDialog):
         except Exception:
             self.picker = None
 
+        self.setEnabled(True)
         self.show()
         self.raise_()
         self.activateWindow()
+        # 强制把焦点放回脚本编辑窗口，保证随后可以直接点击“确定/保存”。
+        self.setFocus(Qt.OtherFocusReason)
 
     def _del_step_row_by_btn(self, btn):
         for r in range(self.table.rowCount()):
