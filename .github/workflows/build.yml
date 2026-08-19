@@ -1,10 +1,6 @@
-name: Build Windows Executable
+name: 手动打包 Windows
 
 on:
-  push:
-    branches: [ "main", "master" ]
-  pull_request:
-    branches: [ "main", "master" ]
   workflow_dispatch:
 
 jobs:
@@ -15,7 +11,7 @@ jobs:
     - name: 📥 检出代码
       uses: actions/checkout@v4
 
-    - name: 🐍 配置 Python 环境 (3.10)
+    - name: 🐍 配置 Python 环境
       uses: actions/setup-python@v5
       with:
         python-version: "3.10"
@@ -45,16 +41,29 @@ jobs:
       shell: pwsh
       run: |
         python -m pip install --upgrade pip
-        pip install -r "${{ steps.project.outputs.project_dir }}\requirements.txt"
+        python -m pip install -r "${{ steps.project.outputs.project_dir }}\requirements.txt"
+        python -m pip install pyinstaller
 
-    - name: 🔨 使用 PyInstaller 打包应用
+    - name: 🔨 打包 Windows 程序
       shell: pwsh
       working-directory: ${{ steps.project.outputs.project_dir }}
       run: |
-        pyinstaller --noconfirm --onedir --windowed --name="屏幕数值监控报警" --icon="favicon.ico" --collect-all ddddocr --add-data "警报声.mp3;." --add-data "favicon.ico;." main.py
+        python -m PyInstaller --noconfirm --onedir --windowed --name="屏幕数值监控报警" --icon="favicon.ico" --collect-all ddddocr --add-data "警报声.mp3;." --add-data "favicon.ico;." main.py
 
-    - name: 📤 上传打包后的文件 (Artifacts)
+    - name: 📦 生成固定下载压缩包
+      shell: pwsh
+      working-directory: ${{ steps.project.outputs.project_dir }}
+      run: |
+        if (Test-Path "屏幕数值监控报警-Windows.zip") {
+          Remove-Item "屏幕数值监控报警-Windows.zip" -Force
+        }
+        # 压缩包打开后第一层就是“屏幕数值监控报警”目录
+        Compress-Archive -Path "dist\屏幕数值监控报警" -DestinationPath "屏幕数值监控报警-Windows.zip" -Force
+        Write-Host "生成：$(Join-Path (Get-Location) '屏幕数值监控报警-Windows.zip')"
+
+    - name: 📤 上传固定下载文件
       uses: actions/upload-artifact@v4
       with:
         name: 屏幕数值监控报警-Windows
-        path: ${{ steps.project.outputs.project_dir }}/dist/屏幕数值监控报警/
+        path: ${{ steps.project.outputs.project_dir }}/屏幕数值监控报警-Windows.zip
+        if-no-files-found: error
