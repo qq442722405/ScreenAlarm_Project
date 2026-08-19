@@ -458,7 +458,7 @@ class SingleCoordPicker(QDialog):
         self.result_x=None; self.result_y=None
         self.setWindowTitle("拾取点击坐标")
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.Tool | Qt.WindowStaysOnTopHint)
-        self.setModal(True); self.setCursor(Qt.CrossCursor); self.setMouseTracking(True)
+        self.setModal(True); self.setCursor(Qt.CrossCursor); self.setMouseTracking(True); self.setAttribute(Qt.WA_TranslucentBackground, True); self.setAttribute(Qt.WA_NoSystemBackground, True); self.setAutoFillBackground(False)
         screens=QApplication.screens()
         self.total_rect=screens[0].geometry() if screens else QApplication.primaryScreen().geometry()
         for screen in screens[1:]: self.total_rect=self.total_rect.united(screen.geometry())
@@ -478,7 +478,7 @@ class SingleCoordPicker(QDialog):
         if py+self.pos_label.height()>self.height(): py=local.y()-self.pos_label.height()-10
         self.pos_label.move(max(0,px),max(0,py)); self.update()
     def paintEvent(self,event):
-        painter=QPainter(self); painter.fillRect(self.rect(),QColor(0,0,0,80))
+        painter=QPainter(self); painter.fillRect(self.rect(),QColor(0,0,0,42))
         if self.cur_pos.x()>=0:
             painter.setPen(QPen(QColor(0,255,140),1,Qt.DashLine)); painter.drawLine(0,self.cur_pos.y(),self.width(),self.cur_pos.y()); painter.drawLine(self.cur_pos.x(),0,self.cur_pos.x(),self.height())
         painter.end()
@@ -499,9 +499,9 @@ class SingleCoordPicker(QDialog):
 class ScriptEditorDialog(QDialog):
     def __init__(self,script_data=None,parent=None):
         super().__init__(parent); self.setWindowTitle("⚙️ 详细脚本配置"); self.resize(700,485); self.setWindowFlags(Qt.WindowStaysOnTopHint|Qt.Tool)
-        self.script_data=script_data or {"name":"新脚本","steps":[]}; self._row_widgets={}; self.picker=None
+        self.script_data=script_data or {"name":"新脚本","run_mode":"click","steps":[]}; self._row_widgets={}; self.picker=None
         self.setStyleSheet("QDialog{background:#1a1a26;color:white;} QLabel{color:#e0e0e0;font-size:11px;font-weight:bold;} QLineEdit,QComboBox,QDoubleSpinBox,QSpinBox{background:rgba(26,26,38,.8);color:#00ff8c;border:1px solid rgba(255,255,255,.2);border-radius:4px;padding:4px;font-weight:bold;} QTableWidget{background:rgba(10,10,15,.9);color:white;gridline-color:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.2);border-radius:4px;} QPushButton{background:rgba(43,45,66,.8);color:white;border:1px solid rgba(255,255,255,.2);border-radius:4px;padding:4px 8px;font-weight:bold;} QHeaderView::section{background:rgba(43,45,66,.8);color:#00ff8c;font-weight:bold;}")
-        layout=QVBoxLayout(self); nl=QHBoxLayout(); nl.addWidget(QLabel("📝 脚本名字:")); self.edit_name=QLineEdit(self.script_data.get("name","新脚本")); nl.addWidget(self.edit_name); layout.addLayout(nl)
+        layout=QVBoxLayout(self); nl=QHBoxLayout(); nl.addWidget(QLabel("📝 脚本名字:")); self.edit_name=QLineEdit(self.script_data.get("name","新脚本")); nl.addWidget(self.edit_name); nl.addWidget(QLabel("执行方式:")); self.combo_run_mode=QComboBox(); self.combo_run_mode.addItems(["点击控制","开始操作控制"]); self.combo_run_mode.setCurrentIndex(1 if self.script_data.get("run_mode","click")=="operation" else 0); self.combo_run_mode.setToolTip("点击控制：悬浮窗或网页端点击脚本执行；开始操作控制：由悬浮窗/网页的“开始操作”统一执行"); nl.addWidget(self.combo_run_mode); layout.addLayout(nl)
         self.table=QTableWidget(); self.table.setColumnCount(4); self.table.setHorizontalHeaderLabels(["步骤","步骤类型","详细参数与操作（移动到坐标并左/右键点击）","删除"]); self.table.horizontalHeader().setSectionResizeMode(0,QHeaderView.ResizeToContents); self.table.horizontalHeader().setSectionResizeMode(1,QHeaderView.ResizeToContents); self.table.horizontalHeader().setSectionResizeMode(2,QHeaderView.Stretch); self.table.horizontalHeader().setSectionResizeMode(3,QHeaderView.ResizeToContents); layout.addWidget(self.table)
         bl=QHBoxLayout(); self.btn_add=QPushButton("➕ 添加步骤 ▾"); self.add_menu=QMenu(self); self.add_menu.addAction("🖱️ 添加点击",lambda:self._add_step_row({"type":"click"})); self.add_menu.addAction("⏱️ 延迟",lambda:self._add_step_row({"type":"delay"})); self.add_menu.addAction("🔀 跳转",lambda:self._add_step_row({"type":"jump"})); self.btn_add.setMenu(self.add_menu); bl.addWidget(self.btn_add); bl.addStretch(); layout.addLayout(bl)
         buttons=QDialogButtonBox(QDialogButtonBox.Ok|QDialogButtonBox.Cancel); buttons.accepted.connect(self._on_accept); buttons.rejected.connect(self.reject); layout.addWidget(buttons)
@@ -570,7 +570,7 @@ class ScriptEditorDialog(QDialog):
                     q=pl.itemAt(i).widget()
                     if isinstance(q,QSpinBox): v=q.value()
                 steps.append({"type":"jump","jump":v})
-        self.script_data={"name":self.edit_name.text().strip() or "未命名脚本","steps":steps}; self.accept()
+        self.script_data={"name":self.edit_name.text().strip() or "未命名脚本","run_mode":"operation" if self.combo_run_mode.currentIndex()==1 else "click","steps":steps}; self.accept()
     def get_script_data(self): return self.script_data
 
 
@@ -1440,6 +1440,10 @@ MOBILE_HTML_TEMPLATE = """
         </div>
 
         <div id="cards-container"></div>
+        <div id="scripts-panel" style="display:none; margin-top:10px; background:rgba(0,0,0,.35); border:1px solid rgba(255,255,255,.12); border-radius:8px; padding:8px;">
+            <div style="color:#00ff8c;font-weight:bold;font-size:13px;margin-bottom:6px;">📜 脚本点击执行</div>
+            <div id="scripts-container" style="display:flex;flex-wrap:wrap;gap:6px;"></div>
+        </div>
     </div>
 
     <!-- 登录弹窗 -->
@@ -1487,6 +1491,8 @@ MOBILE_HTML_TEMPLATE = """
                 document.getElementById('header-row2').style.display = 'flex';
                 document.getElementById('header-row3').style.display = 'flex';
                 document.querySelectorAll('.toggle-icon').forEach(el => el.style.display = 'inline-block');
+                const scriptsPanel = document.getElementById('scripts-panel');
+                if (scriptsPanel) scriptsPanel.style.display = 'block';
             } else {
                 document.getElementById('login-box').style.display = 'inline-flex';
                 document.getElementById('user-box').style.display = 'none';
@@ -1499,6 +1505,8 @@ MOBILE_HTML_TEMPLATE = """
                     el.style.display = 'none';
                 });
                 document.querySelectorAll('.toggle-icon').forEach(el => el.style.display = 'none');
+                const scriptsPanel = document.getElementById('scripts-panel');
+                if (scriptsPanel) scriptsPanel.style.display = 'none';
             }
         }
 
@@ -1779,6 +1787,24 @@ MOBILE_HTML_TEMPLATE = """
             });
         }
 
+        function renderScripts(scripts) {
+            const panel = document.getElementById('scripts-panel');
+            const container = document.getElementById('scripts-container');
+            if (!panel || !container) return;
+            if (!currentUser) { panel.style.display = 'none'; container.innerHTML = ''; return; }
+            const clickScripts = (scripts || []).filter(s => s.run_mode === 'click');
+            panel.style.display = clickScripts.length ? 'block' : 'none';
+            container.innerHTML = '';
+            clickScripts.forEach(script => {
+                const btn = document.createElement('button');
+                btn.className = 'btn-top';
+                btn.style.cssText = script.running ? 'background:#ff3333;color:white;min-width:110px;' : 'background:#0088cc;color:white;min-width:110px;';
+                btn.innerText = script.running ? '⏹ 停止 ' + script.name : '▶ ' + script.name;
+                btn.onclick = () => postAction('run_script', -1, {script_idx: script.index});
+                container.appendChild(btn);
+            });
+        }
+
         async function fetchStatus() {
             try {
                 const res = await fetch('/api/status');
@@ -1812,6 +1838,7 @@ MOBILE_HTML_TEMPLATE = """
                 }
 
                 renderCards(data.boxes || []);
+                renderScripts(data.scripts || []);
             } catch(e) {}
         }
 
@@ -1891,11 +1918,22 @@ class WebServerThread(QThread):
                     'logs': logs
                 })
 
+            scripts_data = []
+            for i, script in enumerate(getattr(self.main_win, 'scripts', [])):
+                thread = self.main_win.script_threads[i] if i < len(self.main_win.script_threads) else None
+                scripts_data.append({
+                    'index': i,
+                    'name': script.get('name', f'脚本{i+1}'),
+                    'run_mode': script.get('run_mode', 'click'),
+                    'running': bool(thread and thread.isRunning())
+                })
+
             return jsonify({
                 'monitoring': self.main_win.monitoring,
                 'grille': getattr(self.main_win, 'operating', False),
                 'compare_min': compare_min,
                 'boxes': boxes_data,
+                'scripts': scripts_data,
                 'users': self.main_win.users
             })
 
@@ -2223,9 +2261,16 @@ class GlobalControlPanel(QWidget):
             # 设置右键快捷菜单政策（取代旁边的图标）
             btn.setContextMenuPolicy(Qt.CustomContextMenu)
             btn.customContextMenuRequested.connect(lambda pos, s_idx=idx, b=btn: self._show_script_context_menu(pos, s_idx, b))
-            
-            # 左键点击直接触发或停止脚本运行
-            btn.clicked.connect(lambda _, s_idx=idx: self._toggle_script_run(s_idx))
+
+            run_mode = script.get("run_mode", "click")
+            if run_mode == "operation":
+                # “开始操作控制”脚本不允许直接点击，由“开始操作”统一启动/停止。
+                btn.setToolTip("由“开始操作”控制")
+                if not is_running:
+                    btn.setStyleSheet("QPushButton { background-color: rgba(100,100,100,0.75); color: #dddddd; font-weight: bold; border-radius: 4px; padding: 2px 8px; }")
+            else:
+                btn.setToolTip("点击执行/停止脚本")
+                btn.clicked.connect(lambda _, s_idx=idx: self._toggle_script_run(s_idx))
 
             self.scripts_layout.addWidget(btn)
 
@@ -2295,22 +2340,53 @@ class GlobalControlPanel(QWidget):
             self._refresh_script_ui()
             self.save_config()
 
-    def _toggle_script_run(self, idx):
-        if idx >= len(self.scripts): return
+    def _start_script(self, idx):
+        if idx < 0 or idx >= len(self.scripts):
+            return False
         while len(self.script_threads) < len(self.scripts):
             self.script_threads.append(None)
-
         thread = self.script_threads[idx]
         if thread and thread.isRunning():
+            return True
+        runner = ScriptRunnerThread(self.scripts[idx], self)
+        runner.finished.connect(lambda i=idx: self._on_script_finished(i))
+        self.script_threads[idx] = runner
+        runner.start()
+        self._refresh_script_ui()
+        return True
+
+    def _stop_script(self, idx):
+        if idx < 0 or idx >= len(self.script_threads):
+            return
+        thread = self.script_threads[idx]
+        if thread:
             thread.stop()
             thread.wait()
             self.script_threads[idx] = None
-        else:
-            runner = ScriptRunnerThread(self.scripts[idx], self)
-            runner.finished.connect(lambda: self._on_script_finished(idx))
-            self.script_threads[idx] = runner
-            runner.start()
         self._refresh_script_ui()
+
+    def _toggle_script_run(self, idx):
+        if idx >= len(self.scripts): return
+        # 点击控制脚本才允许直接点击；“开始操作控制”脚本由开始操作统一控制
+        if self.scripts[idx].get("run_mode", "click") != "click":
+            return
+        while len(self.script_threads) < len(self.scripts):
+            self.script_threads.append(None)
+        thread = self.script_threads[idx]
+        if thread and thread.isRunning():
+            self._stop_script(idx)
+        else:
+            self._start_script(idx)
+
+    def _start_operation_scripts(self):
+        for idx, script in enumerate(self.scripts):
+            if script.get("run_mode", "click") == "operation":
+                self._start_script(idx)
+
+    def _stop_operation_scripts(self):
+        for idx, script in enumerate(self.scripts):
+            if script.get("run_mode", "click") == "operation":
+                self._stop_script(idx)
 
     def _on_script_finished(self, idx):
         if idx < len(self.script_threads):
@@ -2486,9 +2562,11 @@ class GlobalControlPanel(QWidget):
         if self.operating:
             self.btn_toggle_grille.setText("⏹ 停止操作")
             self.btn_toggle_grille.setStyleSheet("background-color: #ff3333; color: white;")
+            self._start_operation_scripts()
         else:
             self.btn_toggle_grille.setText("▶ 开始操作")
             self.btn_toggle_grille.setStyleSheet("background-color: #0088cc; color: white;")
+            self._stop_operation_scripts()
 
     def _on_f12_pressed(self):
         self._toggle_monitoring()
@@ -2534,7 +2612,14 @@ class GlobalControlPanel(QWidget):
             self.alarm_player.stop()
 
     def _on_web_action(self, action, box_id, payload):
-        if action == 'toggle_monitor':
+        if action == 'run_script':
+            try:
+                idx = int(payload.get('script_idx', -1))
+                if 0 <= idx < len(self.scripts) and self.scripts[idx].get('run_mode', 'click') == 'click':
+                    self._toggle_script_run(idx)
+            except Exception as e:
+                print(f"网页执行脚本失败: {e}")
+        elif action == 'toggle_monitor':
             self._toggle_monitoring()
         elif action == 'toggle_grille':
             self._toggle_operating()
