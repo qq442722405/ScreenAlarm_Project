@@ -452,62 +452,102 @@ class OCRAdjustDialog(QDialog):
         }
 
 
-# ==================== 单点点击位置拾取器 (包含实时坐标与 F1 确认) ====================
-class SingleCoordPicker(QWidget):
-    coord_selected = Signal(int, int)
+# ==================== 单点点击位置拾取器（独立模态窗口） ====================
+class SingleCoordPicker(QDialog):
+    """
+    独立的坐标拾取窗口。
 
+    设计原则：
+    1. 拾取窗口使用 exec() 模态运行，脚本编辑窗口不会被 disable/enable。
+    2. 拾取完成后只返回结果，不在回调里修改脚本窗口状态。
+    3. 调用方在 exec() 返回后同步写入 X/Y，因此不会出现“坐标已经显示但保存不了”的状态问题。
+    4. 使用 Windows 全局屏幕坐标，支持多显示器虚拟桌面。
+    """
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowFlags(Qt.WindowStaysOnTopHint | Qt.FramelessWindowHint | Qt.Tool)
+        self.result_x = None
+        self.result_y = None
+
+        self.setWindowTitle("拾取点击坐标")
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.Tool | Qt.WindowStaysOnTopHint)
+        self.setModal(True)
         self.setCursor(Qt.CrossCursor)
         self.setMouseTracking(True)
-        
-        screens = QApplication.screens()
-        total_rect = screens[0].geometry()
-        for s in screens[1:]:
-            total_rect = total_rect.united(s.geometry())
-        self.setGeometry(total_rect)
 
-        self.screen_pixmap = QPixmap(total_rect.size())
+        screens = QApplication.screens()
+        if not screens:
+            self.total_rect = QApplication.primaryScreen().geometry()
+        else:
+            self.total_rect = screens[0].geometry()
+            for screen in screens[1:]:
+                self.total_rect = self.total_rect.united(screen.geometry())
+
+        self.setGeometry(self.total_rect)
+
+        # 先截图，再显示拾取层。注意多屏虚拟桌面的负坐标偏移。
+        self.screen_pixmap = QPixmap(self.total_rect.size())
+        self.screen_pixmap.fill(Qt.black)
         painter = QPainter(self.screen_pixmap)
         for screen in screens:
-            painter.drawPixmap(screen.geometry().topLeft(), screen.grabWindow(0))
+            geo = screen.geometry()
+            target = geo.translated(-self.total_rect.left(), -self.total_rect.top())
+            try:
+                shot = screen.grabWindow(0)
+                painter.drawPixmap(target.topLeft(), shot)
+            except Exception:
+                pass
         painter.end()
 
-        self.cur_pos = QPoint(0, 0)
+        self.cur_pos = QPoint(-1, -1)
 
-        self.label = QLabel("🎯 移动鼠标实时显示坐标，按 F1 键确定位置 (或点击左键，ESC 取消)", self)
-        self.label.setStyleSheet("color: white; background: rgba(0,0,0,220); padding: 8px 16px; border-radius: 6px; font-size: 13px; font-weight: bold;")
-        self.label.adjustSize()
-        self.label.move((self.width() - self.label.width()) // 2, self.height() - 80)
+        self.help_label = QLabel(
+            "🎯 移动鼠标查看坐标　｜　左键：确定　｜　ESC：取消", self
+        )
+        self.help_label.setStyleSheet(
+            "color:white; background:rgba(0,0,0,225); padding:9px 16px; "
+            "border-radius:6px; font-size:13px; font-weight:bold;"
+        )
+        self.help_label.adjustSize()
+        self.help_label.move(
+            max(10, (self.width() - self.help_label.width()) // 2),
+            max(10, self.height() - self.help_label.height() - 25)
+        )
 
         self.pos_label = QLabel("X: 0, Y: 0", self)
-        self.pos_label.setStyleSheet("color: #00ff8c; background: rgba(0,0,0,230); padding: 4px 10px; border-radius: 4px; font-size: 13px; font-weight: bold; border: 1px solid #00ff8c;")
+        self.pos_label.setStyleSheet(
+            "color:#00ff8c; background:rgba(0,0,0,235); padding:5px 10px; "
+            "border-radius:4px; font-size:13px; font-weight:bold; "
+            "border:1px solid #00ff8c;"
+        )
         self.pos_label.adjustSize()
         self.pos_label.hide()
 
+    def _global_pos(self, local_pos):
+        return self.mapToGlobal(local_pos)
+
     def mouseMoveEvent(self, event):
-        pos = event.position().toPoint()
-        self.cur_pos = pos
-        self.pos_label.setText(f"📍 X: {pos.x()}, Y: {pos.y()}")
+        local = event.position().toPoint()
+        self.cur_pos = local
+        global_pos = self._global_pos(local)
+        self.pos_label.setText(f"📍 X: {global_pos.x()}, Y: {global_pos.y()}")
         self.pos_label.adjustSize()
         self.pos_label.show()
 
-        px = pos.x() + 15
-        py = pos.y() + 15
+        px = local.x() + 15
+        py = local.y() + 15
         if px + self.pos_label.width() > self.width():
-            px = pos.x() - self.pos_label.width() - 10
+            px = local.x() - self.pos_label.width() - 10
         if py + self.pos_label.height() > self.height():
-            py = pos.y() - self.pos_label.height() - 10
-        self.pos_label.move(px, py)
+            py = local.y() - self.pos_label.height() - 10
+        self.pos_label.move(max(0, px), max(0, py))
         self.update()
 
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.drawPixmap(self.rect(), self.screen_pixmap)
-        painter.fillRect(self.rect(), QColor(0, 0, 0, 80))
+        painter.fillRect(self.rect(), QColor(0, 0, 0, 70))
 
-        if not self.cur_pos.isNull():
+        if self.cur_pos.x() >= 0 and self.cur_pos.y() >= 0:
             pen = QPen(QColor(0, 255, 140), 1, Qt.DashLine)
             painter.setPen(pen)
             painter.drawLine(0, self.cur_pos.y(), self.width(), self.cur_pos.y())
@@ -515,21 +555,23 @@ class SingleCoordPicker(QWidget):
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
-            # 这里必须返回屏幕全局坐标，而不是拾取窗口内部坐标。
-            # 多屏/非主屏时尤其重要，否则保存后脚本点击位置会偏移。
-            global_pos = self.mapToGlobal(event.position().toPoint())
-            self.coord_selected.emit(global_pos.x(), global_pos.y())
-            self.close()
+            global_pos = self._global_pos(event.position().toPoint())
+            self.result_x = int(global_pos.x())
+            self.result_y = int(global_pos.y())
+            self.accept()
+        elif event.button() == Qt.RightButton:
+            self.reject()
 
     def keyPressEvent(self, event):
-        if event.key() == Qt.Key_F1:
-            # F1 确认同样使用全局屏幕坐标
-            global_pos = QCursor.pos()
-            self.coord_selected.emit(global_pos.x(), global_pos.y())
-            self.close()
-        elif event.key() == Qt.Key_Escape:
-            self.coord_selected.emit(-1, -1)
-            self.close()
+        if event.key() == Qt.Key_Escape:
+            self.reject()
+        else:
+            super().keyPressEvent(event)
+
+    def get_result(self):
+        if self.result_x is None or self.result_y is None:
+            return None
+        return self.result_x, self.result_y
 
 
 # ==================== 详细脚本配置弹窗 (已优化：输入框加宽、手动填入更便捷) ====================
@@ -585,9 +627,7 @@ class ScriptEditorDialog(QDialog):
         """)
 
         self.script_data = script_data or {"name": "新脚本", "steps": []}
-        self.picker = None
         self._row_widgets = {}
-        self._pick_row = None
 
         layout = QVBoxLayout(self)
 
@@ -704,28 +744,35 @@ class ScriptEditorDialog(QDialog):
                 btn_pick.setFixedHeight(24)
 
                 def do_pick(_checked=False, target_row=row):
+                    # 全新设计：拾取器独立 exec()，不再 disable/enable 编辑窗口，
+                    # 不使用异步 signal 修改保存状态。exec() 返回后同步写入当前行。
                     widgets = self._row_widgets.get(target_row)
                     if not widgets:
                         return
-                    self._pick_row = target_row
-                    # 不隐藏脚本编辑窗口，只暂时禁用，避免 QDialog.exec() 在
-                    # 拾取返回后出现焦点/模态状态异常，导致“保存脚本”按钮无响应。
-                    self.setEnabled(False)
-                    self.picker = SingleCoordPicker()
 
-                    def on_selected(px, py):
-                        # 通过 row 找控件，而不是闭包保存可能已经被 Qt 删除的控件。
-                        w = self._row_widgets.get(target_row)
-                        if px >= 0 and py >= 0 and w:
-                            w["x"].setText(str(px))
-                            w["y"].setText(str(py))
-                        # 等待拾取窗口彻底关闭后恢复编辑窗口。
-                        QTimer.singleShot(120, self._restore_after_pick)
+                    picker = SingleCoordPicker(self)
+                    try:
+                        result = picker.exec()
+                    finally:
+                        picker.deleteLater()
 
-                    self.picker.coord_selected.connect(on_selected)
-                    self.picker.showFullScreen()
-                    self.picker.raise_()
-                    self.picker.activateWindow()
+                    if result == QDialog.Accepted:
+                        pos = picker.get_result()
+                        widgets = self._row_widgets.get(target_row)
+                        if pos and widgets:
+                            px, py = pos
+                            widgets["x"].setText(str(int(px)))
+                            widgets["y"].setText(str(int(py)))
+                            # 明确提交编辑控件当前文本，避免焦点/编辑状态影响读取。
+                            widgets["x"].setCursorPosition(len(widgets["x"].text()))
+                            widgets["y"].setCursorPosition(len(widgets["y"].text()))
+                            widgets["x"].editingFinished.emit()
+                            widgets["y"].editingFinished.emit()
+
+                            self.table.setCurrentCell(target_row, 2)
+                            self.raise_()
+                            self.activateWindow()
+                            widgets["x"].setFocus()
 
                 btn_pick.clicked.connect(do_pick)
 
@@ -772,22 +819,6 @@ class ScriptEditorDialog(QDialog):
         self.table.setCellWidget(row, 3, btn_del)
 
         self._update_row_indices()
-
-    def _restore_after_pick(self):
-        try:
-            if self.picker is not None:
-                self.picker.close()
-                self.picker.deleteLater()
-                self.picker = None
-        except Exception:
-            self.picker = None
-
-        self.setEnabled(True)
-        self.show()
-        self.raise_()
-        self.activateWindow()
-        # 强制把焦点放回脚本编辑窗口，保证随后可以直接点击“确定/保存”。
-        self.setFocus(Qt.OtherFocusReason)
 
     def _del_step_row_by_btn(self, btn):
         for r in range(self.table.rowCount()):
