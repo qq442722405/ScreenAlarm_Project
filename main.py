@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
     QPushButton, QLabel, QLineEdit, QDoubleSpinBox, QSpinBox,
     QListWidget, QCheckBox, QAbstractSpinBox, QFrame, QSizePolicy,
     QDialog, QFormLayout, QDialogButtonBox, QComboBox, QTableWidget,
-    QHeaderView, QMenu, QScrollArea, QMessageBox
+    QHeaderView, QMenu, QScrollArea, QMessageBox, QInputDialog
 )
 from PySide6.QtCore import Qt, QTimer, QThread, Signal, QPoint, QRect
 from PySide6.QtGui import (
@@ -499,13 +499,24 @@ class SingleCoordPicker(QDialog):
 class ScriptEditorDialog(QDialog):
     def __init__(self,script_data=None,parent=None):
         super().__init__(parent); self.setWindowTitle("⚙️ 详细脚本配置"); self.resize(700,485); self.setWindowFlags(Qt.WindowStaysOnTopHint|Qt.Tool)
-        self.script_data=script_data or {"name":"新脚本","run_mode":"click","steps":[]}; self._row_widgets={}; self.picker=None
+        self.script_data=script_data or {"name":"新脚本","run_mode":"click","password":"","steps":[]}; self._row_widgets={}; self.picker=None
         self.setStyleSheet("QDialog{background:#1a1a26;color:white;} QLabel{color:#e0e0e0;font-size:11px;font-weight:bold;} QLineEdit,QComboBox,QDoubleSpinBox,QSpinBox{background:rgba(26,26,38,.8);color:#00ff8c;border:1px solid rgba(255,255,255,.2);border-radius:4px;padding:4px;font-weight:bold;} QTableWidget{background:rgba(10,10,15,.9);color:white;gridline-color:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.2);border-radius:4px;} QPushButton{background:rgba(43,45,66,.8);color:white;border:1px solid rgba(255,255,255,.2);border-radius:4px;padding:4px 8px;font-weight:bold;} QHeaderView::section{background:rgba(43,45,66,.8);color:#00ff8c;font-weight:bold;}")
-        layout=QVBoxLayout(self); nl=QHBoxLayout(); nl.addWidget(QLabel("📝 脚本名字:")); self.edit_name=QLineEdit(self.script_data.get("name","新脚本")); nl.addWidget(self.edit_name); nl.addWidget(QLabel("执行方式:")); self.combo_run_mode=QComboBox(); self.combo_run_mode.addItems(["点击控制","开始操作控制"]); self.combo_run_mode.setCurrentIndex(1 if self.script_data.get("run_mode","click")=="operation" else 0); self.combo_run_mode.setToolTip("点击控制：悬浮窗或网页端点击脚本执行；开始操作控制：由悬浮窗/网页的“开始操作”统一执行"); nl.addWidget(self.combo_run_mode); layout.addLayout(nl)
+        layout=QVBoxLayout(self); nl=QHBoxLayout(); nl.addWidget(QLabel("📝 脚本名字:")); self.edit_name=QLineEdit(self.script_data.get("name","新脚本")); nl.addWidget(self.edit_name); nl.addWidget(QLabel("执行方式:")); self.combo_run_mode=QComboBox(); self.combo_run_mode.addItems(["点击控制","开始操作控制"]); self.combo_run_mode.setCurrentIndex(1 if self.script_data.get("run_mode","click")=="operation" else 0); self.combo_run_mode.setToolTip("点击控制：悬浮窗或网页端点击脚本执行；开始操作控制：由悬浮窗/网页的“开始操作”统一执行"); nl.addWidget(self.combo_run_mode); nl.addWidget(QLabel("执行密码:")); self.edit_password=QLineEdit(self.script_data.get("password", "")); self.edit_password.setEchoMode(QLineEdit.Password); self.edit_password.setPlaceholderText("点击控制必填"); self.edit_password.setMinimumWidth(120); nl.addWidget(self.edit_password); layout.addLayout(nl); self.combo_run_mode.currentIndexChanged.connect(self._update_password_state); self._update_password_state()
         self.table=QTableWidget(); self.table.setColumnCount(4); self.table.setHorizontalHeaderLabels(["步骤","步骤类型","详细参数与操作（移动到坐标并左/右键点击）","删除"]); self.table.horizontalHeader().setSectionResizeMode(0,QHeaderView.ResizeToContents); self.table.horizontalHeader().setSectionResizeMode(1,QHeaderView.ResizeToContents); self.table.horizontalHeader().setSectionResizeMode(2,QHeaderView.Stretch); self.table.horizontalHeader().setSectionResizeMode(3,QHeaderView.ResizeToContents); layout.addWidget(self.table)
         bl=QHBoxLayout(); self.btn_add=QPushButton("➕ 添加步骤 ▾"); self.add_menu=QMenu(self); self.add_menu.addAction("🖱️ 添加点击",self._add_click_step_and_pick); self.add_menu.addAction("⏱️ 延迟",lambda:self._add_step_row({"type":"delay"})); self.add_menu.addAction("🔀 跳转",lambda:self._add_step_row({"type":"jump"})); self.btn_add.setMenu(self.add_menu); bl.addWidget(self.btn_add); bl.addStretch(); layout.addLayout(bl)
         buttons=QDialogButtonBox(QDialogButtonBox.Ok|QDialogButtonBox.Cancel); buttons.accepted.connect(self._on_accept); buttons.rejected.connect(self.reject); layout.addWidget(buttons)
         steps=self.script_data.get("steps",[]); [self._add_step_row(x) for x in steps] if steps else self._add_step_row({"type":"click"})
+    def _update_password_state(self):
+        """开始操作控制由统一的开始操作触发，不允许单独设置执行密码。"""
+        is_click = self.combo_run_mode.currentIndex() == 0
+        self.edit_password.setEnabled(is_click)
+        self.edit_password.setReadOnly(not is_click)
+        if not is_click:
+            self.edit_password.clear()
+            self.edit_password.setPlaceholderText("开始操作控制无需密码")
+        else:
+            self.edit_password.setPlaceholderText("点击控制必填")
+
     def _add_click_step_and_pick(self):
         """添加点击步骤后立即进入坐标拾取。"""
         self._add_step_row({"type":"click","x":-1,"y":-1,"button":"left"})
@@ -589,7 +600,9 @@ class ScriptEditorDialog(QDialog):
                     q=pl.itemAt(i).widget()
                     if isinstance(q,QSpinBox): v=q.value()
                 steps.append({"type":"jump","jump":v})
-        self.script_data={"name":self.edit_name.text().strip() or "未命名脚本","run_mode":"operation" if self.combo_run_mode.currentIndex()==1 else "click","steps":steps}; self.accept()
+        run_mode = "operation" if self.combo_run_mode.currentIndex()==1 else "click"
+        password = self.edit_password.text().strip() if run_mode == "click" else ""
+        self.script_data={"name":self.edit_name.text().strip() or "未命名脚本","run_mode":run_mode,"password":password,"steps":steps}; self.accept()
     def get_script_data(self): return self.script_data
 
 
@@ -1829,8 +1842,12 @@ MOBILE_HTML_TEMPLATE = """
                 btn.onclick = () => {
                     if (script.running) {
                         postAction('run_script', -1, {script_idx: script.index});
-                    } else if (window.confirm('确定要执行脚本“' + script.name + '”吗？')) {
-                        postAction('run_script', -1, {script_idx: script.index});
+                        return;
+                    }
+                    const password = window.prompt('请输入脚本“' + script.name + '”的执行密码：');
+                    if (password === null) return;
+                    if (window.confirm('密码输入后，还需要再次确认是否执行脚本“' + script.name + '”？')) {
+                        postAction('run_script', -1, {script_idx: script.index, password: password});
                     }
                 };
                 container.appendChild(btn);
@@ -2397,26 +2414,35 @@ class GlobalControlPanel(QWidget):
             self.script_threads[idx] = None
         self._refresh_script_ui()
 
-    def _toggle_script_run(self, idx):
-        if idx >= len(self.scripts): return
+    def _toggle_script_run(self, idx, supplied_password=None):
+        if idx >= len(self.scripts): return False
         # 点击控制脚本才允许直接点击；“开始操作控制”脚本由开始操作统一控制
-        if self.scripts[idx].get("run_mode", "click") != "click":
-            return
+        script = self.scripts[idx]
+        if script.get("run_mode", "click") != "click":
+            return False
         while len(self.script_threads) < len(self.scripts):
             self.script_threads.append(None)
         thread = self.script_threads[idx]
         if thread and thread.isRunning():
             self._stop_script(idx)
-        else:
-            name = self.scripts[idx].get("name", f"脚本{idx+1}")
-            reply = QMessageBox.question(
-                self, "确认执行脚本",
-                f"确定要执行脚本“{name}”吗？",
-                QMessageBox.Yes | QMessageBox.No,
-                QMessageBox.No
-            )
-            if reply == QMessageBox.Yes:
-                self._start_script(idx)
+            return True
+        name = script.get("name", f"脚本{idx+1}")
+        expected = str(script.get("password", ""))
+        if not expected:
+            QMessageBox.warning(self, "无法执行", f"脚本“{name}”没有设置执行密码，请先在详细脚本配置中设置密码。")
+            return False
+        if supplied_password is None:
+            password, ok = QInputDialog.getText(self, "输入执行密码", f"请输入脚本“{name}”的执行密码：", QLineEdit.Password)
+            if not ok:
+                return False
+            supplied_password = password
+        if str(supplied_password) != expected:
+            QMessageBox.warning(self, "密码错误", "执行密码错误，脚本不会执行。")
+            return False
+        reply = QMessageBox.question(self, "确认执行脚本", f"密码正确。确定要执行脚本“{name}”吗？", QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        if reply == QMessageBox.Yes:
+            return self._start_script(idx)
+        return False
 
     def _start_operation_scripts(self):
         for idx, script in enumerate(self.scripts):
@@ -2677,7 +2703,7 @@ class GlobalControlPanel(QWidget):
             try:
                 idx = int(payload.get('script_idx', -1))
                 if 0 <= idx < len(self.scripts) and self.scripts[idx].get('run_mode', 'click') == 'click':
-                    self._toggle_script_run(idx)
+                    self._toggle_script_run(idx, payload.get('password'))
             except Exception as e:
                 print(f"网页执行脚本失败: {e}")
         elif action == 'toggle_monitor':
