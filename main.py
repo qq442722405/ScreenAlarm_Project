@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
     QPushButton, QLabel, QLineEdit, QDoubleSpinBox, QSpinBox,
     QListWidget, QCheckBox, QAbstractSpinBox, QFrame, QSizePolicy,
     QDialog, QFormLayout, QDialogButtonBox, QComboBox, QTableWidget,
-    QHeaderView, QMenu, QScrollArea
+    QHeaderView, QMenu, QScrollArea, QMessageBox
 )
 from PySide6.QtCore import Qt, QTimer, QThread, Signal, QPoint, QRect
 from PySide6.QtGui import (
@@ -503,9 +503,34 @@ class ScriptEditorDialog(QDialog):
         self.setStyleSheet("QDialog{background:#1a1a26;color:white;} QLabel{color:#e0e0e0;font-size:11px;font-weight:bold;} QLineEdit,QComboBox,QDoubleSpinBox,QSpinBox{background:rgba(26,26,38,.8);color:#00ff8c;border:1px solid rgba(255,255,255,.2);border-radius:4px;padding:4px;font-weight:bold;} QTableWidget{background:rgba(10,10,15,.9);color:white;gridline-color:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.2);border-radius:4px;} QPushButton{background:rgba(43,45,66,.8);color:white;border:1px solid rgba(255,255,255,.2);border-radius:4px;padding:4px 8px;font-weight:bold;} QHeaderView::section{background:rgba(43,45,66,.8);color:#00ff8c;font-weight:bold;}")
         layout=QVBoxLayout(self); nl=QHBoxLayout(); nl.addWidget(QLabel("📝 脚本名字:")); self.edit_name=QLineEdit(self.script_data.get("name","新脚本")); nl.addWidget(self.edit_name); nl.addWidget(QLabel("执行方式:")); self.combo_run_mode=QComboBox(); self.combo_run_mode.addItems(["点击控制","开始操作控制"]); self.combo_run_mode.setCurrentIndex(1 if self.script_data.get("run_mode","click")=="operation" else 0); self.combo_run_mode.setToolTip("点击控制：悬浮窗或网页端点击脚本执行；开始操作控制：由悬浮窗/网页的“开始操作”统一执行"); nl.addWidget(self.combo_run_mode); layout.addLayout(nl)
         self.table=QTableWidget(); self.table.setColumnCount(4); self.table.setHorizontalHeaderLabels(["步骤","步骤类型","详细参数与操作（移动到坐标并左/右键点击）","删除"]); self.table.horizontalHeader().setSectionResizeMode(0,QHeaderView.ResizeToContents); self.table.horizontalHeader().setSectionResizeMode(1,QHeaderView.ResizeToContents); self.table.horizontalHeader().setSectionResizeMode(2,QHeaderView.Stretch); self.table.horizontalHeader().setSectionResizeMode(3,QHeaderView.ResizeToContents); layout.addWidget(self.table)
-        bl=QHBoxLayout(); self.btn_add=QPushButton("➕ 添加步骤 ▾"); self.add_menu=QMenu(self); self.add_menu.addAction("🖱️ 添加点击",lambda:self._add_step_row({"type":"click"})); self.add_menu.addAction("⏱️ 延迟",lambda:self._add_step_row({"type":"delay"})); self.add_menu.addAction("🔀 跳转",lambda:self._add_step_row({"type":"jump"})); self.btn_add.setMenu(self.add_menu); bl.addWidget(self.btn_add); bl.addStretch(); layout.addLayout(bl)
+        bl=QHBoxLayout(); self.btn_add=QPushButton("➕ 添加步骤 ▾"); self.add_menu=QMenu(self); self.add_menu.addAction("🖱️ 添加点击",self._add_click_step_and_pick); self.add_menu.addAction("⏱️ 延迟",lambda:self._add_step_row({"type":"delay"})); self.add_menu.addAction("🔀 跳转",lambda:self._add_step_row({"type":"jump"})); self.btn_add.setMenu(self.add_menu); bl.addWidget(self.btn_add); bl.addStretch(); layout.addLayout(bl)
         buttons=QDialogButtonBox(QDialogButtonBox.Ok|QDialogButtonBox.Cancel); buttons.accepted.connect(self._on_accept); buttons.rejected.connect(self.reject); layout.addWidget(buttons)
         steps=self.script_data.get("steps",[]); [self._add_step_row(x) for x in steps] if steps else self._add_step_row({"type":"click"})
+    def _add_click_step_and_pick(self):
+        """添加点击步骤后立即进入坐标拾取。"""
+        self._add_step_row({"type":"click","x":-1,"y":-1,"button":"left"})
+        row = self.table.rowCount() - 1
+        QTimer.singleShot(0, lambda r=row: self._pick_row_coord(r))
+
+    def _pick_row_coord(self, row):
+        """统一的坐标拾取入口，拾取结束后直接写回当前行。"""
+        widgets = self._row_widgets.get(row)
+        if not widgets:
+            return
+        picker = SingleCoordPicker(self)
+        try:
+            if picker.exec() == QDialog.Accepted:
+                pos = picker.get_result()
+                widgets = self._row_widgets.get(row)
+                if pos and widgets:
+                    widgets["x"].setText(str(pos[0]))
+                    widgets["y"].setText(str(pos[1]))
+                    self.table.setCurrentCell(row, 2)
+                    self.raise_()
+                    self.activateWindow()
+        finally:
+            picker.deleteLater()
+
     def _add_step_row(self,step=None):
         step=step if isinstance(step,dict) else {"type":"click","x":-1,"y":-1,"button":"left"}; row=self.table.rowCount(); self.table.insertRow(row); self.table.setCellWidget(row,0,QLabel(f"第 {row+1} 步")); self.table.cellWidget(row,0).setAlignment(Qt.AlignCenter)
         combo=QComboBox(); combo.addItems(["添加点击","延迟","跳转"]); combo.setCurrentIndex({"click":0,"delay":1,"jump":2}.get(step.get("type","click"),0)); self.table.setCellWidget(row,1,combo)
@@ -520,13 +545,7 @@ class ScriptEditorDialog(QDialog):
                 cb=QComboBox(); cb.addItems(["左键","右键"]); cb.setCurrentIndex(1 if current and current.get("button")=="right" else 0)
                 pw._script_edit_x=ex; pw._script_edit_y=ey; pw._script_button=cb; self._row_widgets[row]={"x":ex,"y":ey,"button":cb}
                 bp=QPushButton("🎯 拾取坐标")
-                def pick(_=False,target=row):
-                    widgets=self._row_widgets.get(target); picker=SingleCoordPicker(self)
-                    if picker.exec()==QDialog.Accepted:
-                        pos=picker.get_result(); widgets=self._row_widgets.get(target)
-                        if pos and widgets: widgets["x"].setText(str(pos[0])); widgets["y"].setText(str(pos[1])); self.table.setCurrentCell(target,2); self.raise_(); self.activateWindow()
-                    picker.deleteLater()
-                bp.clicked.connect(pick)
+                bp.clicked.connect(lambda _=False,target=row: self._pick_row_coord(target))
                 for w in (QLabel("X:"),ex,QLabel("Y:"),ey,QLabel("按钮:"),cb,bp): pl.addWidget(w)
                 pl.addStretch()
             elif text=="延迟":
@@ -1807,7 +1826,13 @@ MOBILE_HTML_TEMPLATE = """
                 btn.className = 'btn-top';
                 btn.style.cssText = script.running ? 'background:#ff3333;color:white;min-width:110px;' : 'background:#0088cc;color:white;min-width:110px;';
                 btn.innerText = script.running ? '⏹ 停止 ' + script.name : '▶ ' + script.name;
-                btn.onclick = () => postAction('run_script', -1, {script_idx: script.index});
+                btn.onclick = () => {
+                    if (script.running) {
+                        postAction('run_script', -1, {script_idx: script.index});
+                    } else if (window.confirm('确定要执行脚本“' + script.name + '”吗？')) {
+                        postAction('run_script', -1, {script_idx: script.index});
+                    }
+                };
                 container.appendChild(btn);
             });
         }
@@ -2383,7 +2408,15 @@ class GlobalControlPanel(QWidget):
         if thread and thread.isRunning():
             self._stop_script(idx)
         else:
-            self._start_script(idx)
+            name = self.scripts[idx].get("name", f"脚本{idx+1}")
+            reply = QMessageBox.question(
+                self, "确认执行脚本",
+                f"确定要执行脚本“{name}”吗？",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No
+            )
+            if reply == QMessageBox.Yes:
+                self._start_script(idx)
 
     def _start_operation_scripts(self):
         for idx, script in enumerate(self.scripts):
