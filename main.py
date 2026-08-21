@@ -2936,9 +2936,77 @@ class GlobalControlPanel(QWidget):
 
 
 # ==================== 程序主入口 ====================
+def _license_storage_path():
+    """返回激活信息存储路径。优先使用程序目录，失败时使用用户目录。"""
+    try:
+        base = os.path.dirname(os.path.abspath(sys.argv[0]))
+        path = os.path.join(base, "screenalarm_license.json")
+        # 仅测试目录是否可写；不存在时不创建额外目录。
+        if os.path.isdir(base):
+            return path
+    except Exception:
+        pass
+    return os.path.join(os.path.expanduser("~"), "screenalarm_license.json")
+
+def _load_activation_standalone(device_id):
+    """在创建主窗口之前读取并验证激活信息。"""
+    path = _license_storage_path()
+    code = ""
+    try:
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if str(data.get("device_id", "")) == device_id:
+                code = str(data.get("activation_code", "")).strip()
+    except Exception:
+        code = ""
+    return path, code
+
+def _save_activation_standalone(path, device_id, code):
+    try:
+        folder = os.path.dirname(path)
+        if folder:
+            os.makedirs(folder, exist_ok=True)
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump({"device_id": device_id, "activation_code": code}, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, path)
+        return True
+    except Exception:
+        return False
+
+def _ensure_activation_before_ui(app):
+    """激活是程序启动前置条件：未激活时绝不创建/显示主界面。"""
+    device_id = get_device_identifier()
+    path, code = _load_activation_standalone(device_id)
+    good, _ = verify_license_code(device_id, code)
+    if good:
+        return True, code
+
+    # 此时主窗口尚未实例化，因此用户无法通过关闭激活框绕过激活。
+    dlg = ActivationDialog(device_id, code, None)
+    dlg.setWindowModality(Qt.ApplicationModal)
+    dlg.setWindowFlags(Qt.Dialog | Qt.WindowTitleHint | Qt.WindowCloseButtonHint)
+    result = dlg.exec()
+    if result != QDialog.Accepted or not dlg.code:
+        return False, ""
+    if not _save_activation_standalone(path, device_id, dlg.code):
+        QMessageBox.critical(None, "激活失败", "激活信息无法保存，程序不能启动。")
+        return False, ""
+    good, _ = verify_license_code(device_id, dlg.code)
+    return (good, dlg.code if good else "")
+
+
 if __name__ == "__main__":
+    # 关键：先完成激活验证，再创建 GlobalControlPanel。
+    # 未激活、激活码错误或过期时，主界面、Web 服务、OCR、F12 监听等均不会启动。
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(True)
+    activated, _activation_code = _ensure_activation_before_ui(app)
+    if not activated:
+        app.quit()
+        sys.exit(0)
+
     panel = GlobalControlPanel()
     panel.show()
     sys.exit(app.exec())
