@@ -1547,6 +1547,9 @@ MOBILE_HTML_TEMPLATE = """
         .log-item { padding: 2px 0; border-bottom: 1px solid rgba(255,255,255,0.05); white-space: nowrap; }
 
         .modal-overlay { display: none; position: fixed; top:0; left:0; width:100%; height:100%; background: rgba(0,0,0,0.7); z-index: 1000; justify-content: center; align-items: center; }
+        .trend-chart-wrap { margin: 6px 0 8px; padding: 6px 4px 4px; background: rgba(0,0,0,.16); border-radius: 6px; }
+        .trend-chart-title { color:#888; font-size:11px; margin-bottom:3px; }
+        .trend-chart { width:100%; height:130px; display:block; }
         .modal-content { background: #1a1a26; border: 1px solid rgba(255,255,255,0.2); border-radius: 10px; width: 90%; max-width: 420px; padding: 16px; color: #e0e0e0; }
         .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 8px; }
         .modal-close { cursor: pointer; color: #ff4d4d; font-weight: bold; font-size: 16px; }
@@ -1805,6 +1808,32 @@ MOBILE_HTML_TEMPLATE = """
             return `<span class="val-text aligned-val"><span class="val-int">${sign}${integer}</span><span class="val-dot ${frac === undefined ? 'ghost-dot' : ''}">${frac === undefined ? '&nbsp;' : '.'}</span><span class="val-frac">${frac === undefined ? '&nbsp;' : frac}</span></span>`;
         }
 
+        function drawValueChart(id, data) {
+            const canvas = document.getElementById('chart-' + id);
+            if (!canvas) return;
+            const wrap = canvas.parentElement;
+            const w = Math.max(260, wrap.clientWidth - 8);
+            const h = 130;
+            const dpr = window.devicePixelRatio || 1;
+            canvas.width = Math.floor(w * dpr); canvas.height = Math.floor(h * dpr);
+            canvas.style.width = w + 'px'; canvas.style.height = h + 'px';
+            const ctx = canvas.getContext('2d'); ctx.setTransform(dpr,0,0,dpr,0,0);
+            ctx.clearRect(0,0,w,h);
+            if (!data || data.length < 2) {
+                ctx.fillStyle='#666'; ctx.font='11px Arial'; ctx.fillText('记录数据不足，等待更多数据...', 8, 24); return;
+            }
+            const vals=data.map(x=>Number(x[1])).filter(Number.isFinite);
+            if (vals.length < 2) return;
+            let min=Math.min(...vals), max=Math.max(...vals);
+            if (min===max) { min-=1; max+=1; }
+            const pad={l:8,r:8,t:10,b:18}; const pw=w-pad.l-pad.r, ph=h-pad.t-pad.b;
+            ctx.strokeStyle='rgba(255,255,255,.08)'; ctx.lineWidth=1;
+            for(let i=0;i<3;i++){ const y=pad.t+ph*i/2; ctx.beginPath();ctx.moveTo(pad.l,y);ctx.lineTo(w-pad.r,y);ctx.stroke(); }
+            ctx.strokeStyle='#00a86b'; ctx.lineWidth=2; ctx.beginPath();
+            data.forEach((p,i)=>{ const v=Number(p[1]); if(!Number.isFinite(v))return; const x=pad.l+(i/(data.length-1))*pw; const y=pad.t+(max-v)/(max-min)*ph; if(i===0)ctx.moveTo(x,y);else ctx.lineTo(x,y); });
+            ctx.stroke();
+        }
+
         function renderCards(boxes) {
             const container = document.getElementById('cards-container');
 
@@ -1882,6 +1911,10 @@ MOBILE_HTML_TEMPLATE = """
                                 <input id="dec-${box.id}" type="number" min="0" max="4" step="1" class="setting-input" value="${box.decimal_places || 0}">
                                 <button class="btn-action" style="background:#0088cc; padding:2px 8px; margin-left:4px;" onclick="updateLimits(${box.id})">保存</button>
                             </div>
+                            <div class="trend-chart-wrap">
+                                <div class="trend-chart-title">📈 数值曲线</div>
+                                <canvas id="chart-${box.id}" class="trend-chart"></canvas>
+                            </div>
                             <div class="log-title">📊 记录</div>
                             <div id="logs-${box.id}" class="log-list">${logsHtml}</div>
                         </div>
@@ -1936,6 +1969,7 @@ MOBILE_HTML_TEMPLATE = """
                         logsBox.innerHTML = (box.logs || []).map(l => `<div class="log-item">${l}</div>`).join('');
                     }
                 }
+                if (currentUser && isExpanded) drawValueChart(box.id, box.chart_data || []);
             });
 
             const currentIds = boxes.map(b => 'card-' + b.id);
@@ -2074,6 +2108,10 @@ class WebServerThread(QThread):
                 logs = []
                 for i in range(b.list_widget.count()):
                     logs.append(b.list_widget.item(i).text())
+                chart_data = []
+                for ts, hv in getattr(b, 'history_records', [])[-120:]:
+                    if hv is not None:
+                        chart_data.append([int(ts * 1000), float(hv)])
 
                 boxes_data.append({
                     'id': b.box_id,
@@ -2090,7 +2128,8 @@ class WebServerThread(QThread):
                     'is_alarm': b.is_alarm,
                     'is_muted': b.is_muted,
                     'user_cleared_alarm': getattr(b, 'user_cleared_alarm', False),
-                    'logs': logs
+                    'logs': logs,
+                    'chart_data': chart_data
                 })
 
             scripts_data = []
