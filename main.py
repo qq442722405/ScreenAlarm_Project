@@ -746,6 +746,8 @@ class OverlayRegionWidget(QWidget):
         self.last_log_time = 0.0
         self.max_log_count = 30
         self.history_records = []
+        self.previous_record_value = None
+        self.last_record_value = None
 
         self.is_alarm = False
         self.is_warning = False
@@ -960,6 +962,9 @@ class OverlayRegionWidget(QWidget):
 
         if self.last_log_time == 0.0 or (now_ts - self.last_log_time >= self.log_interval_min * 60.0):
             self.last_log_time = now_ts
+            # 当前记录写入前保存上一条记录，网页端默认用它进行对比
+            self.previous_record_value = self.last_record_value
+            self.last_record_value = val
             dp = getattr(self, 'decimal_places', 2)
             msg = f"[{time_str}] {val:.{dp}f}" if val is not None else f"[{time_str}] ❌未检测到"
             self.list_widget.insertItem(0, msg)
@@ -1406,8 +1411,7 @@ MOBILE_HTML_TEMPLATE = """
         .header-title-box { display: flex; align-items: center; gap: 6px; }
         .header-tools-box { display: flex; align-items: center; gap: 6px; }
         .title { font-size: 15px; font-weight: bold; color: #00ff8c; }
-        .toggle-icon { cursor: pointer; font-size: 13px; color: #888888; font-weight: bold; user-select: none; padding: 2px 6px; border-radius: 4px; background: rgba(255, 255, 255, 0.08); margin-left: 6px; }
-        .toggle-icon:hover { color: #aaaaaa; background: rgba(255, 255, 255, 0.15); }
+        
 
         .header-row2 { display: flex; align-items: center; justify-content: flex-end; gap: 8px; width: 100%; font-size: 12px; }
         .header-row3 { display: flex; gap: 8px; width: 100%; margin-top: 2px; align-items: center; }
@@ -1458,8 +1462,8 @@ MOBILE_HTML_TEMPLATE = """
 
         .card-header { display: flex; justify-content: space-between; align-items: center; font-size: 13px; color: #888; font-weight: bold; width: 100%; }
         .card-title-box { display: flex; align-items: center; gap: 4px; flex-grow: 1; overflow: hidden; }
-        .toggle-icon { width: 20px; min-width: 20px; height: 20px; display: inline-flex; align-items: center; justify-content: center; text-align: center; cursor: pointer; color: #00ff8c; font-size: 11px; font-weight: bold; border-radius: 4px; background: rgba(255,255,255,0.06); box-sizing: border-box; }
-        .toggle-icon:hover { background: rgba(255,255,255,0.12); }
+        .toggle-icon { width: 18px; min-width: 18px; height: 18px; display: inline-flex; align-items: center; justify-content: center; text-align: center; cursor: pointer; color: #555; font-size: 10px; font-weight: bold; border-radius: 3px; background: rgba(0,0,0,0.18); box-sizing: border-box; }
+        .toggle-icon:hover { color: #777; background: rgba(0,0,0,0.28); }
         .card-title { color: #ffffff; font-size: 15px; font-weight: bold; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
         .card-header-right { display: flex; align-items: center; gap: 8px; margin-left: auto; }
@@ -1492,6 +1496,14 @@ MOBILE_HTML_TEMPLATE = """
             line-height: 1;
             box-shadow: 0 0 5px rgba(255, 77, 77, 0.25);
         }
+        .trend-same {
+            width: 22px; min-width: 22px; height: 20px; box-sizing: border-box;
+            justify-content: center; color: #888; background: rgba(128,128,128,0.12);
+            border: 1px solid rgba(128,128,128,0.25); border-radius: 4px;
+            padding: 1px 5px; font-size: 12px; font-weight: bold; margin-right: 4px;
+            display: inline-flex; align-items: center; line-height: 1;
+        }
+
         .trend-down {
             width: 22px;
             min-width: 22px;
@@ -1562,11 +1574,6 @@ MOBILE_HTML_TEMPLATE = """
                     </div>
                 </div>
 
-                <div id="header-row2" class="header-row2" style="display: none;">
-                    <label style="color:#ffaa00; font-weight:bold;">对比(分):</label>
-                    <input id="compare-min-input" type="number" min="0" step="1" class="setting-input" style="width:60px;" value="5">
-                    <button class="btn-action" style="background:#0088cc; padding:4px 8px;" onclick="saveCompareMin()">保存</button>
-                </div>
             </div>
 
             <div id="header-row3" class="header-row3" style="display: none;">
@@ -1625,7 +1632,6 @@ MOBILE_HTML_TEMPLATE = """
                 document.getElementById('user-box').style.display = 'inline-flex';
                 document.getElementById('current-username').innerText = '👤 ' + currentUser;
                 
-                document.getElementById('header-row2').style.display = 'flex';
                 document.getElementById('header-row3').style.display = 'flex';
                 document.querySelectorAll('.toggle-icon').forEach(el => el.style.display = 'inline-block');
                 const scriptsPanel = document.getElementById('scripts-panel');
@@ -1634,7 +1640,6 @@ MOBILE_HTML_TEMPLATE = """
                 document.getElementById('login-box').style.display = 'inline-flex';
                 document.getElementById('user-box').style.display = 'none';
 
-                document.getElementById('header-row2').style.display = 'none';
                 document.getElementById('header-row3').style.display = 'none';
 
                 cardExpandedState = {};
@@ -1781,10 +1786,6 @@ MOBILE_HTML_TEMPLATE = """
             postAction('set_limits', boxId, {lower, mid_op, mid_val, upper, decimal_places});
         }
 
-        function saveCompareMin() {
-            const val = document.getElementById('compare-min-input').value;
-            postAction('set_compare_min', -1, {compare_min: parseFloat(val)});
-        }
 
         function checkMidCondition(val, op, mid_val) {
             if (val === null || val === undefined) return false;
@@ -1795,10 +1796,13 @@ MOBILE_HTML_TEMPLATE = """
         }
 
         function alignedValueHtml(text) {
-            if (text === null || text === undefined || text === '--') return `<span class="val-text">${text || '--'}</span>`;
-            const m = String(text).match(/^(-?)(\d+)(\.)(\d+)$/);
-            if (!m) return `<span class="val-text">${text}</span>`;
-            return `<span class="val-text aligned-val"><span class="val-int">${m[1]}${m[2]}</span><span class="val-dot">${m[3]}</span><span class="val-frac">${m[4]}</span></span>`;
+            if (text === null || text === undefined || text === '--') return `<span class="val-text aligned-val"><span class="val-int">--</span><span class="val-dot ghost-dot">&nbsp;</span><span class="val-frac">&nbsp;</span></span>`;
+            const m = String(text).trim().match(/^(-?)(\d+)(?:\.(\d+))?$/);
+            if (!m) return `<span class="val-text aligned-val"><span class="val-int">${String(text)}</span></span>`;
+            const sign = m[1] || '';
+            const integer = m[2] || '0';
+            const frac = m[3];
+            return `<span class="val-text aligned-val"><span class="val-int">${sign}${integer}</span><span class="val-dot ${frac === undefined ? 'ghost-dot' : ''}">${frac === undefined ? '&nbsp;' : '.'}</span><span class="val-frac">${frac === undefined ? '&nbsp;' : frac}</span></span>`;
         }
 
         function renderCards(boxes) {
@@ -1833,6 +1837,8 @@ MOBILE_HTML_TEMPLATE = """
                     trendHtml = '<span class="trend-slot"><span class="trend-up">⬆</span></span>';
                 } else if (box.trend === 'down') {
                     trendHtml = '<span class="trend-slot"><span class="trend-down">⬇</span></span>';
+                } else if (box.trend === 'same') {
+                    trendHtml = '<span class="trend-slot"><span class="trend-same">—</span></span>';
                 }
 
                 let header = card.querySelector('.card-header');
@@ -1843,8 +1849,8 @@ MOBILE_HTML_TEMPLATE = """
                     card.innerHTML = `
                         <div class="card-header">
                             <div class="card-title-box">
+                                <span id="toggle-icon-${box.id}" class="toggle-icon" style="display: ${currentUser ? 'inline-flex' : 'none'};" onclick="toggleSingleCard(${box.id})">${isExpanded ? '▲' : '▼'}</span>
                                 <span class="card-title">${box.name}</span>
-                                <span id="toggle-icon-${box.id}" class="toggle-icon" style="display: ${currentUser ? 'inline-block' : 'none'};" onclick="toggleSingleCard(${box.id})">${isExpanded ? '▲' : '▼'}</span>
                             </div>
                             <div class="card-header-right">
                                 <div class="val-container">
@@ -2000,7 +2006,6 @@ MOBILE_HTML_TEMPLATE = """
 
                 const compareMinInput = document.getElementById('compare-min-input');
                 if (compareMinInput && document.activeElement !== compareMinInput) {
-                    compareMinInput.value = data.compare_min || 5;
                 }
 
                 renderCards(data.boxes || []);
@@ -2042,8 +2047,6 @@ class WebServerThread(QThread):
         @self.app.route('/api/status')
         def get_status():
             boxes_data = []
-            compare_min = getattr(self.main_win, 'compare_interval_min', 5.0)
-
             for b in self.main_win.boxes:
                 val_text = b.lbl_result.text()
                 try:
@@ -2051,7 +2054,8 @@ class WebServerThread(QThread):
                 except ValueError:
                     val = None
 
-                past_val = b.get_past_value(compare_min)
+                # 默认与“上一个记录”比较，不再需要网页端设置“对比(分)”
+                past_val = getattr(b, 'previous_record_value', None)
                 trend = 'none'
                 diff_text = ''
                 if val is not None and past_val is not None:
@@ -2059,6 +2063,8 @@ class WebServerThread(QThread):
                         trend = 'up'
                     elif val < past_val:
                         trend = 'down'
+                    else:
+                        trend = 'same'
                     diff_val = abs(val - past_val)
                     dp = getattr(b, 'decimal_places', 0)
                     diff_text = f"{diff_val:.{dp}f}"
@@ -2895,8 +2901,6 @@ class GlobalControlPanel(QWidget):
         elif action == 'exit_app':
             # 网页端退出也走和悬浮窗完全相同的清理流程。
             self.close()
-        elif action == 'set_compare_min':
-            self.compare_interval_min = payload.get('compare_min', 5.0)
         elif box_id != -1:
             target_box = next((b for b in self.boxes if b.box_id == box_id), None)
             if target_box:
