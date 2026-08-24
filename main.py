@@ -2054,20 +2054,22 @@ class WebServerThread(QThread):
                 except ValueError:
                     val = None
 
-                # 默认与“上一个记录”比较，不再需要网页端设置“对比(分)”
-                past_val = getattr(b, 'previous_record_value', None)
+                # 默认与“上一个记录数值”比较。
+                # last_record_value 始终保存最近一次按“记录（分）”周期写入的数值，
+                # 因此网页端不再需要单独的“对比（分）”设置。
+                past_val = getattr(b, 'last_record_value', None)
                 trend = 'none'
                 diff_text = ''
                 if val is not None and past_val is not None:
-                    if val > past_val:
+                    delta = val - past_val
+                    if delta > 0:
                         trend = 'up'
-                    elif val < past_val:
+                    elif delta < 0:
                         trend = 'down'
                     else:
                         trend = 'same'
-                    diff_val = abs(val - past_val)
                     dp = getattr(b, 'decimal_places', 0)
-                    diff_text = f"{diff_val:.{dp}f}"
+                    diff_text = f"{abs(delta):.{dp}f}"
 
                 logs = []
                 for i in range(b.list_widget.count()):
