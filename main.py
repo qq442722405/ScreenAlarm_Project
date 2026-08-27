@@ -1625,7 +1625,9 @@ MOBILE_HTML_TEMPLATE = """
     </div>
 
     <script>
-        let webSoundEnabled = false;
+        let webSoundEnabled = localStorage.getItem('webSoundEnabled') !== '0';
+        let lastWebAlarmState = {};
+        let webAlarmAudio = null;
         let currentUser = localStorage.getItem('currentUser') || null;
         let cardExpandedState = {};
 
@@ -1756,9 +1758,33 @@ MOBILE_HTML_TEMPLATE = """
             }
         }
 
+        function updateWebSoundButton() {
+            const btn = document.getElementById('btn-sound');
+            if (btn) btn.innerText = webSoundEnabled ? '🔊 声音' : '🔇 静音';
+        }
+
         function toggleWebSound() {
             webSoundEnabled = !webSoundEnabled;
-            document.getElementById('btn-sound').innerText = webSoundEnabled ? '🔊 声音' : '🔇 声音';
+            localStorage.setItem('webSoundEnabled', webSoundEnabled ? '1' : '0');
+            if (!webSoundEnabled && webAlarmAudio) { try { webAlarmAudio.pause(); webAlarmAudio.currentTime = 0; } catch(e) {} }
+            updateWebSoundButton();
+        }
+
+        function playWebAlarmIfNeeded(boxes) {
+            if (!webSoundEnabled) return;
+            const hasNewAlarm = (boxes || []).some(box => {
+                const now = !!box.is_alarm;
+                const prev = !!lastWebAlarmState[box.id];
+                return now && !prev;
+            });
+            lastWebAlarmState = {};
+            (boxes || []).forEach(box => { lastWebAlarmState[box.id] = !!box.is_alarm; });
+            if (!hasNewAlarm) return;
+            try {
+                if (!webAlarmAudio) { webAlarmAudio = new Audio('/alarm_sound'); webAlarmAudio.preload = 'auto'; }
+                webAlarmAudio.currentTime = 0;
+                webAlarmAudio.play().catch(() => {});
+            } catch(e) {}
         }
 
         async function togglePcMute() {
@@ -2044,10 +2070,13 @@ MOBILE_HTML_TEMPLATE = """
 
                 renderCards(data.boxes || []);
                 renderScripts(data.scripts || []);
+                playWebAlarmIfNeeded(data.boxes || []);
+                updateWebSoundButton();
             } catch(e) { console.error('状态获取失败:', e); }
         }
 
         updateAuthUI();
+        updateWebSoundButton();
         fetchStatus();
         setInterval(fetchStatus, 1000);
     </script>
@@ -2152,6 +2181,21 @@ class WebServerThread(QThread):
                 'device_id': self.main_win.device_id,
                 'pc_alarm_muted': getattr(self.main_win, 'pc_alarm_muted', False)
             })
+
+        @self.app.route('/alarm_sound', methods=['GET'])
+        def alarm_sound():
+            try:
+                from flask import send_file
+                candidates = [
+                    os.path.join(os.path.dirname(os.path.abspath(__file__)), '警报声.mp3'),
+                    os.path.join(getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__))), '警报声.mp3')
+                ]
+                for sound_path in candidates:
+                    if os.path.exists(sound_path):
+                        return send_file(sound_path, mimetype='audio/mpeg', conditional=True)
+                return ('', 404)
+            except Exception:
+                return ('', 404)
 
         @self.app.route('/api/action', methods=['POST'])
         def handle_action():
@@ -2811,9 +2855,16 @@ class GlobalControlPanel(QWidget):
             box_widget.close()
 
     def _toggle_edit_pos(self, checked):
-        self.is_editing = checked
+        """切换框体位置编辑模式；按钮文字明确显示当前动作。"""
+        self.is_editing = bool(checked)
         for b in self.boxes:
             b.set_edit_mode(self.is_editing)
+        if self.is_editing:
+            self.btn_edit_pos.setText("✅ 完成编辑")
+            self.btn_edit_pos.setStyleSheet("background-color: #2e9a58; color: white; font-weight: bold;")
+        else:
+            self.btn_edit_pos.setText("✏️ 编辑位置")
+            self.btn_edit_pos.setStyleSheet("")
 
     def _toggle_hide_boxes(self):
         self.boxes_panel_hidden = not self.boxes_panel_hidden
