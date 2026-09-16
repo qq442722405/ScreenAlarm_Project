@@ -1257,134 +1257,17 @@ class MonitorThread(QThread):
         self.running = False
 
     def _clean_digit_text(self, text):
-        """只保留数值识别需要的字符，并修正常见 OCR 混淆。"""
         mapping = {
             'O': '0', 'o': '0', 'D': '0',
             'I': '1', 'l': '1', '|': '1', '!': '1',
             'Z': '2', 'z': '2',
             'S': '5', 's': '5',
             'B': '8',
-            'G': '6', 'g': '9',
         }
-        res = []
-        for ch in str(text):
-            ch = mapping.get(ch, ch)
-            if ch.isdigit() or ch in '.-+':
-                res.append(ch)
-        return ''.join(res)
-
-    def _prepare_digit_images(self, bgr):
-        """数字专用预处理：放大、灰度、对比度增强、锐化，并产生多种阈值版本。"""
-        p = self.ocr_params
-        scale_factor = max(1.0, float(p.get('scale', 3.0)))
-        h, w = bgr.shape[:2]
-        scaled = cv2.resize(bgr, (max(1, int(w * scale_factor)), max(1, int(h * scale_factor))), interpolation=cv2.INTER_CUBIC)
-        gray = cv2.cvtColor(scaled, cv2.COLOR_BGR2GRAY)
-        clahe_clip = float(p.get('clahe', 2.0))
-        if clahe_clip > 0:
-            gray = cv2.createCLAHE(clipLimit=clahe_clip, tileGridSize=(8, 8)).apply(gray)
-        # 轻度去噪，避免小数点被噪声吞掉
-        gray = cv2.GaussianBlur(gray, (3, 3), 0)
-        sharp = cv2.addWeighted(gray, 1.6, cv2.GaussianBlur(gray, (0, 0), 1.2), -0.6, 0)
-        block = int(p.get('thresh_block', 11))
-        if block < 3: block = 3
-        if block % 2 == 0: block += 1
-        c_val = int(p.get('thresh_c', 2))
-        variants = [scaled, gray, cv2.bitwise_not(gray)]
-        variants += [
-            cv2.adaptiveThreshold(sharp, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, block, c_val),
-            cv2.threshold(sharp, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)[1],
-        ]
-        return scaled, variants
-
-    def _find_decimal_x(self, image):
-        """从二值数字图中保护小数点：寻找位于字符基线附近、明显小于数字字符的小连通区域。"""
-        if image is None or image.size == 0:
-            return None
-        gray = image if len(image.shape) == 2 else cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-        # 同时检查正/反二值图，适应深色字和浅色字。
-        candidates = []
-        for bw in (cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)[1],
-                    cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)[1]):
-            n, labels, stats, cents = cv2.connectedComponentsWithStats(bw, 8)
-            comps=[]
-            for i in range(1,n):
-                x,y,w,h,area=stats[i]
-                if area >= 3 and h >= 2:
-                    comps.append((x,y,w,h,area))
-            if len(comps) < 2:
-                continue
-            heights=[c[3] for c in comps]
-            med_h=float(np.median(heights))
-            # 小数点通常高度/面积明显小于数字，并处于下半部。
-            for x,y,w,h,area in comps:
-                if h <= med_h*0.55 and w <= med_h*0.8 and area <= med_h*med_h*0.45:
-                    candidates.append((x+w/2, y+h/2, area))
-        if not candidates:
-            return None
-        # 小数点应出现在字符区域的下半部；再按 X 聚类，只有多个二值版本
-        # 在相近位置同时发现时才认为是真正的小数点，降低噪声误判。
-        H = gray.shape[0]
-        candidates = [c for c in candidates if c[1] >= H * 0.50]
-        if not candidates:
-            return None
-        candidates.sort(key=lambda c: c[0])
-        clusters=[]
-        for c in candidates:
-            if not clusters or abs(c[0] - np.mean([x[0] for x in clusters[-1]])) > max(3.0, gray.shape[1]*0.025):
-                clusters.append([c])
-            else:
-                clusters[-1].append(c)
-        # 至少两个独立检测结果支持，或者只有一个候选且形态非常像小数点。
-        supported=[g for g in clusters if len(g)>=2]
-        if supported:
-            g=max(supported, key=lambda a: (len(a), np.mean([x[1] for x in a])))
-            return float(np.mean([x[0] for x in g]))
-        c=min(candidates, key=lambda x: abs(x[2]-8))
-        return float(c[0]) if c[2] >= 3 else None
-
-    def _normalize_numeric_result(self, raw_text, decimal_places, decimal_x=None, image_width=None):
-        """数字专用结果校验：清理 OCR 输出、保护小数点，并拒绝明显非法结果。"""
-        t = self._clean_digit_text(raw_text).replace(' ', '')
-        if not t:
-            return None
-        # 已识别到小数点时优先保留；其它分隔符按数字边界视为小数点。
-        t = re.sub(r'(?<=\d)[,:;·`\'_]+(?=\d)', '.', t)
-        t = re.sub(r'\.{2,}', '.', t)
-        sign = '-' if t.startswith('-') else ''
-        t = t.lstrip('+-')
-        digits = re.sub(r'\D', '', t)
-        if not digits:
-            return None
-
-        if decimal_places > 0:
-            # 固定小数位是最可靠的保护方式，即使 ddddocr 漏掉小数点也恢复。
-            if len(digits) <= decimal_places:
-                value_str = sign + '0.' + digits.zfill(decimal_places)
-            else:
-                value_str = sign + digits[:-decimal_places] + '.' + digits[-decimal_places:]
-        else:
-            # 未指定小数位时，仅在 OCR 本身识别出小数点或图像检测到小数点时插入。
-            if '.' in t:
-                parts=t.split('.',1)
-                if parts[0] and parts[1]:
-                    value_str=sign+parts[0]+'.'+parts[1]
-                else:
-                    value_str=sign+digits
-            elif decimal_x is not None and image_width and len(digits) >= 2:
-                # 用小数点在字符区域中的横向比例估算插入位置。
-                pos=max(1,min(len(digits)-1,int(round(decimal_x/float(image_width)*len(digits)))))
-                value_str=sign+digits[:pos]+'.'+digits[pos:]
-            else:
-                value_str=sign+digits
-        try:
-            value=float(value_str)
-            if not np.isfinite(value): return None
-            # 数值监控不接受科学计数法、多个符号等异常格式。
-            if not re.fullmatch(r'-?\d+(?:\.\d+)?', value_str): return None
-            return value
-        except Exception:
-            return None
+        res = list(text)
+        for i, ch in enumerate(res):
+            if ch in mapping: res[i] = mapping[ch]
+        return "".join(res)
 
     def run(self):
         scale = self.scale
@@ -1424,50 +1307,68 @@ class MonitorThread(QThread):
                         else:
                             bgr = cv2.cvtColor(img_np, cv2.COLOR_RGB2BGR)
 
-                        scaled_bgr, attempts = self._prepare_digit_images(bgr)
-                        decimal_x = None
-                        # 优先从二值图保护小数点位置。
-                        try:
-                            decimal_x = self._find_decimal_x(attempts[-2])
-                        except Exception:
-                            decimal_x = None
+                        scale_factor = max(1.0, float(self.ocr_params.get('scale', 3.0)))
+                        new_w, new_h = int(w * scale_factor), int(h * scale_factor)
+                        scaled_bgr = cv2.resize(bgr, (new_w, new_h), interpolation=cv2.INTER_CUBIC)
+
+                        attempts = []
+
+                        ok1, buf1 = cv2.imencode(".png", scaled_bgr)
+                        if ok1: attempts.append(buf1.tobytes())
+
+                        gray = cv2.cvtColor(scaled_bgr, cv2.COLOR_BGR2GRAY)
+                        ok2, buf2 = cv2.imencode(".png", gray)
+                        if ok2: attempts.append(buf2.tobytes())
+
+                        inverted = cv2.bitwise_not(gray)
+                        ok3, buf3 = cv2.imencode(".png", inverted)
+                        if ok3: attempts.append(buf3.tobytes())
+
+                        clahe_clip = float(self.ocr_params.get('clahe', 2.0))
+                        if clahe_clip > 0:
+                            clahe = cv2.createCLAHE(clipLimit=clahe_clip, tileGridSize=(8, 8))
+                            enhanced = clahe.apply(gray)
+                        else:
+                            enhanced = gray
+
+                        sharpened = cv2.filter2D(enhanced, -1, np.array([[-1,-1,-1],[-1,9,-1],[-1,-1,-1]]))
+                        
+                        block = int(self.ocr_params.get('thresh_block', 11))
+                        c_val = int(self.ocr_params.get('thresh_c', 2))
+                        binary = cv2.adaptiveThreshold(sharpened, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, block, c_val)
+                        ok4, buf4 = cv2.imencode(".png", binary)
+                        if ok4: attempts.append(buf4.tobytes())
 
                         found_val = None
                         last_raw_str = ""
-                        image_width = scaled_bgr.shape[1] if scaled_bgr is not None else None
 
-                        for img in attempts:
+                        for buf in attempts:
                             if not self.running: break
-                            ok, buf = cv2.imencode(".png", img)
-                            if not ok: continue
-                            try:
-                                raw_text = str(self.reader.classification(buf.tobytes())).strip()
-                            except Exception:
-                                continue
+                            raw_text = str(self.reader.classification(buf))
                             if not raw_text: continue
                             last_raw_str = raw_text
-                            candidate = self._normalize_numeric_result(raw_text, dp, decimal_x, image_width)
-                            if candidate is not None:
-                                found_val = candidate
-                                # 固定小数位时第一组有效结果即可；否则继续尝试带小数点的 OCR 结果。
-                                if dp > 0 or '.' in self._clean_digit_text(raw_text):
-                                    break
 
-                        # OCR 没有保留小数点时，再用原始灰度图专门寻找一次。
-                        if found_val is None and decimal_x is not None:
-                            for img in attempts[:3]:
-                                if not self.running: break
-                                ok, buf = cv2.imencode(".png", img)
-                                if not ok: continue
-                                try:
-                                    raw_text = str(self.reader.classification(buf.tobytes())).strip()
-                                    candidate = self._normalize_numeric_result(raw_text, dp, decimal_x, image_width)
-                                    if candidate is not None:
-                                        found_val = candidate
-                                        last_raw_str = raw_text
+                            clean_t = self._clean_digit_text(raw_text).replace(' ', '')
+                            clean_t = re.sub(r'(?<=\d)[,::·\'`_\-*\°ae~,;–—.\s、]+(?=\d)', '.', clean_t)
+
+                            if dp > 0:
+                                digits = re.sub(r'\D', '', clean_t)
+                                if digits:
+                                    if len(digits) > dp:
+                                        val_str = digits[:-dp] + '.' + digits[-dp:]
+                                    else:
+                                        val_str = "0." + digits.zfill(dp)
+                                    try:
+                                        found_val = float(val_str)
                                         break
-                                except Exception:
-                                    pass
+                                    except ValueError: pass
+                            else:
+                                nums = re.findall(r'-?\d+(?:\.\d+)?', clean_t)
+                                if nums:
+                                    try:
+                                        found_val = float(nums[0])
+                                        break
+                                    except ValueError: pass
 
                         now_str = datetime.now().strftime("%H:%M:%S")
                         if self.running:
@@ -2618,10 +2519,11 @@ class GlobalControlPanel(QWidget):
         self.load_config()
         self._refresh_script_ui()
         self._load_license()
+        # 配置加载后恢复悬浮窗位置与框体显示/隐藏状态；没有保存位置时才使用默认位置。
+        if not getattr(self, "_panel_position_restored", False):
+            screen = QApplication.primaryScreen().geometry()
+            self.move((screen.width() - self.width()) // 2, 20)
         QTimer.singleShot(0, self._ensure_activation)
-
-        screen = QApplication.primaryScreen().geometry()
-        self.move((screen.width() - self.width()) // 2, 20)
 
 
     # ==================== 软件激活 ====================
@@ -2844,13 +2746,18 @@ class GlobalControlPanel(QWidget):
         for s in self.scripts:
             if s.get("run_mode", "click") == "operation":
                 s["password"] = ""
+        pos = self.pos()
         data = {
             "interval": self.spin_interval.value(),
             "log_count": self.spin_count.value(),
             "log_interval": self.spin_log_interval.value(),
             "ocr_params": self.ocr_params,
             "boxes": boxes_cfg,
-            "scripts": self.scripts
+            "scripts": self.scripts,
+            # 记住中控悬浮窗位置
+            "control_panel_position": {"x": pos.x(), "y": pos.y()},
+            # 记住监控框体显示/隐藏状态
+            "boxes_panel_hidden": bool(self.boxes_panel_hidden)
         }
         try:
             with open(self.config_file, "w", encoding="utf-8") as f:
@@ -2870,6 +2777,18 @@ class GlobalControlPanel(QWidget):
             self.ocr_params = data.get("ocr_params", self.ocr_params)
             self.scripts = data.get("scripts", [])
 
+            # 恢复中控悬浮窗上次位置
+            panel_pos = data.get("control_panel_position")
+            if isinstance(panel_pos, dict) and "x" in panel_pos and "y" in panel_pos:
+                try:
+                    self.move(int(panel_pos["x"]), int(panel_pos["y"]))
+                    self._panel_position_restored = True
+                except Exception:
+                    self._panel_position_restored = False
+
+            # 恢复上次“显示/隐藏框体”状态
+            self.boxes_panel_hidden = bool(data.get("boxes_panel_hidden", False))
+
             for b_cfg in data.get("boxes", []):
                 box = OverlayRegionWidget(
                     box_id=b_cfg.get("id", len(self.boxes)+1),
@@ -2886,9 +2805,11 @@ class GlobalControlPanel(QWidget):
                 )
                 box.log_interval_min = self.spin_log_interval.value()
                 box.delete_requested.connect(self._remove_box)
+                box.set_panel_hidden(self.boxes_panel_hidden)
                 box.show()
                 self.boxes.append(box)
 
+            self.btn_hide_boxes.setText("👁 显示" if self.boxes_panel_hidden else "🙈 隐藏")
             self._refresh_script_ui()
         except Exception as e:
             print(f"加载配置失败: {e}")
@@ -2964,12 +2885,14 @@ class GlobalControlPanel(QWidget):
         else:
             self.btn_edit_pos.setText("✏️ 编辑位置")
             self.btn_edit_pos.setStyleSheet("")
+        self.save_config()
 
     def _toggle_hide_boxes(self):
         self.boxes_panel_hidden = not self.boxes_panel_hidden
         for b in self.boxes:
             b.set_panel_hidden(self.boxes_panel_hidden)
         self.btn_hide_boxes.setText("👁 显示" if self.boxes_panel_hidden else "🙈 隐藏")
+        self.save_config()
 
     def _toggle_monitoring(self):
         self.monitoring = not self.monitoring
@@ -3121,6 +3044,11 @@ class GlobalControlPanel(QWidget):
 
     def closeEvent(self, event):
         """完整退出：停止监听、监控、所有脚本和 Web 服务，确保 EXE 不再留在后台。"""
+        # 退出前保存悬浮窗位置、框体显示/隐藏及其他配置。
+        try:
+            self.save_config()
+        except Exception:
+            pass
         # 1. 停止 F12 全局监听
         if getattr(self, 'f12_listener', None):
             self.f12_listener.stop()
